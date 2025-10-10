@@ -1,0 +1,180 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    container_name: grandby_postgres
+    environment:
+      POSTGRES_USER: grandby
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-grandby_secret_password}
+      POSTGRES_DB: grandby_db
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - grandby_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U grandby -d grandby_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Redis (캐싱 & Celery 브로커)
+  redis:
+    image: redis:7-alpine
+    container_name: grandby_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - grandby_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+
+  # FastAPI Backend
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: grandby_api
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # Database
+      DATABASE_URL: postgresql://grandby:${DB_PASSWORD:-grandby_secret_password}@db:5432/grandby_db
+      
+      # Redis
+      REDIS_URL: redis://redis:6379/0
+      
+      # JWT
+      SECRET_KEY: ${SECRET_KEY:-your-super-secret-jwt-key-change-in-production}
+      ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: 30
+      REFRESH_TOKEN_EXPIRE_DAYS: 7
+      
+      # OpenAI API
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-your-openai-api-key}
+      
+      # Twilio
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-your-twilio-account-sid}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-your-twilio-auth-token}
+      TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER:-+1234567890}
+      
+      # AWS S3
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-your-aws-access-key}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-your-aws-secret-key}
+      AWS_REGION: ${AWS_REGION:-ap-northeast-2}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-grandby-audio-files}
+      
+      # App Settings
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      DEBUG: ${DEBUG:-true}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:19000,http://localhost:19006,exp://localhost:19000}
+      
+    ports:
+      - "8000:8000"
+    volumes:
+      # Live code reloading for development
+      - ./backend/app:/app/app
+      - ./backend/migrations:/app/migrations
+    networks:
+      - grandby_network
+    restart: unless-stopped
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # Celery Worker (비동기 작업 처리)
+  celery_worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: grandby_celery_worker
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://grandby:${DB_PASSWORD:-grandby_secret_password}@db:5432/grandby_db
+      REDIS_URL: redis://redis:6379/0
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN}
+      TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_REGION: ${AWS_REGION:-ap-northeast-2}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME}
+    volumes:
+      - ./backend/app:/app/app
+    networks:
+      - grandby_network
+    restart: unless-stopped
+    command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2
+
+  # Celery Beat (스케줄러 - AI 자동 전화)
+  celery_beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: grandby_celery_beat
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://grandby:${DB_PASSWORD:-grandby_secret_password}@db:5432/grandby_db
+      REDIS_URL: redis://redis:6379/0
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN}
+      TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER}
+    volumes:
+      - ./backend/app:/app/app
+    networks:
+      - grandby_network
+    restart: unless-stopped
+    command: celery -A app.tasks.celery_app beat --loglevel=info
+
+  # Flower (Celery 모니터링 - 선택사항)
+  flower:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: grandby_flower
+    depends_on:
+      - redis
+      - celery_worker
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    ports:
+      - "5555:5555"
+    networks:
+      - grandby_network
+    restart: unless-stopped
+    command: celery -A app.tasks.celery_app flower --port=5555
+
+networks:
+  grandby_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
