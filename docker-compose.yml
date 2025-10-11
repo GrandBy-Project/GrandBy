@@ -82,7 +82,7 @@ services:
       # App Settings
       ENVIRONMENT: ${ENVIRONMENT:-development}
       DEBUG: ${DEBUG:-true}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:19000,http://localhost:19006,exp://localhost:19000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
       
     ports:
       - "8000:8000"
