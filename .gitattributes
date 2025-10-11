@@ -1,0 +1,38 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# PowerShell scripts should use CRLF and UTF-8 BOM
+*.ps1 text eol=crlf working-tree-encoding=UTF-8
+
+# Shell scripts should use LF
+*.sh text eol=lf
+
+# Batch scripts should use CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Python files should use LF
+*.py text eol=lf
+
+# JavaScript/TypeScript files
+*.js text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.jsx text eol=lf
+*.json text eol=lf
+
+# Markdown files
+*.md text eol=lf
+
+# YAML files
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Docker files
+Dockerfile text eol=lf
+docker-compose.yml text eol=lf
+
+# Git files
+.gitignore text eol=lf
+.gitattributes text eol=lf
+
