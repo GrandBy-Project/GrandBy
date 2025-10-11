@@ -197,7 +197,52 @@ grandby_proj/
 
 ---
 
-## 📦 설치 및 실행 가이드
+## 🚀 빠른 시작 (Quick Start)
+
+### ⚡ 자동 셋업 (한 줄 명령어) - 추천!
+
+프로젝트를 처음 받았다면, 이 명령어 하나로 모든 셋업이 완료됩니다!
+
+**Windows PowerShell:**
+```powershell
+.\setup.ps1
+```
+
+**또는 npm 명령어:**
+```bash
+npm run setup
+```
+
+**자동으로 실행되는 작업:**
+- ✅ Docker 컨테이너 시작 (Backend, PostgreSQL, Redis, Celery)
+- ✅ 데이터베이스 마이그레이션
+- ✅ Frontend 의존성 설치 (npm install)
+
+**소요 시간:** 약 3-5분 (최초 실행 시)
+
+### 📱 Frontend 실행
+
+```bash
+cd frontend
+npx expo start --tunnel
+```
+
+핸드폰의 **Expo Go 앱**으로 QR 코드를 스캔하면 바로 앱 테스트 가능! 🎉
+
+### 🌐 Backend API 확인
+
+브라우저에서 접속:
+```
+http://localhost:8000/docs
+```
+
+Swagger UI에서 모든 API를 테스트할 수 있습니다!
+
+---
+
+## 📦 설치 및 실행 가이드 (상세)
+
+> 💡 위의 자동 셋업이 실패했거나, 단계별로 진행하고 싶은 경우에만 아래 가이드를 따라주세요.
 
 ### 1️⃣ 저장소 클론
 

@@ -1,0 +1,40 @@
+{
+  "name": "grandby-proj",
+  "version": "1.0.0",
+  "description": "AI 기반 어르신 케어 플랫폼 - Grandby",
+  "private": true,
+  "scripts": {
+    "setup": "powershell -ExecutionPolicy Bypass -File .\\setup.ps1",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:restart": "docker-compose restart",
+    "docker:build": "docker-compose up -d --build",
+    "docker:logs": "docker logs grandby_api -f",
+    "docker:logs:db": "docker logs grandby_postgres -f",
+    "docker:logs:redis": "docker logs grandby_redis -f",
+    "migrate": "docker exec grandby_api alembic upgrade head",
+    "migrate:create": "docker exec grandby_api alembic revision --autogenerate -m",
+    "frontend": "cd frontend && npx expo start --tunnel",
+    "frontend:local": "cd frontend && npx expo start",
+    "frontend:install": "cd frontend && npm install",
+    "backend:shell": "docker exec -it grandby_api bash",
+    "db:shell": "docker exec -it grandby_postgres psql -U grandby -d grandby_db",
+    "clean": "docker-compose down -v && cd frontend && rmdir /s /q node_modules 2>nul || echo Cleaned",
+    "help": "echo 사용 가능한 명령어: setup, docker:up, docker:down, docker:logs, migrate, frontend, clean"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/GrandBy-Project/GrandBy.git"
+  },
+  "keywords": [
+    "ai",
+    "elderly-care",
+    "chatbot",
+    "react-native",
+    "fastapi",
+    "expo"
+  ],
+  "author": "GrandBy Team",
+  "license": "MIT"
+}
+
