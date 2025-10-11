@@ -196,7 +196,32 @@ docker-compose down
 - 같은 WiFi에 연결되어 있는지 확인
 - `frontend/src/api/client.ts`의 IP 주소 확인
 
-### 4. DB 마이그레이션 실패
+### 4. PowerShell 스크립트 파싱 에러
+
+**증상:**
+```
+ParserError: MissingCatchOrFinally
+식에 닫는 ')'가 없습니다
+```
+
+**해결:**
+```powershell
+# 최신 코드 다시 받기
+git pull origin main
+
+# 또는 저장소 새로 클론
+cd ..
+rmdir /s /q GrandBy
+git clone https://github.com/GrandBy-Project/GrandBy.git
+cd GrandBy
+.\setup.ps1
+```
+
+**원인:**
+- Git clone 시 인코딩 문제 발생
+- 이제 .gitattributes로 해결됨
+
+### 5. DB 마이그레이션 실패
 
 **해결:**
 ```bash
