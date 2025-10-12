@@ -15,10 +15,11 @@ import { useAuthStore } from '../store/authStore';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { useRouter } from 'expo-router';
+import { UserRole } from '../types';
 
 export const LoginScreen = () => {
   const router = useRouter();
-  const { login, isLoading, error } = useAuthStore();
+  const { login, isLoading, error, setUser } = useAuthStore();
   
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -62,6 +63,34 @@ export const LoginScreen = () => {
 
   const goToRegister = () => {
     router.push('/register');
+  };
+
+  // 테스트용 - 어르신 화면으로 이동
+  const goToElderlyScreen = () => {
+    setUser({
+      user_id: 'test-elderly-1',
+      email: 'elderly@test.com',
+      name: '김정순',
+      role: UserRole.ELDERLY,
+      phone_number: '010-1234-5678',
+      is_active: true,
+      created_at: new Date().toISOString(),
+    });
+    router.replace('/home');
+  };
+
+  // 테스트용 - 보호자 화면으로 이동
+  const goToGuardianScreen = () => {
+    setUser({
+      user_id: 'test-guardian-1',
+      email: 'guardian@test.com',
+      name: '김보호',
+      role: UserRole.CAREGIVER,
+      phone_number: '010-9876-5432',
+      is_active: true,
+      created_at: new Date().toISOString(),
+    });
+    router.replace('/home');
   };
 
   return (
@@ -109,6 +138,25 @@ export const LoginScreen = () => {
             onPress={goToRegister}
             variant="outline"
           />
+
+          {/* 테스트용 버튼들 */}
+          <View style={styles.divider}>
+            <View style={styles.dividerLine} />
+            <Text style={styles.dividerText}>또는 테스트하기</Text>
+            <View style={styles.dividerLine} />
+          </View>
+
+          <Button
+            title="👴 어르신 화면 보기"
+            onPress={goToElderlyScreen}
+            variant="outline"
+          />
+
+          <Button
+            title="👨‍👩‍👧 보호자 화면 보기"
+            onPress={goToGuardianScreen}
+            variant="outline"
+          />
         </View>
 
         <Text style={styles.version}>Version 1.0.0</Text>
@@ -144,6 +192,21 @@ const styles = StyleSheet.create({
   },
   form: {
     gap: 16,
+  },
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 8,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#E0E0E0',
+  },
+  dividerText: {
+    marginHorizontal: 16,
+    fontSize: 14,
+    color: '#999999',
   },
   version: {
     textAlign: 'center',
