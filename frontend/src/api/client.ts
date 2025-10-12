@@ -6,7 +6,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // API Base URL (개발 환경)
 // TODO: 실제 배포 시에는 환경 변수로 관리
-export const API_BASE_URL = 'http://172.30.1.16:8000'; // PC의 실제 IP로 변경 필요
+export const API_BASE_URL = 'http://192.168.219.105:8000'; // PC의 실제 IP로 변경 필요
 
 // Axios 인스턴스 생성
 const apiClient = axios.create({

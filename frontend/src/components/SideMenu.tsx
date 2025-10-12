@@ -108,42 +108,23 @@ export const SideMenu: React.FC<SideMenuProps> = ({ visible, onClose }) => {
       },
     },
     {
-      id: 'contacts',
-      icon: '👥',
-      title: '----',
-      color: '#5856D6',
-      onPress: () => {
-        Alert.alert('준비중', '연락처 기능은 개발 중입니다.');
-        handleClose();
+        id: 'mypage',
+        icon: '👤',
+        title: '마이페이지',
+        color: '#5856D6',
+        onPress: () => {
+          router.push('/mypage');
+          handleClose();
+        },
       },
-    },
-    {
-      id: 'favorites',
-      icon: '❤️',
-      title: '----',
-      color: '#5856D6',
-      onPress: () => {
-        Alert.alert('준비중', '즐겨찾기 기능은 개발 중입니다.');
-        handleClose();
-      },
-    },
-    {
-      id: 'security',
-      icon: '🛡️',
-      title: '----',
-      color: '#5856D6',
-      onPress: () => {
-        Alert.alert('준비중', '보안 기능은 개발 중입니다.');
-        handleClose();
-      },
-    },
+    
     {
       id: 'settings',
       icon: '⚙️',
-      title: '환경설정',
+      title: '앱 설정',
       color: '#5856D6',
       onPress: () => {
-        Alert.alert('준비중', '환경설정 기능은 개발 중입니다.');
+        router.push('/settings');
         handleClose();
       },
     },
@@ -216,7 +197,7 @@ export const SideMenu: React.FC<SideMenuProps> = ({ visible, onClose }) => {
           {/* 하단 섹션 */}
           <View style={styles.bottomSection}>
             <TouchableOpacity onPress={handleLogout}>
-              <Text style={styles.logoutText}>Logout</Text>
+              <Text style={styles.logoutText}>로그아웃</Text>
             </TouchableOpacity>
             
             {/* 닫기 버튼 */}

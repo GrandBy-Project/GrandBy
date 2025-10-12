@@ -1,0 +1,450 @@
+/**
+ * 앱 설정 화면
+ */
+import React, { useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  Switch,
+  Alert,
+  Platform,
+  Linking,
+} from 'react-native';
+import { BottomNavigationBar, Header } from '../components';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+export const AppSettingsScreen = () => {
+  const insets = useSafeAreaInsets();
+
+  // 설정 상태 관리
+  const [settings, setSettings] = useState({
+    // 화면/표시 설정
+    fontSize: 'medium', // small, medium, large, extraLarge
+    brightness: 'medium', // dark, medium, bright, max
+    theme: 'light', // light, dark, highContrast
+    language: 'ko', // ko, en
+
+    // 알림 설정
+    pushNotifications: true,
+    medicineReminder: true,
+    diaryReminder: true,
+    soundEnabled: true,
+    vibrationEnabled: true,
+
+    // 접근성 설정
+    touchDelay: 'normal', // fast, normal, slow
+    buttonSize: 'medium', // small, medium, large
+    voiceGuide: false,
+    highContrast: false,
+  });
+
+  const updateSetting = (key: string, value: any) => {
+    setSettings(prev => ({ ...prev, [key]: value }));
+  };
+
+  const handleCacheClear = () => {
+    Alert.alert(
+      '캐시 정리',
+      '앱 캐시를 정리하시겠습니까?',
+      [
+        { text: '취소', style: 'cancel' },
+        {
+          text: '정리',
+          onPress: () => {
+            Alert.alert('완료', '캐시가 정리되었습니다.');
+          },
+        },
+      ]
+    );
+  };
+
+  const handleAppInfo = () => {
+    Alert.alert('앱 정보', '그랜비 v1.0.0\n개발: 그랜비팀\n문의: support@grandby.com');
+  };
+
+  const handleContact = () => {
+    Alert.alert('문의하기', '고객지원: 1588-0000\n이메일: support@grandby.com');
+  };
+
+  const handleBrightnessSetting = () => {
+    if (Platform.OS === 'ios') {
+      // iOS는 시스템 설정으로 연결
+      Alert.alert(
+        '화면 밝기 설정',
+        '화면 밝기는 시스템 설정에서 조절할 수 있습니다.\n설정으로 이동하시겠습니까?',
+        [
+          { text: '취소', style: 'cancel' },
+          {
+            text: '설정으로 이동',
+            onPress: () => {
+              Linking.openSettings();
+            },
+          },
+        ]
+      );
+    } else {
+      // Android도 시스템 설정으로 연결
+      Alert.alert(
+        '화면 밝기 설정',
+        '화면 밝기는 시스템 설정에서 조절할 수 있습니다.\n설정으로 이동하시겠습니까?',
+        [
+          { text: '취소', style: 'cancel' },
+          {
+            text: '설정으로 이동',
+            onPress: () => {
+              Linking.openSettings();
+            },
+          },
+        ]
+      );
+    }
+  };
+
+  // 화면/표시 설정
+  const displaySettings = [
+    {
+      id: 'fontSize',
+      title: '글씨 크기',
+      type: 'select',
+      value: settings.fontSize,
+      options: [
+        { label: '작게', value: 'small' },
+        { label: '보통', value: 'medium' },
+        { label: '크게', value: 'large' },
+        { label: '매우 크게', value: 'extraLarge' },
+      ],
+    },
+    {
+      id: 'brightness',
+      title: '화면 밝기',
+      type: 'action',
+      value: settings.brightness,
+      platform: Platform.OS,
+    },
+    {
+      id: 'theme',
+      title: '색상 테마',
+      type: 'select',
+      value: settings.theme,
+      options: [
+        { label: '밝은 테마', value: 'light' },
+        { label: '어두운 테마', value: 'dark' },
+        { label: '고대비 모드', value: 'highContrast' },
+      ],
+    },
+    {
+      id: 'language',
+      title: '언어 설정',
+      type: 'select',
+      value: settings.language,
+      options: [
+        { label: '한국어', value: 'ko' },
+        { label: 'English', value: 'en' },
+      ],
+    },
+  ];
+
+  // 알림 설정
+  const notificationSettings = [
+    {
+      id: 'pushNotifications',
+      title: '푸시 알림',
+      type: 'switch',
+      value: settings.pushNotifications,
+    },
+    {
+      id: 'medicineReminder',
+      title: '약 복용 알림',
+      type: 'switch',
+      value: settings.medicineReminder,
+    },
+    {
+      id: 'diaryReminder',
+      title: '일기 작성 알림',
+      type: 'switch',
+      value: settings.diaryReminder,
+    },
+    {
+      id: 'soundEnabled',
+      title: '알림 소리',
+      type: 'switch',
+      value: settings.soundEnabled,
+    },
+    {
+      id: 'vibrationEnabled',
+      title: '알림 진동',
+      type: 'switch',
+      value: settings.vibrationEnabled,
+    },
+  ];
+
+  // 접근성 설정
+  const accessibilitySettings = [
+    {
+      id: 'touchDelay',
+      title: '터치 지연',
+      type: 'select',
+      value: settings.touchDelay,
+      options: [
+        { label: '빠르게', value: 'fast' },
+        { label: '보통', value: 'normal' },
+        { label: '천천히', value: 'slow' },
+      ],
+    },
+    {
+      id: 'buttonSize',
+      title: '버튼 크기',
+      type: 'select',
+      value: settings.buttonSize,
+      options: [
+        { label: '작게', value: 'small' },
+        { label: '보통', value: 'medium' },
+        { label: '크게', value: 'large' },
+      ],
+    },
+    {
+      id: 'voiceGuide',
+      title: '음성 안내',
+      type: 'switch',
+      value: settings.voiceGuide,
+    },
+    {
+      id: 'highContrast',
+      title: '고대비 모드',
+      type: 'switch',
+      value: settings.highContrast,
+    },
+  ];
+
+  const renderSettingItem = (setting: any) => {
+    if (setting.type === 'switch') {
+      return (
+        <View key={setting.id} style={styles.settingItem}>
+          <View style={styles.settingLeft}>
+            <Text style={styles.settingTitle}>{setting.title}</Text>
+          </View>
+          <Switch
+            value={setting.value}
+            onValueChange={(value) => updateSetting(setting.id, value)}
+            trackColor={{ false: '#E5E5E7', true: '#34B79F' }}
+            thumbColor={setting.value ? '#FFFFFF' : '#FFFFFF'}
+          />
+        </View>
+      );
+    }
+
+    if (setting.type === 'select') {
+      const currentOption = setting.options.find((opt: any) => opt.value === setting.value);
+      return (
+        <TouchableOpacity
+          key={setting.id}
+          style={styles.settingItem}
+          onPress={() => {
+            Alert.alert(
+              setting.title,
+              '선택하세요:',
+              setting.options.map((option: any) => ({
+                text: option.label,
+                onPress: () => updateSetting(setting.id, option.value),
+              }))
+            );
+          }}
+          activeOpacity={0.7}
+        >
+          <View style={styles.settingLeft}>
+            <Text style={styles.settingTitle}>{setting.title}</Text>
+          </View>
+          <View style={styles.settingRight}>
+            <Text style={styles.settingValue}>{currentOption?.label}</Text>
+            <Text style={styles.settingArrow}>›</Text>
+          </View>
+        </TouchableOpacity>
+      );
+    }
+
+    if (setting.type === 'action') {
+      const getBrightnessLabel = () => {
+        return '시스템 설정에서 조절';
+      };
+
+      return (
+        <TouchableOpacity
+          key={setting.id}
+          style={styles.settingItem}
+          onPress={handleBrightnessSetting}
+          activeOpacity={0.7}
+        >
+          <View style={styles.settingLeft}>
+            <Text style={styles.settingTitle}>{setting.title}</Text>
+          </View>
+          <View style={styles.settingRight}>
+            <Text style={styles.settingValue}>{getBrightnessLabel()}</Text>
+            <Text style={styles.settingArrow}>›</Text>
+          </View>
+        </TouchableOpacity>
+      );
+    }
+
+    return null;
+  };
+
+  const renderSettingsSection = (title: string, settings: any[], icon: string) => (
+    <View style={styles.settingsSection}>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionIcon}>{icon}</Text>
+        <Text style={styles.sectionTitle}>{title}</Text>
+      </View>
+      <View style={styles.settingsList}>
+        {settings.map(renderSettingItem)}
+      </View>
+    </View>
+  );
+
+  return (
+    <View style={styles.container}>
+      {/* 공통 헤더 */}
+      <Header 
+        title="앱 설정"
+        showBackButton={true}
+      />
+
+      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        {/* 화면/표시 설정 */}
+        {renderSettingsSection('화면/표시 설정', displaySettings, '🎨')}
+
+        {/* 알림 설정 */}
+        {renderSettingsSection('알림 설정', notificationSettings, '🔔')}
+
+        {/* 접근성 설정 */}
+        {renderSettingsSection('접근성 설정', accessibilitySettings, '♿')}
+
+        {/* 기타 설정 */}
+        <View style={styles.settingsSection}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionIcon}>⚙️</Text>
+            <Text style={styles.sectionTitle}>기타 설정</Text>
+          </View>
+          <View style={styles.settingsList}>
+            <TouchableOpacity
+              style={styles.settingItem}
+              onPress={handleCacheClear}
+              activeOpacity={0.7}
+            >
+              <View style={styles.settingLeft}>
+                <Text style={styles.settingTitle}>캐시 정리</Text>
+              </View>
+              <Text style={styles.settingArrow}>›</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.settingItem}
+              onPress={handleAppInfo}
+              activeOpacity={0.7}
+            >
+              <View style={styles.settingLeft}>
+                <Text style={styles.settingTitle}>앱 정보</Text>
+              </View>
+              <Text style={styles.settingArrow}>›</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.settingItem}
+              onPress={handleContact}
+              activeOpacity={0.7}
+            >
+              <View style={styles.settingLeft}>
+                <Text style={styles.settingTitle}>문의하기</Text>
+              </View>
+              <Text style={styles.settingArrow}>›</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* 하단 여백 (네비게이션 바 공간 확보) */}
+        <View style={[styles.bottomSpacer, { height: 100 + Math.max(insets.bottom, 10) }]} />
+      </ScrollView>
+
+      {/* 하단 네비게이션 바 */}
+      <BottomNavigationBar />
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#F5F5F5',
+  },
+  content: {
+    flex: 1,
+    padding: 16,
+  },
+
+  // 설정 섹션
+  settingsSection: {
+    marginBottom: 24,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    paddingHorizontal: 4,
+  },
+  sectionIcon: {
+    fontSize: 20,
+    marginRight: 8,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333333',
+  },
+  settingsList: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+
+  // 설정 항목
+  settingItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+    minHeight: 60, // 터치 영역 확보
+  },
+  settingLeft: {
+    flex: 1,
+  },
+  settingTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333333',
+  },
+  settingRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  settingValue: {
+    fontSize: 16,
+    color: '#666666',
+    marginRight: 8,
+  },
+  settingArrow: {
+    fontSize: 20,
+    color: '#C7C7CC',
+  },
+
+  bottomSpacer: {
+    height: 20,
+  },
+});
