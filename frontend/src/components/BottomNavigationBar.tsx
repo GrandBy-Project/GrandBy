@@ -1,14 +1,16 @@
 /**
  * 공통 하단 네비게이션 바 컴포넌트
  */
-import React from 'react';
+import React, { useState } from 'react';
 import { View, TouchableOpacity, Text, StyleSheet, Alert, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SideMenu } from './SideMenu';
 
 export const BottomNavigationBar: React.FC = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const [sideMenuVisible, setSideMenuVisible] = useState(false);
 
   const handleHome = () => {
     // 사용자 role에 따라 홈 화면 이동
@@ -24,43 +26,55 @@ export const BottomNavigationBar: React.FC = () => {
   };
 
   const handleMenu = () => {
-    Alert.alert('준비중', '메뉴 기능은 개발 중입니다.');
+    setSideMenuVisible(true);
+  };
+
+  const handleCloseSideMenu = () => {
+    setSideMenuVisible(false);
   };
 
   return (
-    <View style={[styles.container, { paddingBottom: Math.max(insets.bottom, 10) }]}>
-      {/* 왼쪽: 햄버거 메뉴 */}
-      <TouchableOpacity
-        style={styles.navButton}
-        onPress={handleMenu}
-        activeOpacity={0.7}
-      >
-        <Text style={styles.icon}>☰</Text>
-        <Text style={styles.label}>메뉴</Text>
-      </TouchableOpacity>
+    <>
+      <View style={[styles.container, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+        {/* 왼쪽: 햄버거 메뉴 */}
+        <TouchableOpacity
+          style={styles.navButton}
+          onPress={handleMenu}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.icon}>☰</Text>
+          <Text style={styles.label}>메뉴</Text>
+        </TouchableOpacity>
 
-      {/* 중간: 홈 버튼 */}
-      <TouchableOpacity
-        style={[styles.navButton, styles.homeButton]}
-        onPress={handleHome}
-        activeOpacity={0.7}
-      >
-        <View style={styles.homeIconContainer}>
-          <Text style={styles.homeIcon}>🏠</Text>
-        </View>
-        <Text style={styles.homeLabel}>홈</Text>
-      </TouchableOpacity>
+        {/* 중간: 홈 버튼 */}
+        <TouchableOpacity
+          style={[styles.navButton, styles.homeButton]}
+          onPress={handleHome}
+          activeOpacity={0.7}
+        >
+          <View style={styles.homeIconContainer}>
+            <Text style={styles.homeIcon}>🏠</Text>
+          </View>
+          <Text style={styles.homeLabel}>홈</Text>
+        </TouchableOpacity>
 
-      {/* 오른쪽: 뒤로가기 */}
-      <TouchableOpacity
-        style={styles.navButton}
-        onPress={handleBack}
-        activeOpacity={0.7}
-      >
-        <Text style={styles.icon}>←</Text>
-        <Text style={styles.label}>뒤로</Text>
-      </TouchableOpacity>
-    </View>
+        {/* 오른쪽: 뒤로가기 */}
+        <TouchableOpacity
+          style={styles.navButton}
+          onPress={handleBack}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.icon}>←</Text>
+          <Text style={styles.label}>뒤로</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* 사이드 메뉴 */}
+      <SideMenu
+        visible={sideMenuVisible}
+        onClose={handleCloseSideMenu}
+      />
+    </>
   );
 };
 
