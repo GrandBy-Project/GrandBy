@@ -2,7 +2,7 @@
  * 로그인 화면 - 새 디자인
  * 메인 컬러: #40B59F
  */
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import {
   Alert,
   Image,
   TouchableOpacity,
+  TextInput,
 } from 'react-native';
 import { useAuthStore } from '../store/authStore';
 import { Button } from '../components/Button';
@@ -23,6 +24,10 @@ import { Colors } from '../constants/Colors';
 export const LoginScreen = () => {
   const router = useRouter();
   const { login, isLoading, error } = useAuthStore();
+  
+  // Input refs
+  const emailRef = useRef<TextInput>(null);
+  const passwordRef = useRef<TextInput>(null);
   
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -93,11 +98,10 @@ export const LoginScreen = () => {
         {/* 로고 섹션 */}
         <View style={styles.logoSection}>
           <Image
-            source={require('../../assets/GrandByLogo.png')}
+            source={require('../../assets/GranbyLogoMed.png')}
             style={styles.logo}
             resizeMode="contain"
           />
-          <Text style={styles.subtitle}>소중한 부모님 곁에 함께</Text>
         </View>
 
         {/* 환영 메시지 */}
@@ -108,6 +112,7 @@ export const LoginScreen = () => {
         {/* 입력 폼 */}
         <View style={styles.formSection}>
           <Input
+            inputRef={emailRef}
             label=""
             value={email}
             onChangeText={setEmail}
@@ -115,15 +120,20 @@ export const LoginScreen = () => {
             keyboardType="email-address"
             autoCapitalize="none"
             error={emailError}
+            returnKeyType="next"
+            onSubmitEditing={() => passwordRef.current?.focus()}
           />
 
           <Input
+            inputRef={passwordRef}
             label=""
             value={password}
             onChangeText={setPassword}
             placeholder="비밀번호"
             secureTextEntry
             error={passwordError}
+            returnKeyType="done"
+            onSubmitEditing={handleLogin}
           />
 
           {/* 자동 로그인 체크박스 */}
@@ -162,12 +172,13 @@ export const LoginScreen = () => {
           </View>
 
           {/* 카카오 로그인 */}
-          <Button
-            title="카카오 로그인"
-            onPress={handleKakaoLogin}
-            variant="kakao"
-            icon={<Text style={styles.kakaoIcon}>💬</Text>}
-          />
+          <TouchableOpacity onPress={handleKakaoLogin} activeOpacity={0.8}>
+            <Image
+              source={require('../../assets/kakao_login_medium_wide.png')}
+              style={styles.kakaoButton}
+              resizeMode="contain"
+            />
+          </TouchableOpacity>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -177,7 +188,7 @@ export const LoginScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
+    backgroundColor: '#FFFFFF', // 흰색 배경
   },
   scrollContent: {
     flexGrow: 1,
@@ -186,26 +197,21 @@ const styles = StyleSheet.create({
   },
   logoSection: {
     alignItems: 'center',
-    marginBottom: 32,
+    marginBottom: 80,
+    marginTop: 10,
   },
   logo: {
-    width: 200,
-    height: 100,
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-    textAlign: 'center',
+    width: 300,
+    height: 130,
   },
   welcomeSection: {
-    marginBottom: 32,
+    marginBottom: 24,
     alignItems: 'center',
   },
   welcomeText: {
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: 'bold',
-    color: Colors.text,
+    color: '#000000',
   },
   formSection: {
     gap: 12,
@@ -231,12 +237,12 @@ const styles = StyleSheet.create({
   },
   checkmark: {
     color: Colors.textWhite,
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: 'bold',
   },
   autoLoginText: {
     fontSize: 14,
-    color: Colors.text,
+    color: '#000000',
   },
   linkContainer: {
     flexDirection: 'row',
@@ -246,13 +252,13 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   linkText: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-    fontWeight: '500',
+    fontSize: 16,
+    color: '#666666',
+    fontWeight: '600',
   },
   divider: {
-    width: 1,
-    height: 12,
+    width: 1.5,
+    height: 14,
     backgroundColor: Colors.border,
     marginHorizontal: 16,
   },
@@ -263,7 +269,8 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: Colors.border,
   },
-  kakaoIcon: {
-    fontSize: 20,
+  kakaoButton: {
+    width: '100%',
+    height: 50,
   },
 });

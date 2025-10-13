@@ -17,6 +17,9 @@ interface InputProps {
   editable?: boolean;
   rightElement?: React.ReactNode;
   maxLength?: number;
+  returnKeyType?: 'done' | 'next' | 'go' | 'search' | 'send';
+  onSubmitEditing?: () => void;
+  inputRef?: React.RefObject<any>;
 }
 
 export const Input: React.FC<InputProps> = ({
@@ -31,6 +34,9 @@ export const Input: React.FC<InputProps> = ({
   editable = true,
   rightElement,
   maxLength,
+  returnKeyType = 'next',
+  onSubmitEditing,
+  inputRef,
 }) => {
   const [isFocused, setIsFocused] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -40,6 +46,7 @@ export const Input: React.FC<InputProps> = ({
       {label && <Text style={styles.label}>{label}</Text>}
       <View style={styles.inputContainer}>
         <TextInput
+          ref={inputRef}
           style={[
             styles.input,
             isFocused && styles.inputFocused,
@@ -57,13 +64,15 @@ export const Input: React.FC<InputProps> = ({
           onBlur={() => setIsFocused(false)}
           editable={editable}
           maxLength={maxLength}
+          returnKeyType={returnKeyType}
+          onSubmitEditing={onSubmitEditing}
         />
         {secureTextEntry && (
           <TouchableOpacity
             style={styles.eyeIcon}
             onPress={() => setShowPassword(!showPassword)}
           >
-            <Text style={styles.eyeIconText}>{showPassword ? '🙈' : '👁️'}</Text>
+            <Text style={styles.eyeIconText}>{showPassword ? '숨김' : '표시'}</Text>
           </TouchableOpacity>
         )}
         {rightElement && <View style={styles.rightElement}>{rightElement}</View>}
@@ -91,10 +100,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
     borderRadius: 12,
-    paddingVertical: 14,
+    paddingVertical: 16,
     paddingHorizontal: 16,
     fontSize: 16,
     color: Colors.text,
+    minHeight: 54,
   },
   inputFocused: {
     borderColor: Colors.primary,
@@ -115,15 +125,17 @@ const styles = StyleSheet.create({
   eyeIcon: {
     position: 'absolute',
     right: 16,
-    top: 14,
+    top: 16,
   },
   eyeIconText: {
-    fontSize: 20,
+    fontSize: 14,
+    color: Colors.primary,
+    fontWeight: '600',
   },
   rightElement: {
     position: 'absolute',
     right: 16,
-    top: 14,
+    top: 16,
   },
   errorText: {
     fontSize: 12,

@@ -52,6 +52,7 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 # Copy application code
 COPY --chown=app:app ./app ./app
 COPY --chown=app:app ./migrations ./migrations
+COPY --chown=app:app ./scripts ./scripts
 COPY --chown=app:app ./alembic.ini ./alembic.ini
 COPY --chown=app:app ./requirements.txt .
 
