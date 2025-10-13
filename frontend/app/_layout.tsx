@@ -25,6 +25,7 @@ export default function RootLayout() {
       <Stack.Screen name="home" />
       <Stack.Screen name="mypage" />
       <Stack.Screen name="settings" />
+      <Stack.Screen name="todos" />
     </Stack>
   );
 }
