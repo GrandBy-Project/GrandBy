@@ -19,29 +19,43 @@ class TwilioService:
         )
         self.phone_number = settings.TWILIO_PHONE_NUMBER
     
-    def make_call(self, to_number: str, callback_url: str = None):
+    def make_call(self, to_number: str, voice_url: str, status_callback_url: str = None):
         """
         전화 걸기
         
         Args:
             to_number: 수신자 전화번호 (+821012345678 형식)
-            callback_url: 통화 상태 콜백 URL
+            voice_url: TwiML 응답 URL (전화 연결 시 실행) - 필수!
+            status_callback_url: 통화 상태 콜백 URL (선택)
         
         Returns:
             call_sid: Twilio Call SID
         """
         try:
-            call = self.client.calls.create(
-                to=to_number,
-                from_=self.phone_number,
-                url=callback_url or "https://your-app.com/api/calls/twiml",  # TwiML 응답 URL
-                status_callback=callback_url or "https://your-app.com/api/calls/status",
-                status_callback_event=["initiated", "ringing", "answered", "completed"]
-            )
-            logger.info(f"Call initiated: {call.sid} to {to_number}")
+            if not voice_url:
+                raise ValueError("voice_url is required")
+            
+            call_params = {
+                "to": to_number,
+                "from_": self.phone_number,
+                "url": voice_url,  # 전화 연결 시 TwiML 가져올 URL
+            }
+            
+            # status_callback은 선택사항
+            if status_callback_url:
+                call_params["status_callback"] = status_callback_url
+                call_params["status_callback_event"] = ["initiated", "ringing", "answered", "completed"]
+            
+            call = self.client.calls.create(**call_params)
+            
+            logger.info(f"✅ Call initiated: {call.sid} to {to_number}")
+            logger.info(f"📞 Voice URL: {voice_url}")
+            if status_callback_url:
+                logger.info(f"📊 Status Callback URL: {status_callback_url}")
+            
             return call.sid
         except Exception as e:
-            logger.error(f"Failed to make call: {e}")
+            logger.error(f"❌ Failed to make call: {e}")
             raise
     
     def get_call_status(self, call_sid: str):

@@ -7,6 +7,7 @@ from app.database import SessionLocal
 from app.models.call import CallSettings, CallLog
 from app.models.user import User
 from app.services.ai_call import TwilioService
+from app.config import settings
 from datetime import datetime, time
 import logging
 
@@ -42,9 +43,19 @@ def check_and_make_calls():
                     continue
                 
                 # 전화 발신
+                # API Base URL 확인
+                if not settings.API_BASE_URL:
+                    logger.error("API_BASE_URL not set in settings")
+                    continue
+                
+                api_base_url = settings.API_BASE_URL
+                voice_url = f"https://{api_base_url}/api/twilio/voice"
+                status_callback_url = f"https://{api_base_url}/api/twilio/call-status"
+                
                 call_sid = twilio_service.make_call(
                     to_number=elderly.phone_number,
-                    callback_url=f"https://your-api.com/api/calls/callback"
+                    voice_url=voice_url,
+                    status_callback_url=status_callback_url
                 )
                 
                 # 통화 기록 생성

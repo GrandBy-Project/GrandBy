@@ -44,8 +44,12 @@
 
 ### 🎤 AI 전화 시스템 (MVP)
 - **자동 안부 전화**: 매일 1회 정해진 시간에 AI가 자동으로 전화
-- **실시간 대화**: STT → LLM → TTS 파이프라인으로 자연스러운 대화
+- **실시간 대화**: Twilio Media Streams + WebSocket으로 저지연 양방향 음성 통화
+  - STT (Whisper) → LLM (GPT-4o-mini) → TTS (OpenAI TTS) 파이프라인
+  - 실시간 음성 활동 감지 (VAD)로 자연스러운 대화 흐름
+  - Base64 오디오 스트리밍으로 끊김 없는 대화
 - **통화 기록 저장**: 음성 파일 및 텍스트 변환 내용 저장
+- **대화 컨텍스트 유지**: 세션 기반 대화 이력 관리
 
 ### 📒 다이어리 시스템
 - **자동 요약 다이어리**: 통화 내용을 LLM으로 요약하여 1인칭 일기 생성
@@ -87,6 +91,7 @@
 - Migration: Alembic 1.13.2
 - Task Queue: Celery 5.4.0
 - Authentication: JWT (python-jose)
+- Audio Processing: audioop (mulaw ↔ PCM 변환)
 ```
 
 ### Frontend
@@ -184,12 +189,19 @@ grandby_proj/
 
 1. **OpenAI API Key** 
    - https://platform.openai.com/api-keys
-   - STT, LLM, TTS에 사용
+   - STT (Whisper), LLM (GPT-4o-mini), TTS에 사용
+   - 크레딧 충전 필요
 
 2. **Twilio Account**
    - https://www.twilio.com/console
-   - 전화 통화에 사용
-   - 한국 전화번호 구매 필요
+   - 실시간 음성 통화에 사용
+   - 전화번호 구매 필요 (한국: +82 또는 국제 번호)
+   - Media Streams 기능 활성화
+
+3. **ngrok Account** (로컬 테스트용)
+   - https://ngrok.com/
+   - 무료 플랜 사용 가능
+   - Webhook 터널링으로 Twilio 연동 테스트
 
 3. **AWS Account** (옵션, 배포 시 필요)
    - https://aws.amazon.com/
@@ -238,6 +250,31 @@ http://localhost:8000/docs
 
 Swagger UI에서 모든 API를 테스트할 수 있습니다!
 
+### 📞 Twilio AI 통화 테스트
+
+**1. ngrok 실행**
+```bash
+ngrok http 8000
+# 출력된 URL (예: abc123.ngrok-free.app)을 복사
+```
+
+**2. 환경 변수 설정**
+```bash
+# 루트 디렉토리의 .env 파일 수정
+API_BASE_URL=abc123.ngrok-free.app
+TEST_PHONE_NUMBER=+821012345678
+
+# Docker 재시작
+docker-compose restart
+```
+
+**3. 전화 걸기**
+```bash
+curl -X POST http://localhost:8000/api/twilio/call
+```
+
+전화를 받으면 AI와 대화가 시작됩니다! 🎙️
+
 ---
 
 ## 📦 설치 및 실행 가이드 (상세)
@@ -274,9 +311,13 @@ REDIS_URL=redis://redis:6379/0
 
 SECRET_KEY=your-super-secret-jwt-key-change-in-production
 OPENAI_API_KEY=sk-proj-xxxxxxxxxxxxx
+
+# Twilio 설정
 TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxx
 TWILIO_AUTH_TOKEN=xxxxxxxxxxxxxxx
 TWILIO_PHONE_NUMBER=+821012345678
+API_BASE_URL=abc123.ngrok.io          # WebSocket용 공개 도메인 (ngrok 또는 실제 도메인)
+TEST_PHONE_NUMBER=+821012345678       # 테스트용 전화번호 (전화를 받을 번호)
 
 AWS_ACCESS_KEY_ID=AKIAxxxxxxxxxxxxx
 AWS_SECRET_ACCESS_KEY=xxxxxxxxxxxxxxx
@@ -407,6 +448,149 @@ celery -A app.tasks.celery_app worker --loglevel=info
 celery -A app.tasks.celery_app beat --loglevel=info
 ```
 
+### Twilio WebSocket 실시간 음성 통화
+
+#### 핵심 기능
+
+- **실시간 양방향 음성 대화**: Twilio Media Streams를 통한 WebSocket 기반 저지연 통화
+- **AI 대화 파이프라인**: 
+  - **STT** (Whisper API): 사용자 음성 → 텍스트
+  - **LLM** (GPT-4o-mini): 자연스러운 대화 생성
+  - **TTS** (OpenAI TTS): AI 응답 → 음성
+- **자동 전화 발신**: `/api/twilio/call` 엔드포인트로 즉시 전화 걸기
+- **음성 활동 감지 (VAD)**: 사용자가 말을 끝낸 시점 자동 감지 (1.5초 침묵 감지)
+- **오디오 포맷 변환**: Twilio mulaw ↔ Whisper WAV 자동 변환
+
+#### API 엔드포인트
+
+1. **`POST /api/twilio/call`**
+   - **기능**: TEST_PHONE_NUMBER로 즉시 전화 발신
+   - **응답**: 
+     ```json
+     {
+       "success": true,
+       "call_sid": "CAxxxxxxxxxxxx",
+       "to_number": "+821012345678",
+       "status": "initiated"
+     }
+     ```
+   
+2. **`POST /api/twilio/voice`**
+   - **기능**: Twilio 전화 연결 시 호출됨
+   - **응답**: TwiML XML (환영 메시지 + WebSocket 연결 명령)
+   
+3. **`WebSocket /api/twilio/media-stream`**
+   - **기능**: 실시간 양방향 오디오 스트리밍
+   - **데이터 형식**: Base64 인코딩된 mulaw 오디오 (8kHz, mono)
+   - **이벤트**:
+     - `start`: 스트림 시작
+     - `media`: 오디오 데이터 송수신
+     - `stop`: 스트림 종료
+   
+4. **`POST /api/twilio/call-status`**
+   - **기능**: Twilio 통화 상태 콜백
+   - **이벤트**: `initiated`, `ringing`, `answered`, `completed`
+
+#### 설정 방법
+
+**1단계: ngrok 설치 및 실행**
+```bash
+# ngrok 설치 (https://ngrok.com/download)
+# Windows: choco install ngrok
+# Mac: brew install ngrok
+
+# ngrok 실행 (포트 8000)
+ngrok http 8000
+
+# 출력 예시:
+# Forwarding: https://abc123.ngrok-free.app -> http://localhost:8000
+```
+
+**2단계: 환경 변수 설정**
+```bash
+# backend/.env 파일 수정
+API_BASE_URL=abc123.ngrok-free.app    # ngrok 도메인 (https:// 제외)
+TEST_PHONE_NUMBER=+821012345678       # 테스트용 전화번호
+
+# Docker 사용 시 .env 파일도 업데이트
+# 그리고 docker-compose restart 실행
+docker-compose restart
+```
+
+**3단계: Twilio 콘솔 설정**
+```
+1. https://www.twilio.com/console/phone-numbers 접속
+2. 구매한 전화번호 클릭
+3. Voice Configuration 섹션:
+   - A CALL COMES IN: Webhook
+   - URL: https://abc123.ngrok-free.app/api/twilio/voice
+   - HTTP: POST
+4. Save 클릭
+```
+
+**4단계: 전화 테스트**
+```bash
+# API 호출로 전화 발신
+curl -X POST http://localhost:8000/api/twilio/call
+
+# 또는 브라우저에서:
+# http://localhost:8000/docs → /api/twilio/call → Try it out → Execute
+```
+
+#### 통화 흐름
+
+```
+1. POST /api/twilio/call 호출
+   ↓
+2. Twilio가 TEST_PHONE_NUMBER로 전화 발신
+   ↓
+3. 사용자가 전화 받음
+   ↓
+4. Twilio가 /api/twilio/voice 호출
+   ↓
+5. 서버가 TwiML 응답 (환영 메시지 + WebSocket URL)
+   ↓
+6. WebSocket 연결 시작 (/api/twilio/media-stream)
+   ↓
+7. AI가 "무엇을 도와드릴까요?" 음성 전송
+   ↓
+8. 사용자가 말함 → STT → GPT → TTS → 사용자가 들음
+   ↓
+9. 대화 반복 (8단계)
+   ↓
+10. "종료" 또는 전화 끊기로 통화 종료
+```
+
+#### 오디오 처리 파이프라인
+
+**사용자 음성 → 텍스트 (STT)**
+```
+Twilio mulaw (8kHz, mono)
+    ↓ audioop.ulaw2lin()
+16-bit PCM
+    ↓ wave 모듈
+WAV 파일 생성
+    ↓ Whisper API
+텍스트 ("안녕하세요")
+```
+
+**AI 응답 → 음성 (TTS)**
+```
+텍스트 ("반갑습니다")
+    ↓ OpenAI TTS API
+WAV 파일 (24kHz, 16-bit, mono)
+    ↓ audioop.ratecv()
+WAV (8kHz)
+    ↓ audioop.lin2ulaw()
+mulaw (8kHz, mono)
+    ↓ Base64 인코딩
+Twilio WebSocket 전송
+```
+
+3. **Twilio Phone Number 구매**
+   - https://www.twilio.com/console/phone-numbers
+   - 한국 번호 또는 국제 번호 구매
+
 ### 새로운 API 엔드포인트 추가
 
 1. **모델 정의** (`backend/app/models/`)
@@ -485,6 +669,14 @@ GET    /api/calls/{id}             # 통화 상세 정보
 POST   /api/calls/{id}/transcript  # 통화 텍스트 조회
 GET    /api/calls/settings         # 통화 설정 조회
 PUT    /api/calls/settings         # 통화 설정 변경
+```
+
+#### Twilio 실시간 통화
+```
+POST   /api/twilio/call            # 즉시 전화 발신 (TEST_PHONE_NUMBER로)
+POST   /api/twilio/voice           # TwiML 응답 (Twilio 콜백)
+WS     /api/twilio/media-stream    # WebSocket 오디오 스트림
+POST   /api/twilio/call-status     # 통화 상태 콜백
 ```
 
 #### 다이어리
