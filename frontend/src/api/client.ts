@@ -1,6 +1,18 @@
 /**
  * API 클라이언트 설정
  * 토큰 자동 갱신 (슬라이딩 윈도우) 포함
+ * 
+ * 🔧 팀 개발을 위한 환경 변수 기반 설정
+ * 
+ * 사용법:
+ * 1. frontend/.env 파일 생성
+ * 2. EXPO_PUBLIC_API_BASE_URL 설정
+ * 3. 각자 개발 환경에 맞게 URL 설정
+ * 
+ * 예시:
+ * - 로컬 개발: http://localhost:8000
+ * - Ngrok 사용: https://abc123.ngrok-free.dev
+ * - 팀 공용: https://team-shared.ngrok-free.dev
  */
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -8,8 +20,10 @@ import Constants from 'expo-constants';
 
 // ==================== API Base URL 설정 ====================
 const getApiBaseUrl = () => {
-  // 1. 환경 변수가 있으면 우선 사용
+  // 1. 환경 변수 우선 사용 (개발자별 설정)
+  // frontend/.env 파일에서 EXPO_PUBLIC_API_BASE_URL 설정
   if (process.env.EXPO_PUBLIC_API_BASE_URL) {
+    console.log('🔗 환경 변수에서 API URL 사용:', process.env.EXPO_PUBLIC_API_BASE_URL);
     return process.env.EXPO_PUBLIC_API_BASE_URL;
   }
   
@@ -18,21 +32,17 @@ const getApiBaseUrl = () => {
     return 'https://api.grandby.com'; // 실제 프로덕션 URL
   }
   
-  // 3. Ngrok 사용 시 (개발 환경)
-  // TODO: Ngrok URL이 변경되면 여기를 업데이트하세요
-  const NGROK_URL = 'https://dotty-supersecure-pouncingly.ngrok-free.dev';
-  if (NGROK_URL && NGROK_URL !== 'YOUR_NGROK_URL') {
-    return NGROK_URL;
-  }
-  
-  // 4. 개발 환경: Expo 개발 서버의 호스트 사용 (자동 감지)
+  // 3. 개발 환경: Expo 개발 서버의 호스트 자동 감지
+  // 같은 네트워크의 다른 기기에서 접근 가능
   const debuggerHost = Constants.expoConfig?.hostUri?.split(':').shift();
-  if (debuggerHost) {
+  if (debuggerHost && debuggerHost !== 'localhost') {
+    console.log('🔗 자동 감지된 API URL:', `http://${debuggerHost}:8000`);
     return `http://${debuggerHost}:8000`;
   }
   
-  // 5. Fallback (수동 설정)
-  return 'http://192.168.0.63:8000';
+  // 4. Fallback: 로컬 개발 (백엔드를 직접 실행한 경우)
+  console.log('🔗 Fallback 로컬 API URL 사용');
+  return 'http://localhost:8000';
 };
 
 export const API_BASE_URL = getApiBaseUrl();
