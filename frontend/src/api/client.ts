@@ -18,13 +18,20 @@ const getApiBaseUrl = () => {
     return 'https://api.grandby.com'; // 실제 프로덕션 URL
   }
   
-  // 3. 개발 환경: Expo 개발 서버의 호스트 사용 (자동 감지)
+  // 3. Ngrok 사용 시 (개발 환경)
+  // TODO: Ngrok URL이 변경되면 여기를 업데이트하세요
+  const NGROK_URL = 'https://dotty-supersecure-pouncingly.ngrok-free.dev';
+  if (NGROK_URL && NGROK_URL !== 'YOUR_NGROK_URL') {
+    return NGROK_URL;
+  }
+  
+  // 4. 개발 환경: Expo 개발 서버의 호스트 사용 (자동 감지)
   const debuggerHost = Constants.expoConfig?.hostUri?.split(':').shift();
   if (debuggerHost) {
     return `http://${debuggerHost}:8000`;
   }
   
-  // 4. Fallback (수동 설정)
+  // 5. Fallback (수동 설정)
   return 'http://192.168.0.63:8000';
 };
 

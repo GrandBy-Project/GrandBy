@@ -17,6 +17,7 @@ from pydantic import BaseModel, EmailStr
 import uuid
 import random
 import string
+from app.utils.email import send_verification_email
 
 router = APIRouter()
 security = HTTPBearer()
@@ -369,8 +370,8 @@ async def send_verification_code(
 ):
     """
     이메일 인증 코드 발송
-    개발 중에는 코드를 콘솔에 출력
-    프로덕션에서는 실제 이메일 발송
+    SMTP를 사용한 실제 이메일 발송
+    ENABLE_EMAIL=False인 경우 콘솔에 출력
     """
     # 이메일 중복 확인
     existing_user = db.query(User).filter(User.email == request.email).first()
@@ -391,19 +392,24 @@ async def send_verification_code(
         "attempts": 0
     }
     
-    # TODO: 실제 이메일 발송 (SMTP)
-    # 개발 중에는 콘솔 출력
-    print(f"\n{'='*50}")
-    print(f"📧 이메일 인증 코드")
-    print(f"{'='*50}")
-    print(f"이메일: {request.email}")
-    print(f"인증 코드: {code}")
-    print(f"만료 시간: {expires_at}")
-    print(f"{'='*50}\n")
+    # 실제 이메일 발송 (SMTP)
+    email_sent = await send_verification_email(request.email, code)
+    
+    if not email_sent and settings.ENABLE_EMAIL:
+        # 이메일 발송 실패 (SMTP 활성화 상태에서)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="이메일 발송에 실패했습니다. 잠시 후 다시 시도해주세요."
+        )
+    
+    # 성공 메시지
+    message = "인증 코드가 이메일로 발송되었습니다."
+    if not settings.ENABLE_EMAIL:
+        message = "인증 코드가 발송되었습니다. (개발 모드: 백엔드 콘솔 확인)"
     
     return {
         "success": True,
-        "message": "인증 코드가 발송되었습니다. (개발 중: 콘솔 확인)",
+        "message": message,
         "expires_in": 300  # 5분
     }
 
