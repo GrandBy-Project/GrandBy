@@ -56,3 +56,28 @@ export const isAuthenticated = async (): Promise<boolean> => {
   return !!token;
 };
 
+/**
+ * 토큰 검증 (스플래쉬에서 사용)
+ */
+export const verifyToken = async () => {
+  const response = await apiClient.get('/api/auth/verify');
+  return response.data;
+};
+
+/**
+ * 토큰 갱신
+ */
+export const refreshToken = async (refreshToken: string) => {
+  const response = await apiClient.post('/api/auth/refresh', {
+    refresh_token: refreshToken,
+    device_id: 'mobile-app',
+  });
+  
+  // 새 토큰 저장
+  await AsyncStorage.setItem('access_token', response.data.access_token);
+  await AsyncStorage.setItem('refresh_token', response.data.refresh_token);
+  await AsyncStorage.setItem('user', JSON.stringify(response.data.user));
+  
+  return response.data;
+};
+

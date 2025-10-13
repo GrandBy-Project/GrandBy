@@ -3,6 +3,7 @@
  */
 import React, { useState } from 'react';
 import { View, TextInput, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { Colors } from '../constants/Colors';
 
 interface InputProps {
   label?: string;
@@ -14,6 +15,8 @@ interface InputProps {
   autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
   error?: string;
   editable?: boolean;
+  rightElement?: React.ReactNode;
+  maxLength?: number;
 }
 
 export const Input: React.FC<InputProps> = ({
@@ -26,6 +29,8 @@ export const Input: React.FC<InputProps> = ({
   autoCapitalize = 'none',
   error,
   editable = true,
+  rightElement,
+  maxLength,
 }) => {
   const [isFocused, setIsFocused] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -44,13 +49,14 @@ export const Input: React.FC<InputProps> = ({
           value={value}
           onChangeText={onChangeText}
           placeholder={placeholder}
-          placeholderTextColor="#999999"
+          placeholderTextColor={Colors.textLight}
           secureTextEntry={secureTextEntry && !showPassword}
           keyboardType={keyboardType}
           autoCapitalize={autoCapitalize}
           onFocus={() => setIsFocused(true)}
           onBlur={() => setIsFocused(false)}
           editable={editable}
+          maxLength={maxLength}
         />
         {secureTextEntry && (
           <TouchableOpacity
@@ -60,6 +66,7 @@ export const Input: React.FC<InputProps> = ({
             <Text style={styles.eyeIconText}>{showPassword ? '🙈' : '👁️'}</Text>
           </TouchableOpacity>
         )}
+        {rightElement && <View style={styles.rightElement}>{rightElement}</View>}
       </View>
       {error && <Text style={styles.errorText}>{error}</Text>}
     </View>
@@ -73,32 +80,37 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#333333',
+    color: Colors.text,
     marginBottom: 8,
   },
   inputContainer: {
     position: 'relative',
   },
   input: {
-    backgroundColor: '#F5F5F5',
+    backgroundColor: Colors.backgroundLight,
     borderWidth: 1,
-    borderColor: '#E0E0E0',
+    borderColor: Colors.border,
     borderRadius: 12,
     paddingVertical: 14,
     paddingHorizontal: 16,
     fontSize: 16,
-    color: '#333333',
+    color: Colors.text,
   },
   inputFocused: {
-    borderColor: '#007AFF',
-    backgroundColor: '#FFFFFF',
+    borderColor: Colors.primary,
+    backgroundColor: Colors.background,
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
   },
   inputError: {
-    borderColor: '#FF3B30',
+    borderColor: Colors.error,
   },
   inputDisabled: {
-    backgroundColor: '#F0F0F0',
-    color: '#999999',
+    backgroundColor: Colors.backgroundGray,
+    color: Colors.textDisabled,
   },
   eyeIcon: {
     position: 'absolute',
@@ -108,11 +120,15 @@ const styles = StyleSheet.create({
   eyeIconText: {
     fontSize: 20,
   },
+  rightElement: {
+    position: 'absolute',
+    right: 16,
+    top: 14,
+  },
   errorText: {
     fontSize: 12,
-    color: '#FF3B30',
+    color: Colors.error,
     marginTop: 4,
     marginLeft: 4,
   },
 });
-
