@@ -1,5 +1,6 @@
 /**
- * 로그인 화면
+ * 로그인 화면 - 새 디자인
+ * 메인 컬러: #40B59F
  */
 import React, { useState } from 'react';
 import {
@@ -10,21 +11,24 @@ import {
   Platform,
   ScrollView,
   Alert,
+  Image,
+  TouchableOpacity,
 } from 'react-native';
 import { useAuthStore } from '../store/authStore';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { useRouter } from 'expo-router';
-import { UserRole } from '../types';
+import { Colors } from '../constants/Colors';
 
 export const LoginScreen = () => {
   const router = useRouter();
-  const { login, isLoading, error, setUser } = useAuthStore();
+  const { login, isLoading, error } = useAuthStore();
   
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [emailError, setEmailError] = useState('');
   const [passwordError, setPasswordError] = useState('');
+  const [autoLogin, setAutoLogin] = useState(true);
 
   const validateForm = (): boolean => {
     let isValid = true;
@@ -33,7 +37,7 @@ export const LoginScreen = () => {
 
     // 이메일 검증
     if (!email.trim()) {
-      setEmailError('이메일을 입력해주세요');
+      setEmailError('아이디를 입력해주세요');
       isValid = false;
     } else if (!/\S+@\S+\.\S+/.test(email)) {
       setEmailError('올바른 이메일 형식이 아닙니다');
@@ -54,10 +58,13 @@ export const LoginScreen = () => {
 
     try {
       await login(email, password);
-      Alert.alert('성공', '로그인되었습니다!');
+      Alert.alert('환영합니다!', '로그인되었습니다.');
       router.replace('/home');
     } catch (err: any) {
-      Alert.alert('로그인 실패', error || '로그인에 실패했습니다.');
+      Alert.alert(
+        '로그인 실패',
+        error || err?.message || '로그인에 실패했습니다.'
+      );
     }
   };
 
@@ -65,32 +72,12 @@ export const LoginScreen = () => {
     router.push('/register');
   };
 
-  // 테스트용 - 어르신 화면으로 이동
-  const goToElderlyScreen = () => {
-    setUser({
-      user_id: 'test-elderly-1',
-      email: 'elderly@test.com',
-      name: '김정순',
-      role: UserRole.ELDERLY,
-      phone_number: '010-1234-5678',
-      is_active: true,
-      created_at: new Date().toISOString(),
-    });
-    router.replace('/home');
+  const goToFindAccount = () => {
+    Alert.alert('준비 중', '계정 찾기 기능은 준비 중입니다.');
   };
 
-  // 테스트용 - 보호자 화면으로 이동
-  const goToGuardianScreen = () => {
-    setUser({
-      user_id: 'test-guardian-1',
-      email: 'guardian@test.com',
-      name: '김보호',
-      role: UserRole.CAREGIVER,
-      phone_number: '010-9876-5432',
-      is_active: true,
-      created_at: new Date().toISOString(),
-    });
-    router.replace('/home');
+  const handleKakaoLogin = () => {
+    Alert.alert('준비 중', '카카오 로그인은 준비 중입니다.');
   };
 
   return (
@@ -101,65 +88,87 @@ export const LoginScreen = () => {
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
-        <View style={styles.header}>
-          <Text style={styles.title}>Grandby</Text>
-          <Text style={styles.subtitle}>어르신과 보호자를 연결하는 AI 케어 서비스</Text>
+        {/* 로고 섹션 */}
+        <View style={styles.logoSection}>
+          <Image
+            source={require('../../assets/GrandByLogo.png')}
+            style={styles.logo}
+            resizeMode="contain"
+          />
+          <Text style={styles.subtitle}>소중한 부모님 곁에 함께</Text>
         </View>
 
-        <View style={styles.form}>
+        {/* 환영 메시지 */}
+        <View style={styles.welcomeSection}>
+          <Text style={styles.welcomeText}>오늘도 함께해요!</Text>
+        </View>
+
+        {/* 입력 폼 */}
+        <View style={styles.formSection}>
           <Input
-            label="이메일"
+            label=""
             value={email}
             onChangeText={setEmail}
-            placeholder="이메일을 입력하세요"
+            placeholder="아이디"
             keyboardType="email-address"
             autoCapitalize="none"
             error={emailError}
           />
 
           <Input
-            label="비밀번호"
+            label=""
             value={password}
             onChangeText={setPassword}
-            placeholder="비밀번호를 입력하세요"
+            placeholder="비밀번호"
             secureTextEntry
             error={passwordError}
           />
 
+          {/* 자동 로그인 체크박스 */}
+          <TouchableOpacity
+            style={styles.autoLoginContainer}
+            onPress={() => setAutoLogin(!autoLogin)}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.checkbox, autoLogin && styles.checkboxChecked]}>
+              {autoLogin && <Text style={styles.checkmark}>✓</Text>}
+            </View>
+            <Text style={styles.autoLoginText}>자동 로그인</Text>
+          </TouchableOpacity>
+
+          {/* 로그인 버튼 */}
           <Button
             title="로그인"
             onPress={handleLogin}
             loading={isLoading}
           />
 
-          <Button
-            title="회원가입"
-            onPress={goToRegister}
-            variant="outline"
-          />
-
-          {/* 테스트용 버튼들 */}
-          <View style={styles.divider}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>또는 테스트하기</Text>
-            <View style={styles.dividerLine} />
+          {/* 계정 찾기 / 회원가입 */}
+          <View style={styles.linkContainer}>
+            <TouchableOpacity onPress={goToFindAccount}>
+              <Text style={styles.linkText}>계정 찾기</Text>
+            </TouchableOpacity>
+            <View style={styles.divider} />
+            <TouchableOpacity onPress={goToRegister}>
+              <Text style={styles.linkText}>회원가입</Text>
+            </TouchableOpacity>
           </View>
 
-          <Button
-            title="👴 어르신 화면 보기"
-            onPress={goToElderlyScreen}
-            variant="outline"
-          />
+          {/* 구분선 */}
+          <View style={styles.separator}>
+            <View style={styles.separatorLine} />
+          </View>
 
+          {/* 카카오 로그인 */}
           <Button
-            title="👨‍👩‍👧 보호자 화면 보기"
-            onPress={goToGuardianScreen}
-            variant="outline"
+            title="카카오 로그인"
+            onPress={handleKakaoLogin}
+            variant="kakao"
+            icon={<Text style={styles.kakaoIcon}>💬</Text>}
           />
         </View>
-
-        <Text style={styles.version}>Version 1.0.0</Text>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -168,51 +177,93 @@ export const LoginScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.background,
   },
   scrollContent: {
     flexGrow: 1,
-    justifyContent: 'center',
     padding: 24,
+    paddingTop: 60,
   },
-  header: {
+  logoSection: {
     alignItems: 'center',
-    marginBottom: 48,
+    marginBottom: 32,
   },
-  title: {
-    fontSize: 48,
-    fontWeight: 'bold',
-    color: '#007AFF',
+  logo: {
+    width: 200,
+    height: 100,
     marginBottom: 8,
   },
   subtitle: {
     fontSize: 14,
-    color: '#666666',
+    color: Colors.textSecondary,
     textAlign: 'center',
   },
-  form: {
-    gap: 16,
+  welcomeSection: {
+    marginBottom: 32,
+    alignItems: 'center',
   },
-  divider: {
+  welcomeText: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: Colors.text,
+  },
+  formSection: {
+    gap: 12,
+  },
+  autoLoginContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     marginVertical: 8,
   },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: '#E0E0E0',
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderWidth: 2,
+    borderColor: Colors.border,
+    borderRadius: 4,
+    marginRight: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  dividerText: {
-    marginHorizontal: 16,
+  checkboxChecked: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  checkmark: {
+    color: Colors.textWhite,
     fontSize: 14,
-    color: '#999999',
+    fontWeight: 'bold',
   },
-  version: {
-    textAlign: 'center',
-    color: '#999999',
-    fontSize: 12,
-    marginTop: 32,
+  autoLoginText: {
+    fontSize: 14,
+    color: Colors.text,
+  },
+  linkContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  linkText: {
+    fontSize: 14,
+    color: Colors.textSecondary,
+    fontWeight: '500',
+  },
+  divider: {
+    width: 1,
+    height: 12,
+    backgroundColor: Colors.border,
+    marginHorizontal: 16,
+  },
+  separator: {
+    marginVertical: 24,
+  },
+  separatorLine: {
+    height: 1,
+    backgroundColor: Colors.border,
+  },
+  kakaoIcon: {
+    fontSize: 20,
   },
 });
-
