@@ -2,7 +2,7 @@
  * 로그인 화면 - 새 디자인
  * 메인 컬러: #40B59F
  */
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import {
   Alert,
   Image,
   TouchableOpacity,
+  TextInput,
 } from 'react-native';
 import { useAuthStore } from '../store/authStore';
 import { Button } from '../components/Button';
@@ -23,6 +24,10 @@ import { Colors } from '../constants/Colors';
 export const LoginScreen = () => {
   const router = useRouter();
   const { login, isLoading, error } = useAuthStore();
+  
+  // Input refs
+  const emailRef = useRef<TextInput>(null);
+  const passwordRef = useRef<TextInput>(null);
   
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -107,6 +112,7 @@ export const LoginScreen = () => {
         {/* 입력 폼 */}
         <View style={styles.formSection}>
           <Input
+            inputRef={emailRef}
             label=""
             value={email}
             onChangeText={setEmail}
@@ -114,15 +120,20 @@ export const LoginScreen = () => {
             keyboardType="email-address"
             autoCapitalize="none"
             error={emailError}
+            returnKeyType="next"
+            onSubmitEditing={() => passwordRef.current?.focus()}
           />
 
           <Input
+            inputRef={passwordRef}
             label=""
             value={password}
             onChangeText={setPassword}
             placeholder="비밀번호"
             secureTextEntry
             error={passwordError}
+            returnKeyType="done"
+            onSubmitEditing={handleLogin}
           />
 
           {/* 자동 로그인 체크박스 */}

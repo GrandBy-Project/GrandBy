@@ -2,7 +2,7 @@
  * 회원가입 화면 - 완전 개선 버전
  * 이메일 인증, 비밀번호 강도, 전화번호 필수, 약관 동의 포함
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import {
   ScrollView,
   Alert,
   TouchableOpacity,
+  TextInput,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Colors, PasswordStrengthColors } from '../constants/Colors';
@@ -34,6 +35,14 @@ import { useAuthStore } from '../store/authStore';
 export const RegisterScreen = () => {
   const router = useRouter();
   const { setUser } = useAuthStore();
+  
+  // Input refs
+  const emailRef = useRef<TextInput>(null);
+  const verificationCodeRef = useRef<TextInput>(null);
+  const passwordRef = useRef<TextInput>(null);
+  const confirmPasswordRef = useRef<TextInput>(null);
+  const nameRef = useRef<TextInput>(null);
+  const phoneRef = useRef<TextInput>(null);
   
   // 폼 상태
   const [email, setEmail] = useState('');
@@ -260,6 +269,7 @@ export const RegisterScreen = () => {
           <View style={styles.emailContainer}>
             <View style={{ flex: 1 }}>
               <Input
+                inputRef={emailRef}
                 label=""
                 value={email}
                 onChangeText={setEmail}
@@ -268,6 +278,8 @@ export const RegisterScreen = () => {
                 autoCapitalize="none"
                 error={errors.email}
                 editable={!emailVerified}
+                returnKeyType="next"
+                onSubmitEditing={() => codeSent && !emailVerified && verificationCodeRef.current?.focus()}
               />
             </View>
             {!emailVerified && (
@@ -290,6 +302,7 @@ export const RegisterScreen = () => {
             <View style={styles.codeContainer}>
               <View style={{ flex: 1 }}>
                 <Input
+                  inputRef={verificationCodeRef}
                   label=""
                   value={verificationCode}
                   onChangeText={setVerificationCode}
@@ -297,6 +310,8 @@ export const RegisterScreen = () => {
                   keyboardType="numeric"
                   error={errors.verificationCode}
                   maxLength={6}
+                  returnKeyType="done"
+                  onSubmitEditing={handleVerifyCode}
                 />
               </View>
               <Button
@@ -318,12 +333,15 @@ export const RegisterScreen = () => {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>비밀번호 * (최소 6자)</Text>
           <Input
+            inputRef={passwordRef}
             label=""
             value={password}
             onChangeText={setPassword}
             placeholder="비밀번호"
             secureTextEntry
             error={errors.password}
+            returnKeyType="next"
+            onSubmitEditing={() => confirmPasswordRef.current?.focus()}
           />
           
           {/* 비밀번호 강도 표시기 */}
@@ -354,12 +372,15 @@ export const RegisterScreen = () => {
           )}
 
           <Input
+            inputRef={confirmPasswordRef}
             label=""
             value={confirmPassword}
             onChangeText={setConfirmPassword}
             placeholder="비밀번호 확인"
             secureTextEntry
             error={errors.confirmPassword}
+            returnKeyType="next"
+            onSubmitEditing={() => nameRef.current?.focus()}
           />
         </View>
 
@@ -367,11 +388,14 @@ export const RegisterScreen = () => {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>이름 *</Text>
           <Input
+            inputRef={nameRef}
             label=""
             value={name}
             onChangeText={setName}
             placeholder="이름"
             error={errors.name}
+            returnKeyType="next"
+            onSubmitEditing={() => phoneRef.current?.focus()}
           />
         </View>
 
@@ -379,12 +403,15 @@ export const RegisterScreen = () => {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>전화번호 *</Text>
           <Input
+            inputRef={phoneRef}
             label=""
             value={phoneNumber}
             onChangeText={handlePhoneNumberChange}
             placeholder="010-1234-5678"
             keyboardType="phone-pad"
             error={errors.phoneNumber}
+            returnKeyType="done"
+            onSubmitEditing={() => {}}
           />
         </View>
 
@@ -399,7 +426,6 @@ export const RegisterScreen = () => {
               ]}
               onPress={() => setRole(UserRole.ELDERLY)}
             >
-              <Text style={styles.roleIcon}>👴</Text>
               <Text
                 style={[
                   styles.roleButtonText,
@@ -417,7 +443,6 @@ export const RegisterScreen = () => {
               ]}
               onPress={() => setRole(UserRole.CAREGIVER)}
             >
-              <Text style={styles.roleIcon}>👨‍👩‍👧</Text>
               <Text
                 style={[
                   styles.roleButtonText,
@@ -495,7 +520,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   verifiedBadge: {
-    height: 50,
+    minHeight: 54,
     paddingHorizontal: 16,
     backgroundColor: Colors.successLight,
     borderRadius: 12,
@@ -504,6 +529,7 @@ const styles = StyleSheet.create({
   verifiedText: {
     color: Colors.success,
     fontWeight: '600',
+    fontSize: 16,
   },
   codeContainer: {
     flexDirection: 'row',
@@ -512,7 +538,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   timerContainer: {
-    height: 50,
+    minHeight: 54,
     paddingHorizontal: 12,
     backgroundColor: Colors.errorLight,
     borderRadius: 12,
@@ -521,6 +547,7 @@ const styles = StyleSheet.create({
   timerText: {
     color: Colors.error,
     fontWeight: '600',
+    fontSize: 16,
   },
   strengthContainer: {
     marginTop: 8,
@@ -538,7 +565,7 @@ const styles = StyleSheet.create({
     borderRadius: 2,
   },
   strengthText: {
-    fontSize: 12,
+    fontSize: 16,
     fontWeight: '600',
   },
   roleButtons: {
@@ -547,30 +574,28 @@ const styles = StyleSheet.create({
   },
   roleButton: {
     flex: 1,
-    paddingVertical: 20,
+    paddingVertical: 16,
     paddingHorizontal: 16,
     borderRadius: 12,
     borderWidth: 2,
     borderColor: Colors.border,
     backgroundColor: Colors.backgroundLight,
     alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 54,
   },
   roleButtonActive: {
     borderColor: Colors.primary,
     backgroundColor: Colors.primaryPale,
   },
-  roleIcon: {
-    fontSize: 32,
-    marginBottom: 8,
-  },
   roleButtonText: {
     fontSize: 16,
     color: Colors.textSecondary,
-    fontWeight: '500',
+    fontWeight: '600',
   },
   roleButtonTextActive: {
     color: Colors.primary,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   buttonContainer: {
     marginTop: 16,
