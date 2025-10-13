@@ -27,11 +27,13 @@ import {
   validateVerificationCode,
 } from '../utils/validation';
 import { UserRole } from '../types';
-import apiClient from '../api/client';
+import apiClient, { TokenManager } from '../api/client';
 import { TermsModal } from '../components/TermsModal';
+import { useAuthStore } from '../store/authStore';
 
 export const RegisterScreen = () => {
   const router = useRouter();
+  const { setUser } = useAuthStore();
   
   // 폼 상태
   const [email, setEmail] = useState('');
@@ -198,14 +200,24 @@ export const RegisterScreen = () => {
     try {
       setIsLoading(true);
 
-      await apiClient.post('/api/auth/register', {
+      // 회원가입 요청 (토큰과 사용자 정보 반환)
+      const response = await apiClient.post('/api/auth/register', {
         email: email.trim(),
         password,
         name: name.trim(),
         role,
         phone_number: phoneNumber.replace(/[^\d]/g, ''),
-        auth_provider: 'email',  // 소문자로 변경
+        auth_provider: 'email',
       });
+
+      // 토큰 저장 (자동 로그인)
+      await TokenManager.saveTokens(
+        response.data.access_token,
+        response.data.refresh_token
+      );
+
+      // Zustand 스토어에 사용자 정보 저장
+      setUser(response.data.user);
 
       Alert.alert('환영합니다!', '회원가입이 완료되었습니다.', [
         {
