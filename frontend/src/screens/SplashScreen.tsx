@@ -13,7 +13,7 @@ import { useAuthStore } from '../store/authStore';
 export const SplashScreen = () => {
   const router = useRouter();
   const { setUser } = useAuthStore();
-  const [statusMessage, setStatusMessage] = useState('로딩 중...');
+  const [statusMessage, setStatusMessage] = useState('로그인 여부를 확인 중입니다..');
 
   useEffect(() => {
     checkAutoLogin();
@@ -21,7 +21,7 @@ export const SplashScreen = () => {
 
   const checkAutoLogin = async () => {
     try {
-      setStatusMessage('로그인 정보 확인 중...');
+      setStatusMessage('로그인 여부를 확인 중입니다..');
       
       // 1. 토큰 확인
       const tokens = await TokenManager.getTokens();
@@ -38,7 +38,7 @@ export const SplashScreen = () => {
       if (await TokenManager.isAccessTokenValid()) {
         // Access Token 유효 → 사용자 정보 가져오기
         try {
-          setStatusMessage('사용자 정보 로드 중...');
+          setStatusMessage('로그인 여부를 확인 중입니다..');
           const user = await authApi.verifyToken();
           
           // 사용자 정보 저장
@@ -58,7 +58,7 @@ export const SplashScreen = () => {
       // 3. Refresh Token으로 갱신 시도
       if (await TokenManager.isRefreshTokenValid()) {
         try {
-          setStatusMessage('로그인 갱신 중...');
+          setStatusMessage('로그인 여부를 확인 중입니다..');
           const response = await authApi.refreshToken(tokens.refresh_token);
           
           // 사용자 정보 저장
@@ -95,23 +95,17 @@ export const SplashScreen = () => {
 
   return (
     <View style={styles.container}>
-      {/* 로고 */}
+      {/* 로고 이미지 */}
       <View style={styles.logoContainer}>
-        <Text style={styles.logoText}>그랜비</Text>
-        <Text style={styles.logoSubtext}>Grandby</Text>
-        <View style={styles.logoIcon}>
-          <Text style={styles.logoIconText}>👴❤️</Text>
-        </View>
+        <Image 
+          source={require('../../assets/GrandByLogo.png')} 
+          style={styles.logoImage}
+          resizeMode="contain"
+        />
       </View>
 
-      {/* 로딩 인디케이터 */}
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={Colors.primary} />
-        <Text style={styles.statusText}>{statusMessage}</Text>
-      </View>
-
-      {/* 버전 */}
-      <Text style={styles.versionText}>Version 1.0.0</Text>
+      {/* 상태 메시지 */}
+      <Text style={styles.statusMessage}>{statusMessage}</Text>
     </View>
   );
 };
@@ -119,57 +113,23 @@ export const SplashScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.primaryPale,
+    backgroundColor: '#FFFFFF', // 흰색 배경
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: 20,
   },
   logoContainer: {
     alignItems: 'center',
-    marginBottom: 80,
+    marginBottom: 60,
   },
-  logoText: {
-    fontSize: 56,
-    fontWeight: 'bold',
-    color: Colors.primary,
-    marginBottom: 8,
+  logoImage: {
+    width: 400,
+    height: 400,
   },
-  logoSubtext: {
-    fontSize: 24,
-    color: Colors.primaryDark,
-    fontWeight: '300',
-    letterSpacing: 2,
-  },
-  logoIcon: {
-    marginTop: 24,
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: Colors.background,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: Colors.shadow,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  logoIconText: {
-    fontSize: 40,
-  },
-  loadingContainer: {
-    alignItems: 'center',
-    marginTop: 40,
-  },
-  statusText: {
-    marginTop: 16,
+  statusMessage: {
     fontSize: 14,
-    color: Colors.textSecondary,
-  },
-  versionText: {
-    position: 'absolute',
-    bottom: 32,
-    fontSize: 12,
-    color: Colors.textLight,
+    color: '#666666', // 회색
+    textAlign: 'center',
   },
 });
 
