@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     TWILIO_ACCOUNT_SID: str
     TWILIO_AUTH_TOKEN: str
     TWILIO_PHONE_NUMBER: str
+    API_BASE_URL: str | None = None  # WebSocket용 공개 도메인 (예: your-domain.com)
+    TEST_PHONE_NUMBER: str | None = None  # 테스트용 전화번호 (예: +821012345678)
     
     # ==================== AWS S3 ====================
     AWS_ACCESS_KEY_ID: str
@@ -97,4 +99,3 @@ def is_development() -> bool:
 def is_production() -> bool:
     """프로덕션 환경 여부 확인"""
     return settings.ENVIRONMENT == "production"
-
