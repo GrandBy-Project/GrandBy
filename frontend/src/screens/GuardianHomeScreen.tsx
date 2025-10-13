@@ -130,7 +130,7 @@ export const GuardianHomeScreen = () => {
           </View>
           <View style={styles.profileTextContainer}>
             <Text style={styles.profileGreeting}>안녕하세요!</Text>
-            <Text style={styles.profileName}>{user?.name || '박승희'}님</Text>
+            <Text style={styles.profileName}>{user?.name || '사용자'}님</Text>
           </View>
         </View>
 
