@@ -89,39 +89,48 @@ export const SideMenu: React.FC<SideMenuProps> = ({ visible, onClose }) => {
   const menuItems = [
     {
       id: 'shared-diary',
-      icon: '💳',
-      title: '공유다이어리',
+      icon: '📖',
+      title: '일기장',
       color: '#34B79F',
       onPress: () => {
-        Alert.alert('준비중', '공유다이어리 기능은 개발 중입니다.');
+        Alert.alert('준비중', '일기장 기능은 개발 중입니다.');
         handleClose();
       },
     },
     {
       id: 'todo-list',
-      icon: '📅',
-      title: 'To Do List',
-      color: '#5856D6',
+      icon: '📋',
+      title: '해야 할 일',
+      color: '#FF6B6B',
       onPress: () => {
-        Alert.alert('준비중', 'To Do List 기능은 개발 중입니다.');
+        router.push('/todos');
         handleClose();
       },
     },
     {
-        id: 'mypage',
-        icon: '👤',
-        title: '마이페이지',
-        color: '#5856D6',
-        onPress: () => {
-          router.push('/mypage');
-          handleClose();
-        },
+      id: 'calendar',
+      icon: '📅',
+      title: '달력',
+      color: '#FF9500',
+      onPress: () => {
+        router.push('/calendar');
+        handleClose();
       },
-    
+    },
+    {
+      id: 'mypage',
+      icon: '👤',
+      title: '내 정보',
+      color: '#5856D6',
+      onPress: () => {
+        router.push('/mypage');
+        handleClose();
+      },
+    },
     {
       id: 'settings',
       icon: '⚙️',
-      title: '앱 설정',
+      title: '설정',
       color: '#5856D6',
       onPress: () => {
         router.push('/settings');
