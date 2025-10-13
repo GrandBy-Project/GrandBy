@@ -138,6 +138,24 @@ async def health_check():
 
 from app.routers import auth, users, calls, diaries, todos, notifications, dashboard
 
+# ==================== AI 챗봇 서비스 ====================
+# STT, LLM, TTS 서비스 import
+from app.services.ai_call.stt_service import STTService
+from app.services.ai_call.llm_service import LLMService
+from app.services.ai_call.tts_service import TTSService
+from fastapi import UploadFile, File, Form
+from typing import Optional
+import time
+import os
+
+# 서비스 인스턴스 생성 (앱 시작 시 한 번만 초기화)
+stt_service = STTService()
+llm_service = LLMService()
+tts_service = TTSService()
+
+# 대화 기록 저장 (간단한 인메모리 저장소, 실제로는 DB 사용 권장)
+conversation_sessions = {}
+
 # 인증
 app.include_router(
     auth.router,
@@ -186,6 +204,236 @@ app.include_router(
     prefix="/api/dashboard",
     tags=["Dashboard"]
 )
+
+
+# ==================== AI 챗봇 엔드포인트 ====================
+
+@app.post("/api/chatbot/text", tags=["AI Chatbot"])
+async def chat_with_text(
+    user_id: str = Form(..., description="사용자 ID"),
+    message: str = Form(..., description="사용자 메시지 (텍스트)"),
+    analyze_emotion: bool = Form(False, description="감정 분석 여부")
+):
+    """
+    텍스트 기반 챗봇 대화
+    
+    음성 입력이 어려울 때 텍스트로 테스트할 수 있는 간편한 엔드포인트
+    
+    Args:
+        user_id: 사용자 고유 ID (세션 관리용)
+        message: 사용자가 입력한 텍스트 메시지
+        analyze_emotion: 감정 분석 실행 여부
+    
+    Returns:
+        대화 응답 및 실행 시간 정보
+    """
+    cycle_start_time = time.time()  # 전체 사이클 시작 시간
+    logger.info(f"\n{'='*80}")
+    logger.info(f"💬 텍스트 챗봇 대화 시작 (사용자: {user_id})")
+    logger.info(f"{'='*80}")
+    
+    try:
+        # 1. 대화 기록 가져오기
+        if user_id not in conversation_sessions:
+            conversation_sessions[user_id] = []
+        
+        conversation_history = conversation_sessions[user_id]
+        
+        # 2. 감정 분석 (옵션)
+        emotion_result = None
+        emotion_time = 0
+        if analyze_emotion:
+            emotion_result, emotion_time = llm_service.analyze_emotion(message)
+        
+        # 3. LLM 응답 생성
+        ai_response, llm_time = llm_service.generate_response(
+            user_message=message,
+            conversation_history=conversation_history
+        )
+        
+        # 4. 대화 기록 저장 (최근 10개까지만 유지)
+        conversation_sessions[user_id].append({"role": "user", "content": message})
+        conversation_sessions[user_id].append({"role": "assistant", "content": ai_response})
+        if len(conversation_sessions[user_id]) > 10:
+            conversation_sessions[user_id] = conversation_sessions[user_id][-10:]
+        
+        # 전체 사이클 완료 시간
+        total_time = time.time() - cycle_start_time
+        
+        logger.info(f"\n{'='*80}")
+        logger.info(f"⏱️  전체 대화 사이클 완료!")
+        logger.info(f"  - 감정 분석: {emotion_time:.2f}초")
+        logger.info(f"  - LLM 응답 생성: {llm_time:.2f}초")
+        logger.info(f"  ⭐ 총 소요 시간: {total_time:.2f}초")
+        logger.info(f"{'='*80}\n")
+        
+        return {
+            "success": True,
+            "user_message": message,
+            "ai_response": ai_response,
+            "emotion_analysis": emotion_result,
+            "timing": {
+                "emotion_analysis_time": emotion_time,
+                "llm_time": llm_time,
+                "total_time": total_time
+            },
+            "conversation_count": len(conversation_sessions[user_id]) // 2
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ 챗봇 대화 실패: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@app.post("/api/chatbot/voice", tags=["AI Chatbot"])
+async def chat_with_voice(
+    user_id: str = Form(..., description="사용자 ID"),
+    audio_file: UploadFile = File(..., description="음성 파일 (mp3, wav, m4a 등)"),
+    return_audio: bool = Form(True, description="음성 응답 생성 여부")
+):
+    """
+    음성 기반 챗봇 대화 (전체 파이프라인)
+    
+    STT → LLM → TTS 전체 과정을 수행하는 완전한 음성 챗봇
+    
+    Args:
+        user_id: 사용자 고유 ID
+        audio_file: 사용자 음성 파일
+        return_audio: True면 TTS 음성 파일 생성, False면 텍스트만 반환
+    
+    Returns:
+        대화 응답, 음성 파일 경로, 실행 시간 정보
+    """
+    cycle_start_time = time.time()  # 전체 사이클 시작 시간
+    logger.info(f"\n{'='*80}")
+    logger.info(f"🎙️  음성 챗봇 대화 시작 (사용자: {user_id})")
+    logger.info(f"{'='*80}")
+    
+    temp_audio_path = None
+    tts_audio_path = None
+    
+    try:
+        # 1. 업로드된 음성 파일 임시 저장
+        temp_audio_path = f"/tmp/upload_{user_id}_{int(time.time())}.{audio_file.filename.split('.')[-1]}"
+        with open(temp_audio_path, "wb") as f:
+            content = await audio_file.read()
+            f.write(content)
+        logger.info(f"📁 음성 파일 저장: {temp_audio_path}")
+        
+        # 2. STT: 음성 → 텍스트 변환
+        user_message, stt_time = stt_service.transcribe_audio(temp_audio_path)
+        
+        # 3. 대화 기록 가져오기
+        if user_id not in conversation_sessions:
+            conversation_sessions[user_id] = []
+        conversation_history = conversation_sessions[user_id]
+        
+        # 4. LLM: 대화 응답 생성
+        ai_response, llm_time = llm_service.generate_response(
+            user_message=user_message,
+            conversation_history=conversation_history
+        )
+        
+        # 5. TTS: 텍스트 → 음성 변환 (옵션)
+        tts_time = 0
+        if return_audio:
+            tts_audio_path, tts_time = tts_service.text_to_speech(ai_response)
+        
+        # 6. 대화 기록 저장
+        conversation_sessions[user_id].append({"role": "user", "content": user_message})
+        conversation_sessions[user_id].append({"role": "assistant", "content": ai_response})
+        if len(conversation_sessions[user_id]) > 10:
+            conversation_sessions[user_id] = conversation_sessions[user_id][-10:]
+        
+        # 전체 사이클 완료 시간
+        total_time = time.time() - cycle_start_time
+        
+        logger.info(f"\n{'='*80}")
+        logger.info(f"⏱️  전체 음성 대화 사이클 완료!")
+        logger.info(f"  - STT (음성→텍스트): {stt_time:.2f}초")
+        logger.info(f"  - LLM (응답 생성): {llm_time:.2f}초")
+        logger.info(f"  - TTS (텍스트→음성): {tts_time:.2f}초")
+        logger.info(f"  ⭐ 총 소요 시간: {total_time:.2f}초")
+        logger.info(f"{'='*80}\n")
+        
+        return {
+            "success": True,
+            "user_message": user_message,
+            "ai_response": ai_response,
+            "audio_file_path": tts_audio_path if return_audio else None,
+            "timing": {
+                "stt_time": stt_time,
+                "llm_time": llm_time,
+                "tts_time": tts_time,
+                "total_time": total_time
+            },
+            "conversation_count": len(conversation_sessions[user_id]) // 2
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ 음성 챗봇 대화 실패: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+    finally:
+        # 임시 파일 정리
+        if temp_audio_path and os.path.exists(temp_audio_path):
+            os.remove(temp_audio_path)
+            logger.info(f"🗑️  임시 파일 삭제: {temp_audio_path}")
+
+
+@app.get("/api/chatbot/session/{user_id}", tags=["AI Chatbot"])
+async def get_conversation_history(user_id: str):
+    """
+    사용자의 대화 기록 조회
+    
+    Args:
+        user_id: 사용자 ID
+    
+    Returns:
+        대화 기록 목록
+    """
+    if user_id not in conversation_sessions:
+        return {
+            "user_id": user_id,
+            "conversation_count": 0,
+            "messages": []
+        }
+    
+    return {
+        "user_id": user_id,
+        "conversation_count": len(conversation_sessions[user_id]) // 2,
+        "messages": conversation_sessions[user_id]
+    }
+
+
+@app.delete("/api/chatbot/session/{user_id}", tags=["AI Chatbot"])
+async def clear_conversation_history(user_id: str):
+    """
+    사용자의 대화 기록 초기화
+    
+    Args:
+        user_id: 사용자 ID
+    
+    Returns:
+        초기화 결과
+    """
+    if user_id in conversation_sessions:
+        del conversation_sessions[user_id]
+        logger.info(f"🗑️  대화 기록 초기화 완료: {user_id}")
+        return {
+            "success": True,
+            "message": f"사용자 {user_id}의 대화 기록이 초기화되었습니다."
+        }
+    else:
+        return {
+            "success": False,
+            "message": f"사용자 {user_id}의 대화 기록이 존재하지 않습니다."
+        }
 
 
 # ==================== Startup Message ====================
