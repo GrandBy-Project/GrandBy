@@ -58,7 +58,7 @@ export const ElderlyHomeScreen = () => {
       title: '할 일',
       icon: '✅',
       color: '#98FB98',
-      onPress: () => Alert.alert('준비중', '할일 기능은 개발 중입니다.'),
+      onPress: () => router.push('/todos'),
     },
     {
       id: 'notification',
