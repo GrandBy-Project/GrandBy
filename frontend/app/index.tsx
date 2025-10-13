@@ -1,7 +1,6 @@
 /**
- * 로그인 화면 (인덱스 페이지)
+ * 앱 진입점 - 스플래쉬 스크린
  */
-import { LoginScreen } from '../src/screens/LoginScreen';
+import { SplashScreen } from '../src/screens/SplashScreen';
 
-export default LoginScreen;
-
+export default SplashScreen;

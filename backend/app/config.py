@@ -55,6 +55,15 @@ class Settings(BaseSettings):
         """CORS origins를 리스트로 변환"""
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",")]
     
+    # ==================== Email (SMTP) ====================
+    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM_EMAIL: str = ""
+    SMTP_FROM_NAME: str = "그랜비 Grandby"
+    ENABLE_EMAIL: bool = True  # 개발 중에는 False, 실제 발송 시 True
+    
     # ==================== Logging ====================
     LOG_LEVEL: str = "INFO"
     
