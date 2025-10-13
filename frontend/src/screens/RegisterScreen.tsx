@@ -204,7 +204,7 @@ export const RegisterScreen = () => {
         name: name.trim(),
         role,
         phone_number: phoneNumber.replace(/[^\d]/g, ''),
-        auth_provider: 'EMAIL',
+        auth_provider: 'email',  // 소문자로 변경
       });
 
       Alert.alert('환영합니다!', '회원가입이 완료되었습니다.', [
