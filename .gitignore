@@ -413,3 +413,5 @@ docs/.doctrees/
 # Keep empty directories
 !**/.gitkeep
 
+# 음성 파일
+backend/audio_files/*
