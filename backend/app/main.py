@@ -194,6 +194,11 @@ def text_to_speech(text: str) -> bytes:
     OpenAI TTS API를 사용하여 텍스트를 음성으로 변환
     """
     try:
+        # 임시 파일로 저장 (더 안정적인 방법)
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
+            temp_path = temp_file.name
+        
+        # TTS 생성
         response = openai_client.audio.speech.create(
             model=settings.OPENAI_TTS_MODEL,
             voice=settings.OPENAI_TTS_VOICE,  # alloy, echo, fable, onyx, nova, shimmer
@@ -201,9 +206,27 @@ def text_to_speech(text: str) -> bytes:
             response_format="wav"
         )
         
-        return response.content
+        # 파일로 저장 (stream_to_file이 더 안정적)
+        response.stream_to_file(temp_path)
+        
+        # 파일 읽기
+        with open(temp_path, 'rb') as f:
+            audio_data = f.read()
+        
+        # 임시 파일 삭제
+        os.unlink(temp_path)
+        
+        if not audio_data:
+            logger.error(f"TTS: 응답은 성공했지만 데이터가 비어있음 (텍스트 길이: {len(text)})")
+            return b""
+        
+        logger.info(f"✅ TTS 성공: {len(audio_data)} bytes, 텍스트 길이: {len(text)}")
+        return audio_data
+        
     except Exception as e:
-        logger.error(f"TTS 오류: {str(e)}")
+        logger.error(f"TTS 오류: {str(e)}, 텍스트: {text[:50]}...")
+        import traceback
+        logger.error(traceback.format_exc())
         return b""
 
 
@@ -570,7 +593,10 @@ async def voice_handler():
 
 
 @app.websocket("/api/twilio/media-stream")
-async def media_stream_handler(websocket: WebSocket):
+async def media_stream_handler(
+    websocket: WebSocket,
+    db: Session = Depends(get_db)
+):
     """
     Twilio Media Streams WebSocket 핸들러
     실시간 오디오 데이터 양방향 처리
@@ -635,11 +661,69 @@ async def media_stream_handler(websocket: WebSocket):
             elif event_type == 'stop':
                 # 스트림 종료
                 logger.info(f"📞 스트림 종료 - Call: {call_sid}")
-                if call_sid in conversation_sessions:
-                    # 통화 내용 저장 가능 (향후 일기 생성 등에 활용)
+                
+                # 대화 내용 DB에 저장
+                if call_sid and call_sid in conversation_sessions:
                     conversation = conversation_sessions[call_sid]
-                    logger.info(f"대화 내용 저장 가능: {len(conversation)}개 메시지")
-                    del conversation_sessions[call_sid]
+                    logger.info(f"💾 대화 내용 저장 중: {len(conversation)}개 메시지")
+                    
+                    try:
+                        from app.models.call import CallLog, CallTranscript, CallStatus
+                        
+                        # 1. CallLog 찾기 또는 생성
+                        call_log = db.query(CallLog).filter(
+                            CallLog.twilio_call_sid == call_sid
+                        ).first()
+                        
+                        if not call_log:
+                            # 새 CallLog 생성
+                            # TODO: 실제 elderly_id를 어떻게 가져올지 결정 필요 (전화번호 매핑 등)
+                            call_log = CallLog(
+                                twilio_call_sid=call_sid,
+                                elderly_id=settings.TEST_PHONE_NUMBER or "unknown",  # 임시
+                                call_status=CallStatus.COMPLETED,
+                                call_start_time=datetime.utcnow(),
+                                call_end_time=datetime.utcnow()
+                            )
+                            db.add(call_log)
+                            db.flush()  # call_id 생성
+                            logger.info(f"📝 새 CallLog 생성: {call_log.call_id}")
+                        else:
+                            # 기존 CallLog 업데이트
+                            call_log.call_status = CallStatus.COMPLETED
+                            call_log.call_end_time = datetime.utcnow()
+                            logger.info(f"📝 기존 CallLog 업데이트: {call_log.call_id}")
+                        
+                        # 2. 대화 내용 저장 (CallTranscript)
+                        saved_count = 0
+                        for i, message in enumerate(conversation):
+                            role = message.get("role")
+                            content = message.get("content")
+                            
+                            # system 메시지는 제외하고 user/assistant만 저장
+                            if role in ["user", "assistant"] and content:
+                                transcript = CallTranscript(
+                                    call_id=call_log.call_id,
+                                    speaker="ELDERLY" if role == "user" else "AI",
+                                    text=content,
+                                    timestamp=float(i),  # 순서
+                                )
+                                db.add(transcript)
+                                saved_count += 1
+                        
+                        # 3. DB 커밋
+                        db.commit()
+                        logger.info(f"✅ 대화 내용 DB 저장 완료: {call_log.call_id} ({saved_count}개 메시지)")
+                        
+                    except Exception as save_error:
+                        logger.error(f"❌ 대화 내용 저장 실패: {save_error}")
+                        import traceback
+                        logger.error(traceback.format_exc())
+                        db.rollback()
+                    finally:
+                        # 메모리에서 삭제
+                        del conversation_sessions[call_sid]
+                
                 if call_sid in active_connections:
                     del active_connections[call_sid]
                 break
