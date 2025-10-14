@@ -15,6 +15,206 @@ import { useRouter } from 'expo-router';
 import { BottomNavigationBar, Header } from '../components';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+// 커스텀 아이콘 컴포넌트들
+const CheckIcon = ({ size = 24, color = '#34B79F' }: { size?: number; color?: string }) => (
+  <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+    <View style={{
+      width: size * 0.8,
+      height: size * 0.8,
+      borderRadius: size * 0.1,
+      borderWidth: size * 0.08,
+      borderColor: color,
+      alignItems: 'center',
+      justifyContent: 'center',
+    }}>
+      <View style={{
+        width: size * 0.3,
+        height: size * 0.15,
+        borderBottomWidth: size * 0.08,
+        borderRightWidth: size * 0.08,
+        borderColor: color,
+        transform: [{ rotate: '45deg' }],
+        marginTop: -size * 0.05,
+      }} />
+    </View>
+  </View>
+);
+
+const PhoneIcon = ({ size = 24, color = '#34B79F' }: { size?: number; color?: string }) => (
+  <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+    <View style={{
+      width: size * 0.7,
+      height: size * 0.9,
+      borderRadius: size * 0.15,
+      borderWidth: size * 0.08,
+      borderColor: color,
+      backgroundColor: 'transparent',
+    }} />
+    <View style={{
+      width: size * 0.3,
+      height: size * 0.05,
+      backgroundColor: color,
+      borderRadius: size * 0.025,
+      position: 'absolute',
+      top: size * 0.2,
+    }} />
+    <View style={{
+      width: size * 0.15,
+      height: size * 0.15,
+      backgroundColor: color,
+      borderRadius: size * 0.075,
+      position: 'absolute',
+      bottom: size * 0.15,
+    }} />
+  </View>
+);
+
+const DiaryIcon = ({ size = 24, color = '#34B79F' }: { size?: number; color?: string }) => (
+  <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+    <View style={{
+      width: size * 0.8,
+      height: size * 0.9,
+      borderRadius: size * 0.05,
+      borderWidth: size * 0.08,
+      borderColor: color,
+      backgroundColor: 'transparent',
+    }} />
+    <View style={{
+      width: size * 0.5,
+      height: size * 0.08,
+      backgroundColor: color,
+      position: 'absolute',
+      top: size * 0.25,
+    }} />
+    <View style={{
+      width: size * 0.4,
+      height: size * 0.08,
+      backgroundColor: color,
+      position: 'absolute',
+      top: size * 0.4,
+    }} />
+    <View style={{
+      width: size * 0.3,
+      height: size * 0.08,
+      backgroundColor: color,
+      position: 'absolute',
+      top: size * 0.55,
+    }} />
+  </View>
+);
+
+const NotificationIcon = ({ size = 24, color = '#34B79F' }: { size?: number; color?: string }) => (
+  <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+    <View style={{
+      width: size * 0.6,
+      height: size * 0.6,
+      borderTopLeftRadius: size * 0.3,
+      borderTopRightRadius: size * 0.3,
+      borderWidth: size * 0.08,
+      borderBottomWidth: 0,
+      borderColor: color,
+      backgroundColor: 'transparent',
+    }} />
+    <View style={{
+      width: size * 0.8,
+      height: size * 0.1,
+      backgroundColor: color,
+      borderRadius: size * 0.05,
+      position: 'absolute',
+      bottom: size * 0.25,
+    }} />
+    <View style={{
+      width: size * 0.2,
+      height: size * 0.15,
+      borderTopLeftRadius: size * 0.1,
+      borderTopRightRadius: size * 0.1,
+      backgroundColor: color,
+      position: 'absolute',
+      bottom: size * 0.1,
+    }} />
+  </View>
+);
+
+const PillIcon = ({ size = 24, color = '#34B79F' }: { size?: number; color?: string }) => (
+  <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+    <View style={{
+      width: size * 0.8,
+      height: size * 0.4,
+      borderRadius: size * 0.2,
+      backgroundColor: color,
+      flexDirection: 'row',
+    }}>
+      <View style={{
+        width: '50%',
+        height: '100%',
+        backgroundColor: color,
+        borderTopLeftRadius: size * 0.2,
+        borderBottomLeftRadius: size * 0.2,
+      }} />
+      <View style={{
+        width: '50%',
+        height: '100%',
+        backgroundColor: 'rgba(52, 183, 159, 0.5)',
+        borderTopRightRadius: size * 0.2,
+        borderBottomRightRadius: size * 0.2,
+      }} />
+    </View>
+  </View>
+);
+
+const SunIcon = ({ size = 24, color = '#FFB800' }: { size?: number; color?: string }) => (
+  <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+    <View style={{
+      width: size * 0.5,
+      height: size * 0.5,
+      borderRadius: size * 0.25,
+      backgroundColor: color,
+    }} />
+    {/* 태양 광선들 */}
+    {Array.from({ length: 8 }).map((_, index) => {
+      const angle = (index * 45) * (Math.PI / 180);
+      const x = Math.cos(angle) * size * 0.35;
+      const y = Math.sin(angle) * size * 0.35;
+      return (
+        <View
+          key={index}
+          style={{
+            position: 'absolute',
+            width: size * 0.08,
+            height: size * 0.2,
+            backgroundColor: color,
+            borderRadius: size * 0.04,
+            transform: [
+              { translateX: x },
+              { translateY: y },
+              { rotate: `${index * 45}deg` }
+            ],
+          }}
+        />
+      );
+    })}
+  </View>
+);
+
+const ProfileIcon = ({ size = 36, color = '#34B79F' }: { size?: number; color?: string }) => (
+  <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+    <View style={{
+      width: size * 0.4,
+      height: size * 0.4,
+      borderRadius: size * 0.2,
+      backgroundColor: color,
+      marginBottom: size * 0.1,
+    }} />
+    <View style={{
+      width: size * 0.7,
+      height: size * 0.35,
+      backgroundColor: color,
+      borderTopLeftRadius: size * 0.35,
+      borderTopRightRadius: size * 0.35,
+    }} />
+  </View>
+);
+
 export const ElderlyHomeScreen = () => {
   const router = useRouter();
   const { user, logout } = useAuthStore();
@@ -69,7 +269,7 @@ export const ElderlyHomeScreen = () => {
         <View style={styles.profileCard}>
           <View style={styles.profileHeader}>
             <View style={styles.avatarContainer}>
-              <Text style={styles.avatarText}>👴</Text>
+              <ProfileIcon size={36} color="#34B79F" />
             </View>
             <View style={styles.profileInfo}>
               <Text style={[styles.greeting, isLargeView && styles.greetingLarge]}>안녕하세요!</Text>
@@ -93,15 +293,18 @@ export const ElderlyHomeScreen = () => {
           <View style={styles.divider} />
 
           <View style={styles.reminderSection}>
-            <Text style={[styles.reminderText, isLargeView && styles.reminderTextLarge]}>
-              💊 오후 4시에 정형외과 진료가 잡혀있어요!
-            </Text>
+            <View style={styles.reminderContent}>
+              <PillIcon size={isLargeView ? 20 : 16} color="#FFFFFF" />
+              <Text style={[styles.reminderText, isLargeView && styles.reminderTextLarge]}>
+                오후 4시에 정형외과 진료가 잡혀있어요!
+              </Text>
+            </View>
           </View>
 
           <View style={styles.divider} />
 
           <View style={styles.weatherSection}>
-            <Text style={[styles.weatherIcon, isLargeView && styles.weatherIconLarge]}>☀️</Text>
+            <SunIcon size={isLargeView ? 32 : 24} color="#FFB800" />
             <Text style={[styles.weatherText, isLargeView && styles.weatherTextLarge]}>
               오늘은 날씨가 좋으니 산책하기 좋은 날이에요.
             </Text>
@@ -112,25 +315,25 @@ export const ElderlyHomeScreen = () => {
         <View style={styles.quickActions}>
           <TouchableOpacity style={[styles.actionButton, isLargeView && styles.actionButtonLarge]} onPress={() => router.push('/todos')}>
             <View style={[styles.actionIcon, isLargeView && styles.actionIconLarge]}>
-              <Text style={[styles.actionIconText, isLargeView && styles.actionIconTextLarge]}>✓</Text>
+              <CheckIcon size={isLargeView ? 32 : 24} color="#34B79F" />
             </View>
             <Text style={[styles.actionLabel, isLargeView && styles.actionLabelLarge]}>할 일</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.actionButton, isLargeView && styles.actionButtonLarge]} onPress={() => Alert.alert('준비중', 'AI 통화 기능은 개발 중입니다.')}>
             <View style={[styles.actionIcon, isLargeView && styles.actionIconLarge]}>
-              <Text style={[styles.actionIconText, isLargeView && styles.actionIconTextLarge]}>📞</Text>
+              <PhoneIcon size={isLargeView ? 32 : 24} color="#34B79F" />
             </View>
             <Text style={[styles.actionLabel, isLargeView && styles.actionLabelLarge]}>AI 통화</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.actionButton, isLargeView && styles.actionButtonLarge]} onPress={() => Alert.alert('준비중', '일기 기능은 개발 중입니다.')}>
             <View style={[styles.actionIcon, isLargeView && styles.actionIconLarge]}>
-              <Text style={[styles.actionIconText, isLargeView && styles.actionIconTextLarge]}>📝</Text>
+              <DiaryIcon size={isLargeView ? 32 : 24} color="#34B79F" />
             </View>
             <Text style={[styles.actionLabel, isLargeView && styles.actionLabelLarge]}>일기</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.actionButton, isLargeView && styles.actionButtonLarge]} onPress={() => Alert.alert('준비중', '알림 기능은 개발 중입니다.')}>
             <View style={[styles.actionIcon, isLargeView && styles.actionIconLarge]}>
-              <Text style={[styles.actionIconText, isLargeView && styles.actionIconTextLarge]}>🔔</Text>
+              <NotificationIcon size={isLargeView ? 32 : 24} color="#34B79F" />
             </View>
             <Text style={[styles.actionLabel, isLargeView && styles.actionLabelLarge]}>알림</Text>
           </TouchableOpacity>
@@ -309,9 +512,6 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 4,
   },
-  avatarText: {
-    fontSize: 36,
-  },
   divider: {
     height: 1,
     backgroundColor: 'rgba(255, 255, 255, 0.3)',
@@ -341,20 +541,22 @@ const styles = StyleSheet.create({
   reminderSection: {
     paddingVertical: 4,
   },
+  reminderContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   reminderText: {
     fontSize: 14,
     color: '#FFFFFF',
     fontWeight: '500',
     lineHeight: 20,
+    marginLeft: 8,
+    flex: 1,
   },
   weatherSection: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 4,
-  },
-  weatherIcon: {
-    fontSize: 24,
-    marginRight: 12,
   },
   weatherText: {
     flex: 1,
@@ -362,6 +564,7 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: '500',
     lineHeight: 20,
+    marginLeft: 12,
   },
   weatherBadge: {
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
@@ -399,9 +602,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 8,
     elevation: 4,
-  },
-  actionIconText: {
-    fontSize: 24,
   },
   actionLabel: {
     fontSize: 14,
@@ -552,9 +752,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
     lineHeight: 24,
   },
-  weatherIconLarge: {
-    fontSize: 32,
-  },
   weatherTextLarge: {
     fontSize: 18,
     lineHeight: 24,
@@ -567,9 +764,6 @@ const styles = StyleSheet.create({
     height: 72,
     borderRadius: 36,
     marginBottom: 12,
-  },
-  actionIconTextLarge: {
-    fontSize: 32,
   },
   actionLabelLarge: {
     fontSize: 18,
