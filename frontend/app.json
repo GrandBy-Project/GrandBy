@@ -1,8 +1,9 @@
 {
   "expo": {
-    "name": "frontend",
+    "name": "Grandby",
     "slug": "frontend",
     "version": "1.0.0",
+    "owner": "parad327",
     "orientation": "portrait",
     "platforms": ["ios", "android"],
     "icon": "./assets/icon.png",
@@ -14,18 +15,25 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.parad327.grandby"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
+      "package": "com.parad327.grandby",
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false
     },
     "plugins": [
       "expo-router"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "e28f1ca6-9d5f-4503-997a-ac6a21fd7eb0"
+      }
+    }
   }
 }
