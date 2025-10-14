@@ -31,7 +31,6 @@ export const TodoListScreen = () => {
   const [showSuccessAnimation, setShowSuccessAnimation] = useState(false);
   const [completedTodoTitle, setCompletedTodoTitle] = useState('');
   const [fadeAnim] = useState(new Animated.Value(0));
-  const [selectedTodoId, setSelectedTodoId] = useState<string | null>(null);
   const [todos, setTodos] = useState<TodoItem[]>([
     {
       id: '1',
@@ -80,54 +79,6 @@ export const TodoListScreen = () => {
     },
   ]);
 
-  const handleTodoPress = (id: string) => {
-    const todo = todos.find(t => t.id === id);
-    if (!todo) return;
-
-    if (todo.isCompleted) {
-      // 이미 완료된 할일을 다시 누르면 미완료로 변경
-      setTodos(prevTodos =>
-        prevTodos.map(t => 
-          t.id === id ? { ...t, isCompleted: false } : t
-        )
-      );
-      setSelectedTodoId(null);
-    } else if (selectedTodoId === id) {
-      // 선택된 할일을 다시 누르면 완료 처리
-      setTodos(prevTodos =>
-        prevTodos.map(t => 
-          t.id === id ? { ...t, isCompleted: true } : t
-        )
-      );
-      setSelectedTodoId(null);
-      
-      // 성공 애니메이션 표시
-      setCompletedTodoTitle(todo.title);
-      setShowSuccessAnimation(true);
-      
-      // Fade in 애니메이션
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 500,
-        useNativeDriver: true,
-      }).start();
-
-      // 2.5초 후 fade out 애니메이션
-      setTimeout(() => {
-        Animated.timing(fadeAnim, {
-          toValue: 0,
-          duration: 500,
-          useNativeDriver: true,
-        }).start(() => {
-          setShowSuccessAnimation(false);
-        });
-      }, 2000);
-    } else {
-      // 할일을 처음 누르면 선택 상태로 변경
-      setSelectedTodoId(id);
-    }
-  };
-
   const handleCompletePress = (id: string) => {
     const todo = todos.find(t => t.id === id);
     if (!todo) return;
@@ -139,7 +90,6 @@ export const TodoListScreen = () => {
           t.id === id ? { ...t, isCompleted: false } : t
         )
       );
-      setSelectedTodoId(null);
     } else {
       // 미완료 할일을 누르면 완료 처리
       setTodos(prevTodos =>
@@ -147,7 +97,6 @@ export const TodoListScreen = () => {
           t.id === id ? { ...t, isCompleted: true } : t
         )
       );
-      setSelectedTodoId(null);
       
       // 성공 애니메이션 표시
       setCompletedTodoTitle(todo.title);
@@ -223,14 +172,20 @@ export const TodoListScreen = () => {
     );
   };
 
+  const handleCardPress = (todoId: string) => {
+    // 카드 터치 시 상세 보기로 이동
+    router.push(`/todo-detail?id=${todoId}`);
+  };
+
+  const handleAddTodo = () => {
+    router.push('/todo-write');
+  };
+
   const TodoCard = ({ todo }: { todo: TodoItem }) => {
-    const isSelected = selectedTodoId === todo.id;
-    
     return (
       <View style={[
         styles.todoCard,
         todo.isCompleted && styles.completedCard,
-        isSelected && styles.selectedCard,
       ]}>
         {/* 완료된 항목에 대한 배지 */}
         {todo.isCompleted && (
@@ -239,91 +194,70 @@ export const TodoListScreen = () => {
           </View>
         )}
         
-        {/* 선택된 항목에 대한 안내 메시지 */}
-        {isSelected && (
-          <View style={styles.selectedBadge}>
-            <Text style={styles.selectedBadgeText}>체크박스를 눌러 완료하세요</Text>
-          </View>
-        )}
-        
-        <View style={styles.todoHeader}>
-          {/* 카드 영역 - 선택용 */}
-          <TouchableOpacity
-            style={styles.todoLeft}
-            onPress={() => handleTodoPress(todo.id)}
-            activeOpacity={0.7}
-          >
-            <Text style={[
-              styles.categoryIcon,
-              isSelected && styles.selectedText
-            ]}>
-              {getCategoryIcon(todo.category)}
-            </Text>
-            <View style={styles.todoInfo}>
-              <Text
-                style={[
-                  styles.todoTitle,
-                  todo.isCompleted && styles.completedText,
-                  isSelected && styles.selectedText,
-                ]}
-              >
-                {todo.title}
+        {/* 카드 전체 터치 영역 - 상세보기로 이동 */}
+        <TouchableOpacity
+          style={styles.cardTouchArea}
+          onPress={() => handleCardPress(todo.id)}
+          activeOpacity={0.7}
+        >
+          <View style={styles.todoHeader}>
+            <View style={styles.todoLeft}>
+              <Text style={styles.categoryIcon}>
+                {getCategoryIcon(todo.category)}
               </Text>
-              <Text
-                style={[
-                  styles.todoDescription,
-                  todo.isCompleted && styles.completedText,
-                  isSelected && styles.selectedText,
-                ]}
-              >
-                {todo.description}
-              </Text>
-              <View style={[
-                styles.timeContainer,
-                todo.isCompleted && styles.completedTimeContainer,
-                isSelected && styles.selectedTimeContainer,
-              ]}>
-                <Text style={[
-                  styles.timeIcon,
-                  isSelected && styles.selectedText
-                ]}>🕐</Text>
+              <View style={styles.todoInfo}>
                 <Text
                   style={[
-                    styles.todoTime,
+                    styles.todoTitle,
                     todo.isCompleted && styles.completedText,
-                    isSelected && styles.selectedText,
                   ]}
                 >
-                  {todo.time}
+                  {todo.title}
                 </Text>
+                <Text
+                  style={[
+                    styles.todoDescription,
+                    todo.isCompleted && styles.completedText,
+                  ]}
+                >
+                  {todo.description}
+                </Text>
+                <View style={[
+                  styles.timeContainer,
+                  todo.isCompleted && styles.completedTimeContainer,
+                ]}>
+                  <Text style={styles.timeIcon}>🕐</Text>
+                  <Text
+                    style={[
+                      styles.todoTime,
+                      todo.isCompleted && styles.completedText,
+                    ]}
+                  >
+                    {todo.time}
+                  </Text>
+                </View>
               </View>
             </View>
-          </TouchableOpacity>
-          
-          {/* 완료 버튼 영역 */}
-          <TouchableOpacity 
-            style={styles.todoRight}
-            onPress={() => handleCompletePress(todo.id)}
-            activeOpacity={0.7}
-          >
-            <View style={[
-              styles.completeButton,
-              todo.isCompleted && styles.completedButton,
-              isSelected && styles.selectedCompleteButton,
-            ]}>
-              {todo.isCompleted ? (
-                <Text style={styles.completedButtonText}>취소</Text>
-              ) : (
-                <Text style={[
-                  styles.completeButtonText,
-                  isSelected && styles.selectedCompleteButtonText,
-                ]}>
-                  {isSelected ? '완료하기' : '완료'}
-                </Text>
-              )}
-            </View>
-          </TouchableOpacity>
-        </View>
+            
+            {/* 완료 버튼만 남김 */}
+            <TouchableOpacity 
+              style={styles.completeButtonContainer}
+              onPress={() => handleCompletePress(todo.id)}
+              activeOpacity={0.7}
+            >
+              <View style={[
+                styles.completeButton,
+                todo.isCompleted && styles.completedButton,
+              ]}>
+                {todo.isCompleted ? (
+                  <Text style={styles.completedButtonText}>취소</Text>
+                ) : (
+                  <Text style={styles.completeButtonText}>완료</Text>
+                )}
+              </View>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
       </View>
     );
   };
@@ -331,7 +265,15 @@ export const TodoListScreen = () => {
   return (
     <View style={styles.container}>
       {/* 공통 헤더 */}
-      <Header title="할 일" showBackButton />
+      <Header 
+        title="할 일" 
+        showBackButton 
+        rightButton={
+          <TouchableOpacity onPress={handleAddTodo} style={styles.addButton}>
+            <Text style={styles.addButtonText}>+</Text>
+          </TouchableOpacity>
+        }
+      />
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* 오늘의 할일 요약 */}
@@ -528,6 +470,9 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 6,
   },
+  cardTouchArea: {
+    flex: 1,
+  },
   completedCard: {
     backgroundColor: '#F8F9FA',
     borderColor: '#40B59F',
@@ -568,6 +513,10 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   todoRight: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  completeButtonContainer: {
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -727,7 +676,7 @@ const styles = StyleSheet.create({
   completeButton: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 12,
+    paddingVertical: 16,
     paddingHorizontal: 16,
     borderRadius: 12,
     backgroundColor: '#2E8B87',
@@ -768,5 +717,23 @@ const styles = StyleSheet.create({
   },
   selectedCompleteButtonText: {
     color: '#FFFFFF',
+  },
+  addButton: {
+    backgroundColor: '#40B59F',
+    borderRadius: 20,
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#40B59F',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  addButtonText: {
+    color: '#FFFFFF',
+    fontSize: 24,
+    fontWeight: '700',
   },
 });
