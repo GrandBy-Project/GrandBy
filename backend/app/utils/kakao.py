@@ -42,12 +42,12 @@ class KakaoAPI:
             params["state"] = state
         
         # 추가 scope (필요한 정보 요청)
-        # profile_nickname, profile_image: 프로필 정보
-        # account_email: 이메일
-        # phone_number: 전화번호 (비즈니스 앱만 가능)
-        # birthday: 생일
-        # gender: 성별
-        params["scope"] = "profile_nickname,account_email,phone_number,birthday,gender"
+        # ✅ 사업자 등록 없이 받을 수 있는 정보만 요청
+        # profile_nickname: 카카오 닉네임
+        # profile_image: 프로필 이미지
+        # account_email: 이메일 (사용자 동의 필요)
+        # ❌ phone_number, birthday, gender: 비즈니스 인증 필요
+        params["scope"] = "profile_nickname,profile_image,account_email"
         
         query_string = "&".join([f"{k}={v}" for k, v in params.items()])
         return f"{self.KAKAO_AUTH_URL}/oauth/authorize?{query_string}"

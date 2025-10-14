@@ -207,8 +207,16 @@ export const KakaoRegisterScreen = () => {
         <View style={styles.header}>
           <Text style={styles.title}>추가 정보 입력</Text>
           <Text style={styles.subtitle}>
-            서비스 이용을 위해 추가 정보가 필요합니다
+            카카오에서 받은 정보를 확인하고{'\n'}
+            추가 정보를 입력해주세요
           </Text>
+          {!kakaoUserInfo.email && (
+            <View style={styles.warningBox}>
+              <Text style={styles.warningText}>
+                ⚠️ 카카오 계정에 이메일이 없어 직접 입력이 필요합니다
+              </Text>
+            </View>
+          )}
         </View>
 
         {/* 폼 */}
@@ -377,6 +385,19 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 16,
     color: Colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  warningBox: {
+    backgroundColor: '#FFF3CD',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 12,
+  },
+  warningText: {
+    fontSize: 14,
+    color: '#856404',
+    textAlign: 'center',
   },
   formSection: {
     gap: 16,

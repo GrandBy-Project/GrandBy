@@ -488,12 +488,15 @@ async def kakao_login():
     카카오 인증 페이지로 리다이렉트
     """
     try:
+        logger.info("🔵 카카오 로그인 요청 받음")
         authorization_url = kakao_api.get_authorization_url()
+        logger.info(f"🔵 카카오 인증 URL 생성 완료: {authorization_url}")
+        logger.info(f"🔵 Redirect URI: {settings.KAKAO_REDIRECT_URI}")
         return {
             "authorization_url": authorization_url
         }
     except Exception as e:
-        logger.error(f"카카오 로그인 URL 생성 실패: {e}")
+        logger.error(f"❌ 카카오 로그인 URL 생성 실패: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="카카오 로그인 URL 생성에 실패했습니다."
@@ -511,20 +514,35 @@ async def kakao_callback(request: KakaoCallbackRequest, db: Session = Depends(ge
     3. 기존 사용자면 로그인, 신규 사용자면 회원가입 필요 정보 반환
     """
     try:
+        logger.info(f"🔵 카카오 콜백 받음 - code: {request.code[:10]}...")
+        
         # 1. 액세스 토큰 받기
+        logger.info("🔵 카카오 액세스 토큰 요청 중...")
         token_response = await kakao_api.get_access_token(request.code)
         access_token = token_response.get("access_token")
         refresh_token = token_response.get("refresh_token")
         
         if not access_token:
+            logger.error("❌ 카카오 액세스 토큰을 받지 못함")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="카카오 액세스 토큰을 받지 못했습니다."
             )
         
+        logger.info("✅ 카카오 액세스 토큰 받음")
+        
         # 2. 사용자 정보 조회
+        logger.info("🔵 카카오 사용자 정보 조회 중...")
         kakao_user_raw = await kakao_api.get_user_info(access_token)
         kakao_user = kakao_api.parse_user_info(kakao_user_raw)
+        
+        logger.info(f"✅ 카카오 사용자 정보 파싱 완료:")
+        logger.info(f"   - kakao_id: {kakao_user['kakao_id']}")
+        logger.info(f"   - email: {kakao_user.get('email')}")
+        logger.info(f"   - name: {kakao_user.get('name')}")
+        logger.info(f"   - phone_number: {kakao_user.get('phone_number')}")
+        logger.info(f"   - birth_date: {kakao_user.get('birth_date')}")
+        logger.info(f"   - gender: {kakao_user.get('gender')}")
         
         # 3. 기존 사용자 확인 (kakao_id로)
         existing_user = db.query(User).filter(
@@ -532,6 +550,7 @@ async def kakao_callback(request: KakaoCallbackRequest, db: Session = Depends(ge
         ).first()
         
         if existing_user:
+            logger.info(f"✅ 기존 사용자 발견 - email: {existing_user.email}")
             # 기존 사용자 - 로그인 처리
             # 토큰 업데이트
             existing_user.kakao_access_token = access_token
@@ -549,6 +568,8 @@ async def kakao_callback(request: KakaoCallbackRequest, db: Session = Depends(ge
                 "sub": existing_user.user_id
             })
             
+            logger.info("✅ 기존 사용자 로그인 완료")
+            
             return {
                 "access_token": access_token_jwt,
                 "refresh_token": refresh_token_jwt,
@@ -557,8 +578,9 @@ async def kakao_callback(request: KakaoCallbackRequest, db: Session = Depends(ge
             }
         
         # 4. 신규 사용자 - 회원가입 필요 정보 반환
+        logger.info("🆕 신규 사용자 - 회원가입 필요")
         # 프론트엔드에서 추가 정보 입력 받아야 함
-        return KakaoUserInfo(
+        kakao_user_info = KakaoUserInfo(
             kakao_id=kakao_user["kakao_id"],
             email=kakao_user.get("email"),
             name=kakao_user.get("name"),
@@ -568,10 +590,13 @@ async def kakao_callback(request: KakaoCallbackRequest, db: Session = Depends(ge
             profile_image=kakao_user.get("profile_image")
         )
         
+        logger.info(f"📤 신규 사용자 정보 반환: {kakao_user_info.model_dump()}")
+        return kakao_user_info
+        
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"카카오 로그인 콜백 처리 실패: {e}")
+        logger.error(f"❌ 카카오 로그인 콜백 처리 실패: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"카카오 로그인 처리 중 오류가 발생했습니다: {str(e)}"

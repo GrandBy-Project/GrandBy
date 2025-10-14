@@ -14,9 +14,9 @@ import {
   Image,
   TouchableOpacity,
   TextInput,
-  Linking,
 } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
+import * as Linking from 'expo-linking';
 import { useAuthStore } from '../store/authStore';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';

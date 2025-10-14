@@ -95,6 +95,11 @@ services:
       SMTP_FROM_NAME: ${SMTP_FROM_NAME:-그랜비 Grandby}
       ENABLE_EMAIL: ${ENABLE_EMAIL:-true}
       
+      # Kakao OAuth
+      KAKAO_REST_API_KEY: ${KAKAO_REST_API_KEY}
+      KAKAO_REDIRECT_URI: ${KAKAO_REDIRECT_URI}
+      KAKAO_CLIENT_SECRET: ${KAKAO_CLIENT_SECRET}
+      
     ports:
       - "8000:8000"
     volumes:
