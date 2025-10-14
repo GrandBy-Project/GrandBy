@@ -54,7 +54,7 @@ export const Button: React.FC<ButtonProps> = ({
               variant === 'secondary' && styles.secondaryButtonText,
               variant === 'outline' && styles.outlineButtonText,
               variant === 'kakao' && styles.kakaoButtonText,
-              icon && styles.textWithIcon,
+              icon ? styles.textWithIcon : null,
             ]}
           >
             {title}
