@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir:*)",
+      "Bash(npm install:*)",
+      "Bash(npx expo install:*)",
+      "Bash(eas project:info:*)",
+      "Bash(eas init --id e28f1ca6-9d5f-4503-997a-ac6a21fd7eb0)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
