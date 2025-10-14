@@ -3,13 +3,15 @@
  */
 import React from 'react';
 import { TouchableOpacity, Text, StyleSheet, ActivityIndicator } from 'react-native';
+import { Colors } from '../constants/Colors';
 
 interface ButtonProps {
   title: string;
   onPress: () => void;
-  variant?: 'primary' | 'secondary' | 'outline';
+  variant?: 'primary' | 'secondary' | 'outline' | 'kakao';
   disabled?: boolean;
   loading?: boolean;
+  icon?: React.ReactNode;
 }
 
 export const Button: React.FC<ButtonProps> = ({
@@ -18,7 +20,14 @@ export const Button: React.FC<ButtonProps> = ({
   variant = 'primary',
   disabled = false,
   loading = false,
+  icon,
 }) => {
+  const getSpinnerColor = () => {
+    if (variant === 'outline') return Colors.primary;
+    if (variant === 'kakao') return Colors.kakaoText;
+    return Colors.textWhite;
+  };
+
   return (
     <TouchableOpacity
       style={[
@@ -26,6 +35,7 @@ export const Button: React.FC<ButtonProps> = ({
         variant === 'primary' && styles.primaryButton,
         variant === 'secondary' && styles.secondaryButton,
         variant === 'outline' && styles.outlineButton,
+        variant === 'kakao' && styles.kakaoButton,
         (disabled || loading) && styles.disabledButton,
       ]}
       onPress={onPress}
@@ -33,18 +43,23 @@ export const Button: React.FC<ButtonProps> = ({
       activeOpacity={0.7}
     >
       {loading ? (
-        <ActivityIndicator color={variant === 'outline' ? '#007AFF' : '#FFFFFF'} />
+        <ActivityIndicator color={getSpinnerColor()} />
       ) : (
-        <Text
-          style={[
-            styles.buttonText,
-            variant === 'primary' && styles.primaryButtonText,
-            variant === 'secondary' && styles.secondaryButtonText,
-            variant === 'outline' && styles.outlineButtonText,
-          ]}
-        >
-          {title}
-        </Text>
+        <>
+          {icon && icon}
+          <Text
+            style={[
+              styles.buttonText,
+              variant === 'primary' && styles.primaryButtonText,
+              variant === 'secondary' && styles.secondaryButtonText,
+              variant === 'outline' && styles.outlineButtonText,
+              variant === 'kakao' && styles.kakaoButtonText,
+              icon && styles.textWithIcon,
+            ]}
+          >
+            {title}
+          </Text>
+        </>
       )}
     </TouchableOpacity>
   );
@@ -58,17 +73,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 54,
+    flexDirection: 'row',
   },
   primaryButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: Colors.primary,
+    shadowColor: Colors.shadow,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
   },
   secondaryButton: {
-    backgroundColor: '#34C759',
+    backgroundColor: Colors.success,
   },
   outlineButton: {
     backgroundColor: 'transparent',
     borderWidth: 2,
-    borderColor: '#007AFF',
+    borderColor: Colors.primary,
+  },
+  kakaoButton: {
+    backgroundColor: Colors.kakao,
+    shadowColor: Colors.shadow,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
   },
   disabledButton: {
     opacity: 0.5,
@@ -78,13 +107,18 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   primaryButtonText: {
-    color: '#FFFFFF',
+    color: Colors.textWhite,
   },
   secondaryButtonText: {
-    color: '#FFFFFF',
+    color: Colors.textWhite,
   },
   outlineButtonText: {
-    color: '#007AFF',
+    color: Colors.primary,
+  },
+  kakaoButtonText: {
+    color: Colors.kakaoText,
+  },
+  textWithIcon: {
+    marginLeft: 8,
   },
 });
-

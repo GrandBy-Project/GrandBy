@@ -1,9 +1,8 @@
 /**
  * 인증 관련 API
  */
-import apiClient from './client';
+import apiClient, { TokenManager } from './client';
 import { AuthResponse, LoginRequest, RegisterRequest } from '../types';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 /**
  * 회원가입
@@ -11,10 +10,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 export const register = async (data: RegisterRequest): Promise<AuthResponse> => {
   const response = await apiClient.post<AuthResponse>('/api/auth/register', data);
   
-  // 토큰 저장
-  await AsyncStorage.setItem('access_token', response.data.access_token);
-  await AsyncStorage.setItem('refresh_token', response.data.refresh_token);
-  await AsyncStorage.setItem('user', JSON.stringify(response.data.user));
+  // 새로운 TokenManager 사용
+  await TokenManager.saveTokens(response.data.access_token, response.data.refresh_token);
   
   return response.data;
 };
@@ -25,10 +22,8 @@ export const register = async (data: RegisterRequest): Promise<AuthResponse> => 
 export const login = async (data: LoginRequest): Promise<AuthResponse> => {
   const response = await apiClient.post<AuthResponse>('/api/auth/login', data);
   
-  // 토큰 저장
-  await AsyncStorage.setItem('access_token', response.data.access_token);
-  await AsyncStorage.setItem('refresh_token', response.data.refresh_token);
-  await AsyncStorage.setItem('user', JSON.stringify(response.data.user));
+  // 새로운 TokenManager 사용
+  await TokenManager.saveTokens(response.data.access_token, response.data.refresh_token);
   
   return response.data;
 };
@@ -37,22 +32,52 @@ export const login = async (data: LoginRequest): Promise<AuthResponse> => {
  * 로그아웃
  */
 export const logout = async (): Promise<void> => {
-  await AsyncStorage.multiRemove(['access_token', 'refresh_token', 'user']);
+  await TokenManager.clearTokens();
 };
 
 /**
  * 저장된 사용자 정보 가져오기
  */
 export const getCurrentUser = async () => {
-  const userStr = await AsyncStorage.getItem('user');
-  return userStr ? JSON.parse(userStr) : null;
+  const tokens = await TokenManager.getTokens();
+  if (!tokens) return null;
+  
+  // 사용자 정보는 토큰 검증으로 가져오기
+  try {
+    return await verifyToken();
+  } catch {
+    return null;
+  }
 };
 
 /**
  * 인증 상태 확인
  */
 export const isAuthenticated = async (): Promise<boolean> => {
-  const token = await AsyncStorage.getItem('access_token');
-  return !!token;
+  return await TokenManager.isAccessTokenValid();
 };
+
+/**
+ * 토큰 검증 (스플래쉬에서 사용)
+ */
+export const verifyToken = async () => {
+  const response = await apiClient.get('/api/auth/verify');
+  return response.data;
+};
+
+/**
+ * 토큰 갱신
+ */
+export const refreshToken = async (refreshToken: string) => {
+  const response = await apiClient.post('/api/auth/refresh', {
+    refresh_token: refreshToken,
+    device_id: 'mobile-app',
+  });
+  
+  // 새로운 TokenManager 사용
+  await TokenManager.saveTokens(response.data.access_token, response.data.refresh_token);
+  
+  return response.data;
+};
+
 

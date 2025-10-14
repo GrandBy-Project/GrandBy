@@ -72,7 +72,9 @@ services:
       TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-your-twilio-account-sid}
       TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-your-twilio-auth-token}
       TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER:-+1234567890}
-      
+      API_BASE_URL: ${API_BASE_URL}
+      TEST_PHONE_NUMBER: ${TEST_PHONE_NUMBER}
+
       # AWS S3
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-your-aws-access-key}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-your-aws-secret-key}
@@ -83,6 +85,15 @@ services:
       ENVIRONMENT: ${ENVIRONMENT:-development}
       DEBUG: ${DEBUG:-true}
       CORS_ORIGINS: ${CORS_ORIGINS:-*}
+      
+      # Email (SMTP)
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-그랜비 Grandby}
+      ENABLE_EMAIL: ${ENABLE_EMAIL:-true}
       
     ports:
       - "8000:8000"
@@ -113,6 +124,8 @@ services:
       TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID}
       TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN}
       TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER}
+      API_BASE_URL: ${API_BASE_URL}
+      TEST_PHONE_NUMBER: ${TEST_PHONE_NUMBER}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
       AWS_REGION: ${AWS_REGION:-ap-northeast-2}
@@ -142,6 +155,8 @@ services:
       TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID}
       TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN}
       TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER}
+      API_BASE_URL: ${API_BASE_URL}
+      TEST_PHONE_NUMBER: ${TEST_PHONE_NUMBER}
     volumes:
       - ./backend/app:/app/app
     networks:
