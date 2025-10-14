@@ -66,6 +66,11 @@ class Settings(BaseSettings):
     SMTP_FROM_NAME: str = "그랜비 Grandby"
     ENABLE_EMAIL: bool = True  # 개발 중에는 False, 실제 발송 시 True
     
+    # ==================== Kakao OAuth ====================
+    KAKAO_REST_API_KEY: str = ""  # 카카오 로그인 사용 시 필수
+    KAKAO_REDIRECT_URI: str = ""  # 카카오 로그인 사용 시 필수
+    KAKAO_CLIENT_SECRET: str | None = None  # 선택사항 (보안 강화 시 사용)
+    
     # ==================== Logging ====================
     LOG_LEVEL: str = "INFO"
     

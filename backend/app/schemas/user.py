@@ -62,3 +62,31 @@ class ConnectionResponse(BaseModel):
     class Config:
         from_attributes = True
 
+
+class KakaoCallbackRequest(BaseModel):
+    """카카오 로그인 콜백 요청"""
+    code: str
+    state: Optional[str] = None
+
+
+class KakaoUserInfo(BaseModel):
+    """카카오 사용자 정보"""
+    kakao_id: str
+    email: Optional[str] = None
+    name: Optional[str] = None
+    phone_number: Optional[str] = None
+    birth_date: Optional[str] = None
+    gender: Optional[str] = None
+    profile_image: Optional[str] = None
+
+
+class KakaoRegisterRequest(BaseModel):
+    """카카오 회원가입 추가 정보 입력"""
+    kakao_id: str
+    email: EmailStr
+    name: str
+    phone_number: str
+    role: UserRole
+    password: str  # 카카오 로그인 사용자도 비밀번호 설정
+    birth_date: Optional[str] = None
+    gender: Optional[str] = None

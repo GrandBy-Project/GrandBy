@@ -46,6 +46,15 @@ class User(Base):
     name = Column(String(100), nullable=False)
     phone_number = Column(String(20), nullable=True)
     
+    # 카카오 OAuth 정보
+    kakao_id = Column(String(100), unique=True, nullable=True, index=True)  # 카카오 고유 ID
+    kakao_access_token = Column(String(500), nullable=True)  # 카카오 액세스 토큰
+    kakao_refresh_token = Column(String(500), nullable=True)  # 카카오 리프레시 토큰
+    
+    # 추가 프로필 정보
+    birth_date = Column(String(10), nullable=True)  # 생년월일 (YYYY-MM-DD)
+    gender = Column(String(10), nullable=True)  # 성별 (male/female)
+    
     # 역할 및 인증
     role = Column(SQLEnum(UserRole), nullable=False)
     auth_provider = Column(SQLEnum(AuthProvider), default=AuthProvider.EMAIL)

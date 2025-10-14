@@ -14,12 +14,18 @@ import {
   Image,
   TouchableOpacity,
   TextInput,
+  Linking,
 } from 'react-native';
+import * as WebBrowser from 'expo-web-browser';
 import { useAuthStore } from '../store/authStore';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { useRouter } from 'expo-router';
 import { Colors } from '../constants/Colors';
+import { getKakaoLoginUrl, kakaoCallback, KakaoUserInfo } from '../api/auth';
+
+// WebBrowser 세션 완료 처리
+WebBrowser.maybeCompleteAuthSession();
 
 export const LoginScreen = () => {
   const router = useRouter();
@@ -81,8 +87,62 @@ export const LoginScreen = () => {
     Alert.alert('준비 중', '계정 찾기 기능은 준비 중입니다.');
   };
 
-  const handleKakaoLogin = () => {
-    Alert.alert('준비 중', '카카오 로그인은 준비 중입니다.');
+  const handleKakaoLogin = async () => {
+    try {
+      console.log('🔵 카카오 로그인 시작');
+      
+      // 1. 백엔드에서 카카오 로그인 URL 받기
+      const { authorization_url } = await getKakaoLoginUrl();
+      console.log('🔵 카카오 인증 URL:', authorization_url);
+      
+      // 2. WebBrowser로 카카오 로그인 페이지 열기
+      const result = await WebBrowser.openAuthSessionAsync(
+        authorization_url,
+        'grandby://kakao-callback' // Deep Link (나중에 설정)
+      );
+      
+      console.log('🔵 WebBrowser 결과:', result);
+      
+      if (result.type === 'success' && result.url) {
+        // 3. URL에서 code 파라미터 추출
+        const url = new URL(result.url);
+        const code = url.searchParams.get('code');
+        
+        if (!code) {
+          Alert.alert('오류', '인증 코드를 받지 못했습니다.');
+          return;
+        }
+        
+        console.log('🔵 인증 코드:', code);
+        
+        // 4. 백엔드에 code 전달
+        const response = await kakaoCallback(code);
+        
+        // 5-1. 기존 사용자 - 자동 로그인
+        if ('access_token' in response) {
+          console.log('✅ 기존 사용자 로그인 성공');
+          Alert.alert('환영합니다!', '카카오 로그인에 성공했습니다.');
+          router.replace('/home');
+        }
+        // 5-2. 신규 사용자 - 추가 정보 입력 화면으로 이동
+        else {
+          console.log('🆕 신규 사용자 - 추가 정보 입력 필요');
+          // @ts-ignore - router params
+          router.push({
+            pathname: '/kakao-register',
+            params: { kakaoUserInfo: JSON.stringify(response) }
+          });
+        }
+      } else if (result.type === 'cancel') {
+        console.log('❌ 사용자가 카카오 로그인을 취소했습니다.');
+      }
+    } catch (error: any) {
+      console.error('❌ 카카오 로그인 실패:', error);
+      Alert.alert(
+        '카카오 로그인 실패',
+        error?.response?.data?.detail || error?.message || '카카오 로그인 중 오류가 발생했습니다.'
+      );
+    }
   };
 
   return (
