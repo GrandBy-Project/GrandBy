@@ -1,26 +1,29 @@
 {
   "expo": {
-    "name": "frontend",
-    "slug": "frontend",
+    "name": "GrandBy",
+    "slug": "grandby",
     "version": "1.0.0",
     "orientation": "portrait",
     "platforms": ["ios", "android"],
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
+    "scheme": "grandby",
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.grandby.app"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
+      "package": "com.grandby.app",
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false
     },

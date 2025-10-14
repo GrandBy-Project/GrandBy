@@ -95,10 +95,13 @@ export const LoginScreen = () => {
       const { authorization_url } = await getKakaoLoginUrl();
       console.log('🔵 카카오 인증 URL:', authorization_url);
       
-      // 2. WebBrowser로 카카오 로그인 페이지 열기
+      // 2. WebBrowser로 카카오 로그인 페이지 열기 (딥링크 사용)
+      const redirectUrl = Linking.createURL('kakao-callback');
+      console.log('🔵 Redirect URL:', redirectUrl);
+      
       const result = await WebBrowser.openAuthSessionAsync(
         authorization_url,
-        'grandby://kakao-callback' // Deep Link (나중에 설정)
+        redirectUrl
       );
       
       console.log('🔵 WebBrowser 결과:', result);
