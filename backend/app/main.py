@@ -263,7 +263,7 @@ async def transcribe_audio_realtime(audio_data: bytes) -> str:
 async def send_audio_to_twilio_with_tts(websocket: WebSocket, stream_sid: str, text: str):
     """
     TTS Service를 사용하여 텍스트를 음성으로 변환 후 Twilio WebSocket으로 전송
-    MP3 → WAV → mulaw 변환 포함
+    WAV → mulaw 변환 포함
     
     Args:
         websocket: Twilio WebSocket 연결
@@ -273,39 +273,92 @@ async def send_audio_to_twilio_with_tts(websocket: WebSocket, stream_sid: str, t
     try:
         import wave
         import io
-        from pydub import AudioSegment
         
-        # TTS Service로 음성 생성 (MP3 파일로 저장됨)
+        # TTS Service로 음성 생성 (WAV 파일로 저장됨)
         audio_file_path, tts_time = tts_service.text_to_speech(text)
+        
+        # TTS 실패 체크
+        if not audio_file_path or tts_time == 0:
+            logger.error("❌ TTS 변환 실패 - 응답이 None이거나 시간이 0초")
+            return
+        
         logger.info(f"✅ TTS 완료 ({tts_time:.2f}초): {audio_file_path}")
         
-        if not audio_file_path or not os.path.exists(audio_file_path):
-            logger.error("❌ TTS 음성 파일 생성 실패")
+        # 파일 존재 확인
+        if not os.path.exists(audio_file_path):
+            logger.error(f"❌ TTS 파일이 존재하지 않음: {audio_file_path}")
+            return
+        
+        # 파일 크기 확인
+        file_size = os.path.getsize(audio_file_path)
+        logger.info(f"📁 생성된 파일 크기: {file_size} bytes")
+        
+        if file_size == 0:
+            logger.error("❌ 파일이 비어있습니다! TTS API 문제 가능성")
             return
         
         try:
-            # MP3 파일을 WAV로 변환 (pydub 사용)
-            audio_segment = AudioSegment.from_mp3(audio_file_path)
-            
-            # Twilio 요구 사항: Mono, 8kHz, 16-bit PCM
-            audio_segment = audio_segment.set_channels(1)  # Mono
-            audio_segment = audio_segment.set_frame_rate(8000)  # 8kHz
-            audio_segment = audio_segment.set_sample_width(2)  # 16-bit
-            
-            # WAV 데이터 추출
-            wav_io = io.BytesIO()
-            audio_segment.export(wav_io, format='wav')
-            wav_io.seek(0)
-            
-            # WAV에서 PCM 데이터 읽기
-            with wave.open(wav_io, 'rb') as wav_file:
-                pcm_data = wav_file.readframes(wav_file.getnframes())
-            
+            # 파일 헤더 확인
+            with open(audio_file_path, 'rb') as f:
+                header = f.read(12)
+                logger.info(f"📄 파일 헤더: {header.hex() if header else 'EMPTY'}")
+                
+                if len(header) == 0:
+                    logger.error("❌ 헤더를 읽을 수 없습니다!")
+                    return
+                
+                # WAV 파일 검증
+                if header[:4] == b'RIFF' and header[8:12] == b'WAVE':
+                    logger.info("✅ 정상 WAV 파일 확인")
+                elif header[:3] == b'ID3' or header[:2] == b'\xff\xfb':
+                    logger.error("❌ MP3 파일입니다! response_format이 wav로 설정되지 않았습니다.")
+                    return
+                else:
+                    logger.error(f"❌ 알 수 없는 파일 형식: {header[:4]}")
+                    return
+
+            # WAV 파일 읽기 (wave 모듈만 사용)
+            with wave.open(audio_file_path, 'rb') as wav_file:
+                channels = wav_file.getnchannels()
+                sample_width = wav_file.getsampwidth()
+                framerate = wav_file.getframerate()
+                n_frames = wav_file.getnframes()
+                
+                logger.info(f"🎵 TTS WAV 정보:")
+                logger.info(f"  - 채널: {channels}ch")
+                logger.info(f"  - 비트: {sample_width*8}bit")
+                logger.info(f"  - 샘플레이트: {framerate}Hz")
+                logger.info(f"  - 프레임 수: {n_frames}")
+                
+                pcm_data = wav_file.readframes(n_frames)
+                logger.info(f"  - PCM 데이터: {len(pcm_data)} bytes")
+
+            # Stereo → Mono 변환 (필요시)
+            if channels == 2:
+                logger.info("🔄 Stereo → Mono 변환 중...")
+                pcm_data = audioop.tomono(pcm_data, sample_width, 1, 1)
+                logger.info(f"✅ Mono 변환 완료: {len(pcm_data)} bytes")
+
+            # 샘플레이트 변환 (Twilio는 8kHz 요구)
+            if framerate != 8000:
+                logger.info(f"🔄 샘플레이트 변환: {framerate}Hz → 8000Hz")
+                pcm_data, _ = audioop.ratecv(pcm_data, sample_width, 1, framerate, 8000, None)
+                logger.info(f"✅ 샘플레이트 변환 완료: {len(pcm_data)} bytes")
+
             # PCM → mulaw 변환
+            logger.info("🔄 PCM → mulaw 변환 중...")
             mulaw_data = audioop.lin2ulaw(pcm_data, 2)
+            logger.info(f"✅ mulaw 변환 완료: {len(mulaw_data)} bytes")
             
+        except wave.Error as wave_err:
+            logger.error(f"❌ WAV 파일 읽기 오류: {wave_err}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return
         except Exception as conv_error:
-            logger.error(f"❌ 오디오 변환 오류: {conv_error}")
+            logger.error(f"❌ 오디오 변환 오류: {type(conv_error).__name__}: {conv_error}")
+            import traceback
+            logger.error(traceback.format_exc())
             return
         finally:
             # TTS로 생성된 임시 MP3 파일 삭제
