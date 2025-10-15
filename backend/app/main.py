@@ -20,7 +20,6 @@ from sqlalchemy.orm import Session
 import time
 
 from twilio.twiml.voice_response import VoiceResponse, Connect, Stream
-from openai import OpenAI
 
 from app.routers import auth, users, calls, diaries, todos, notifications, dashboard
 from app.config import settings, is_development
@@ -35,7 +34,6 @@ logging.basicConfig(level=settings.LOG_LEVEL)
 logger = logging.getLogger(__name__)
 
 # OpenAI 클라이언트 및 서비스 초기화
-openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
 stt_service = STTService()
 tts_service = TTSService()
 llm_service = LLMService()
@@ -88,126 +86,6 @@ class AudioProcessor:
 
 
 # ==================== Helper Functions ====================
-
-def transcribe_audio(audio_data: bytes) -> str:
-    """
-    Whisper API를 사용하여 오디오를 텍스트로 변환
-    Twilio mulaw 포맷 → WAV 변환 후 전송
-    """
-    try:
-        import wave
-        
-        # Twilio는 mulaw (G.711 μ-law) 포맷으로 전송
-        # mulaw를 16-bit PCM으로 변환
-        try:
-            pcm_data = audioop.ulaw2lin(audio_data, 2)
-        except Exception as conv_error:
-            logger.error(f"mulaw 변환 오류: {conv_error}")
-            return ""
-        
-        # 임시 WAV 파일 생성
-        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_audio:
-            temp_audio_path = temp_audio.name
-        
-        # PCM 데이터를 WAV 파일로 저장
-        try:
-            with wave.open(temp_audio_path, 'wb') as wav_file:
-                wav_file.setnchannels(1)      # Mono
-                wav_file.setsampwidth(2)      # 16-bit (2 bytes)
-                wav_file.setframerate(8000)   # 8kHz (Twilio 샘플레이트)
-                wav_file.writeframes(pcm_data)
-        except Exception as wav_error:
-            logger.error(f"WAV 파일 생성 오류: {wav_error}")
-            if os.path.exists(temp_audio_path):
-                os.unlink(temp_audio_path)
-            return ""
-        
-        # Whisper API 호출
-        try:
-            with open(temp_audio_path, 'rb') as audio_file:
-                transcript = openai_client.audio.transcriptions.create(
-                    model="whisper-1",
-                    file=audio_file,
-                    language="ko"
-                )
-            
-            logger.info(f"✅ 음성 인식 성공: {transcript.text[:50]}...")
-            return transcript.text
-            
-        except Exception as whisper_error:
-            logger.error(f"Whisper API 오류: {whisper_error}")
-            return ""
-        
-        finally:
-            # 임시 파일 삭제
-            if os.path.exists(temp_audio_path):
-                os.unlink(temp_audio_path)
-    
-    except Exception as e:
-        logger.error(f"음성 인식 전체 오류: {str(e)}")
-        return ""
-
-
-def get_gpt_response(user_message: str, call_sid: str) -> str:
-    """GPT를 사용한 대화 응답 생성"""
-    try:
-        # 대화 세션 초기화 (첫 메시지인 경우)
-        if call_sid not in conversation_sessions:
-            conversation_sessions[call_sid] = [
-                {
-                    "role": "system",
-                    "content": """당신은 친절하고 따뜻한 한국어 AI 어시스턴트입니다.
-                    어르신과 전화 통화를 하며 일상 대화를 나누고 있습니다.
-                    간결하고 명확하게 답변하며, 전화 통화에 적합한 짧은 문장으로 대답하세요.
-                    어르신의 안부를 묻고, 오늘 하루 어떻게 지냈는지, 건강은 어떤지 관심을 가져주세요."""
-                }
-            ]
-        
-        # 사용자 메시지 추가
-        conversation_sessions[call_sid].append({
-            "role": "user",
-            "content": user_message
-        })
-        
-        # GPT API 호출
-        response = openai_client.chat.completions.create(
-            model=settings.OPENAI_MODEL,
-            messages=conversation_sessions[call_sid],
-            max_tokens=150,
-            temperature=0.7
-        )
-        
-        assistant_message = response.choices[0].message.content
-        
-        # AI 응답 저장
-        conversation_sessions[call_sid].append({
-            "role": "assistant",
-            "content": assistant_message
-        })
-        
-        return assistant_message
-    except Exception as e:
-        logger.error(f"GPT API 오류: {str(e)}")
-        return "죄송합니다. 응답을 생성하는 중 오류가 발생했습니다."
-
-
-def text_to_speech(text: str) -> bytes:
-    """
-    OpenAI TTS API를 사용하여 텍스트를 음성으로 변환
-    """
-    try:
-        response = openai_client.audio.speech.create(
-            model=settings.OPENAI_TTS_MODEL,
-            voice=settings.OPENAI_TTS_VOICE,  # alloy, echo, fable, onyx, nova, shimmer
-            input=text,
-            response_format="wav"
-        )
-        
-        return response.content
-    except Exception as e:
-        logger.error(f"TTS 오류: {str(e)}")
-        return b""
-
 
 async def transcribe_audio_realtime(audio_data: bytes) -> str:
     """
@@ -394,85 +272,6 @@ async def send_audio_to_twilio_with_tts(websocket: WebSocket, stream_sid: str, t
         logger.error(traceback.format_exc())
 
 
-async def send_audio_to_twilio(websocket: WebSocket, stream_sid: str, text: str):
-    """
-    텍스트를 음성으로 변환하여 Twilio WebSocket으로 전송
-    WAV → mulaw 변환 포함 (기존 함수 - 호환성 유지)
-    """
-    try:
-        import wave
-        import io
-        
-        # TTS로 음성 생성 (WAV 포맷)
-        audio_data = text_to_speech(text)
-        
-        if not audio_data:
-            logger.error("TTS 음성 생성 실패")
-            return
-        
-        # WAV 데이터를 mulaw로 변환
-        try:
-            # WAV 파일을 메모리에서 읽기
-            wav_io = io.BytesIO(audio_data)
-            with wave.open(wav_io, 'rb') as wav_file:
-                # WAV 파라미터 확인
-                channels = wav_file.getnchannels()
-                sample_width = wav_file.getsampwidth()
-                framerate = wav_file.getframerate()
-                frames = wav_file.readframes(wav_file.getnframes())
-                
-                logger.info(f"🎵 TTS WAV: {channels}ch, {sample_width*8}bit, {framerate}Hz")
-                
-                # Stereo → Mono 변환 (필요시)
-                if channels == 2:
-                    frames = audioop.tomono(frames, sample_width, 1, 1)
-                
-                # 샘플레이트 변환 (Twilio는 8kHz 요구)
-                if framerate != 8000:
-                    frames, _ = audioop.ratecv(frames, sample_width, 1, framerate, 8000, None)
-                
-                # 16-bit → 8-bit mulaw 변환
-                if sample_width == 2:  # 16-bit
-                    mulaw_data = audioop.lin2ulaw(frames, 2)
-                elif sample_width == 1:  # 8-bit
-                    # 8-bit PCM → 16-bit PCM → mulaw
-                    frames_16 = audioop.lin2lin(frames, 1, 2)
-                    mulaw_data = audioop.lin2ulaw(frames_16, 2)
-                else:
-                    logger.error(f"지원하지 않는 샘플 너비: {sample_width}")
-                    return
-                
-        except Exception as conv_error:
-            logger.error(f"오디오 변환 오류: {conv_error}")
-            return
-        
-        # mulaw 데이터를 Base64로 인코딩
-        audio_base64 = base64.b64encode(mulaw_data).decode('utf-8')
-        
-        logger.info(f"📤 오디오 전송: {len(mulaw_data)} bytes (mulaw 8kHz)")
-        
-        # 청크로 나누어 전송 (Twilio 제한 고려)
-        chunk_size = 8000  # 8KB chunks
-        for i in range(0, len(audio_base64), chunk_size):
-            chunk = audio_base64[i:i + chunk_size]
-            
-            message = {
-                "event": "media",
-                "streamSid": stream_sid,
-                "media": {
-                    "payload": chunk
-                }
-            }
-            
-            await websocket.send_text(json.dumps(message))
-            await asyncio.sleep(0.02)  # 작은 지연으로 부드러운 재생
-            
-        logger.info("✅ 음성 전송 완료")
-        
-    except Exception as e:
-        logger.error(f"❌ 음성 전송 오류: {str(e)}")
-
-
 # Lifespan 이벤트 (startup/shutdown)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -593,10 +392,6 @@ async def health_check():
 # 각 도메인별 라우터를 여기에 등록
 
 # ==================== AI 챗봇 서비스 ====================
-# STT, LLM, TTS 서비스 import
-
-# 대화 기록 저장 (간단한 인메모리 저장소, 실제로는 DB 사용 권장)
-conversation_sessions = {}
 
 # 인증
 app.include_router(
