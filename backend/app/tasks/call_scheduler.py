@@ -1,14 +1,14 @@
 """
-AI 자동 전화 스케줄링 작업
+AI 자동 전화 스케줄링 작업 (Celery Beat)
 """
 
 from app.tasks.celery_app import celery_app
 from app.database import SessionLocal
-from app.models.call import CallSettings, CallLog, CallStatus
+from app.models.call import CallSettings, CallLog
 from app.models.user import User
 from app.services.ai_call import TwilioService
 from app.config import settings
-from datetime import datetime, timedelta
+from datetime import datetime, time
 import logging
 
 logger = logging.getLogger(__name__)
@@ -18,23 +18,20 @@ logger = logging.getLogger(__name__)
 def check_and_make_calls():
     """
     현재 시간에 전화를 걸어야 하는 어르신 확인 후 전화 발신
-    매 분마다 실행되며, 설정된 시간(±5분 이내)에 전화 발신
     """
-    logger.info("⏰ Checking for scheduled calls...")
+    logger.info("Checking for scheduled calls...")
     
     db = SessionLocal()
     try:
-        current_datetime = datetime.now()
-        current_time = current_datetime.time()
-        current_hour = current_time.hour
-        current_minute = current_time.minute
+        current_time = datetime.now().time()
         
-        logger.info(f"Current time: {current_hour:02d}:{current_minute:02d}")
-        
-        # 활성화된 모든 통화 설정 조회
+        # 현재 시간에 전화해야 하는 설정 조회
         settings_list = db.query(CallSettings).filter(
-            CallSettings.is_active == True
+            CallSettings.is_active == True,
+            # TODO: 시간 비교 로직 개선 필요
         ).all()
+        
+        logger.info(f"📋 Found {len(user_settings_list)} users with auto-call enabled")
         
         if not settings_list:
             logger.info("No active call settings found")
@@ -75,29 +72,26 @@ def check_and_make_calls():
         
         # Twilio 서비스 초기화
         twilio_service = TwilioService()
+        calls_made = 0
         
-        # 전화 발신
-        for setting in settings_to_call:
+        for setting in settings_list:
             try:
-                # 어르신 정보 조회
-                elderly = db.query(User).filter(User.user_id == setting.elderly_id).first()
+                scheduled_time = user_setting.scheduled_call_time  # HH:MM 형식
                 
                 if not elderly or not elderly.phone_number:
-                    logger.warning(f"❌ No phone number for user {setting.elderly_id}")
+                    logger.warning(f"No phone number for user {setting.elderly_id}")
                     continue
                 
+                # 전화 발신
                 # API Base URL 확인
                 if not settings.API_BASE_URL:
-                    logger.error("❌ API_BASE_URL not set in settings")
+                    logger.error("API_BASE_URL not set in settings")
                     continue
                 
                 api_base_url = settings.API_BASE_URL
                 voice_url = f"https://{api_base_url}/api/twilio/voice"
                 status_callback_url = f"https://{api_base_url}/api/twilio/call-status"
                 
-                logger.info(f"📞 Calling {elderly.phone_number}...")
-                
-                # 전화 발신
                 call_sid = twilio_service.make_call(
                     to_number=elderly.phone_number,
                     voice_url=voice_url,
@@ -107,27 +101,23 @@ def check_and_make_calls():
                 # 통화 기록 생성
                 new_call = CallLog(
                     elderly_id=elderly.user_id,
-                    call_status=CallStatus.INITIATED,
+                    call_status="initiated",
                     twilio_call_sid=call_sid,
-                    call_start_time=datetime.utcnow(),
                     created_at=datetime.utcnow()
                 )
                 db.add(new_call)
                 db.commit()
                 
-                logger.info(f"✅ Call initiated for {elderly.email}: {call_sid}")
+                logger.info(f"Call initiated for {elderly.name}: {call_sid}")
                 
             except Exception as e:
-                logger.error(f"❌ Failed to make call for {setting.elderly_id}: {e}")
-                import traceback
-                logger.error(traceback.format_exc())
+                logger.error(f"Failed to make call for {setting.elderly_id}: {e}")
                 db.rollback()
                 continue
+        
+        logger.info(f"✅ Scheduled call check completed. Calls made: {calls_made}")
+        return {"calls_made": calls_made, "timestamp": current_time}
     
-    except Exception as e:
-        logger.error(f"❌ Error in check_and_make_calls: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
     finally:
         db.close()
 

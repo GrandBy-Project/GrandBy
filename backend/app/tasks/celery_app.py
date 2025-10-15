@@ -31,10 +31,10 @@ celery_app.autodiscover_tasks(["app.tasks"])
 
 # 스케줄 설정 (Celery Beat)
 celery_app.conf.beat_schedule = {
-    # AI 자동 전화 스케줄링 (매 분마다 체크)
+    # AI 자동 전화 스케줄링 (매 시간마다 체크)
     "check-call-schedule": {
         "task": "app.tasks.call_scheduler.check_and_make_calls",
-        "schedule": crontab(minute="*"),  # 매 분마다 체크 (정확도 향상)
+        "schedule": crontab(minute="*/30"),  # 30분마다 체크
     },
     # 감정 분석 알림 체크 (매일 오전 9시)
     "check-emotion-alerts": {

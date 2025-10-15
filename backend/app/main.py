@@ -6,6 +6,7 @@ Grandby FastAPI Application
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Form, HTTPException, Depends, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
+from pydantic import BaseModel
 from contextlib import asynccontextmanager
 import logging
 import json
@@ -22,7 +23,7 @@ import time
 from twilio.twiml.voice_response import VoiceResponse, Connect, Stream
 from openai import OpenAI
 
-from app.routers import auth, users, calls, diaries, todos, notifications, dashboard
+from app.routers import auth, users, calls, diaries, todos, notifications, dashboard, twilio
 from app.config import settings, is_development
 from app.database import test_db_connection, get_db
 from app.services.ai_call.stt_service import STTService
@@ -642,6 +643,13 @@ app.include_router(
     tags=["AI Calls"]
 )
 
+# Twilio Voice (VoIP)
+app.include_router(
+    twilio.router,
+    prefix="/api/twilio",
+    tags=["Twilio Voice"]
+)
+
 # 다이어리
 app.include_router(
     diaries.router,
@@ -901,21 +909,41 @@ async def clear_conversation_history(user_id: str):
 
 # ==================== Twilio WebSocket Endpoints ====================
 
-@app.post("/api/twilio/call", tags=["Twilio"])
-async def initiate_test_call(db: Session = Depends(get_db)):
+class RealtimeCallRequest(BaseModel):
+    """실시간 AI 대화 통화 요청"""
+    to_number: str  # 전화번호 (+821012345678 형식)
+    user_id: str = "test-user"  # 사용자 ID (선택)
+
+
+class RealtimeCallResponse(BaseModel):
+    """실시간 AI 대화 통화 응답"""
+    success: bool
+    call_sid: str
+    to_number: str
+    status: str
+    message: str
+    voice_url: str
+    timestamp: str
+
+
+@app.post("/api/twilio/call", response_model=RealtimeCallResponse, tags=["Twilio"])
+async def initiate_realtime_call(
+    request: RealtimeCallRequest,
+    db: Session = Depends(get_db)
+):
     """
-    테스트 전화 발신 (TEST_PHONE_NUMBER로 자동 발신)
+    실시간 AI 대화 통화 발신 (WebSocket 기반)
     
-    환경 변수 TEST_PHONE_NUMBER에 설정된 번호로 자동으로 전화를 겁니다.
+    사용자가 입력한 전화번호로 전화를 걸고, WebSocket을 통해 실시간 AI 대화를 제공합니다.
+    
+    플로우:
+    1. 앱에서 이 API 호출 (전화번호 전달)
+    2. Twilio가 사용자 전화번호로 전화 발신
+    3. 사용자가 전화 받음
+    4. /api/twilio/voice 엔드포인트에서 WebSocket 연결 시작
+    5. 실시간 음성 대화 (STT → LLM → TTS)
     """
     try:
-        # TEST_PHONE_NUMBER 확인
-        if not settings.TEST_PHONE_NUMBER:
-            raise HTTPException(
-                status_code=400,
-                detail="TEST_PHONE_NUMBER가 환경 변수에 설정되지 않았습니다."
-            )
-        
         # API Base URL 확인
         if not settings.API_BASE_URL:
             raise HTTPException(
@@ -926,17 +954,18 @@ async def initiate_test_call(db: Session = Depends(get_db)):
         # Twilio 서비스 초기화
         twilio_service = TwilioService()
         
-        # Callback URL 설정
+        # Callback URL 설정 (WebSocket 연결)
         api_base_url = settings.API_BASE_URL
-        voice_url = f"https://{api_base_url}/api/twilio/voice"
+        voice_url = f"https://{api_base_url}/api/twilio/voice"  # WebSocket 시작 엔드포인트
         status_callback_url = f"https://{api_base_url}/api/twilio/call-status"
         
-        logger.info(f"📞 전화 발신 시작: {settings.TEST_PHONE_NUMBER}")
-        logger.info(f"🔗 Voice URL: {voice_url}")
+        logger.info(f"📞 실시간 AI 대화 통화 발신 시작: {request.to_number}")
+        logger.info(f"👤 사용자 ID: {request.user_id}")
+        logger.info(f"🔗 Voice URL (WebSocket 시작): {voice_url}")
         
         # 전화 걸기
         call_sid = twilio_service.make_call(
-            to_number=settings.TEST_PHONE_NUMBER,
+            to_number=request.to_number,  # 사용자 입력 전화번호
             voice_url=voice_url,
             status_callback_url=status_callback_url
         )
@@ -946,7 +975,7 @@ async def initiate_test_call(db: Session = Depends(get_db)):
             from app.models.call import CallLog
             new_call = CallLog(
                 call_id=call_sid,
-                elderly_id="test-user",  # 테스트용
+                elderly_id=request.user_id,
                 call_status="initiated",
                 twilio_call_sid=call_sid,
                 created_at=datetime.utcnow()
@@ -958,25 +987,25 @@ async def initiate_test_call(db: Session = Depends(get_db)):
             logger.warning(f"⚠️ 통화 기록 저장 실패 (계속 진행): {str(e)}")
             db.rollback()
         
-        logger.info(f"✅ 전화 발신 성공: {call_sid}")
+        logger.info(f"✅ 실시간 AI 대화 통화 발신 성공: {call_sid}")
         
-        return {
-            "success": True,
-            "call_sid": call_sid,
-            "to_number": settings.TEST_PHONE_NUMBER,
-            "status": "initiated",
-            "message": f"전화가 {settings.TEST_PHONE_NUMBER}로 발신되었습니다.",
-            "voice_url": voice_url,
-            "timestamp": datetime.utcnow().isoformat()
-        }
+        return RealtimeCallResponse(
+            success=True,
+            call_sid=call_sid,
+            to_number=request.to_number,
+            status="initiated",
+            message=f"실시간 AI 대화 전화가 {request.to_number}로 발신되었습니다. 전화를 받으시면 AI와 대화하실 수 있습니다.",
+            voice_url=voice_url,
+            timestamp=datetime.utcnow().isoformat()
+        )
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ 전화 발신 실패: {str(e)}")
+        logger.error(f"❌ 실시간 AI 대화 통화 발신 실패: {str(e)}")
         raise HTTPException(
             status_code=500,
-            detail=f"전화 발신 중 오류 발생: {str(e)}"
+            detail=f"실시간 AI 대화 통화 발신 중 오류 발생: {str(e)}"
         )
 
 
