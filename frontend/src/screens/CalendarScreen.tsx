@@ -11,6 +11,9 @@ import {
   Alert,
   TextInput,
   Modal,
+  Platform,
+  KeyboardAvoidingView,
+  Keyboard,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Header, BottomNavigationBar } from '../components';
@@ -76,17 +79,22 @@ export const CalendarScreen = () => {
   ];
 
   const handleAddSchedule = () => {
-    if (selectedDate) {
-      setNewSchedule({ 
-        ...newSchedule, 
-        date: `2024-01-${selectedDate.toString().padStart(2, '0')}` 
-      });
-    }
+    // 기본 날짜로 일정 추가 모달 열기
+    setNewSchedule({ 
+      ...newSchedule, 
+      date: selectedDate ? `2024-01-${selectedDate.toString().padStart(2, '0')}` : '2024-01-15'
+    });
     setShowAddModal(true);
   };
 
   const handleDateSelect = (day: number) => {
     setSelectedDate(day);
+    // 선택된 날짜로 일정 추가 모달 열기
+    setNewSchedule({ 
+      ...newSchedule, 
+      date: `2024-01-${day.toString().padStart(2, '0')}` 
+    });
+    setShowAddModal(true);
   };
 
   const handleSaveSchedule = () => {
@@ -114,19 +122,17 @@ export const CalendarScreen = () => {
     };
 
     setSchedules(prev => [...prev, newItem]);
-    setNewSchedule({ title: '', description: '', time: '' });
+    setNewSchedule({ title: '', description: '', time: '', date: '' });
     setShowAddModal(false);
     Alert.alert('저장 완료', '일정이 추가되었습니다.');
   };
 
   const handleCancelAdd = () => {
-    setNewSchedule({ title: '', description: '', time: '' });
+    setNewSchedule({ title: '', description: '', time: '', date: '' });
     setShowAddModal(false);
+    setShowTimePicker(false); // 시간 선택 모달도 함께 닫기
   };
 
-  const handleSchedulePress = (scheduleId: string) => {
-    router.push(`/todo-detail?id=${scheduleId}&type=schedule`);
-  };
 
   const handleDeleteSchedule = (scheduleId: string) => {
     Alert.alert(
@@ -160,95 +166,65 @@ export const CalendarScreen = () => {
       <Header title="달력" showBackButton />
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        {/* 탭 네비게이션 */}
+        <View style={styles.tabContainer}>
+          <TouchableOpacity style={[styles.tab, styles.tabActive]}>
+            <Text style={styles.tabTextActive}>캘린더</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.tab}>
+            <Text style={styles.tabText}>요약</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.tab}>
+            <Text style={styles.tabText}>리뷰</Text>
+          </TouchableOpacity>
+        </View>
+
         {/* 월간 달력 영역 */}
         <View style={styles.calendarSection}>
-          <Text style={styles.sectionTitle}>2024년 1월</Text>
-          <View style={styles.calendarGrid}>
+          <Text style={styles.monthTitle}>2024년 1월</Text>
+          <View style={styles.calendarContainer}>
             {/* 요일 헤더 */}
             <View style={styles.weekHeader}>
-              {['일', '월', '화', '수', '목', '금', '토'].map((day) => (
-                <Text key={day} style={styles.dayHeader}>{day}</Text>
+              {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, index) => (
+                <Text key={`day-${index}`} style={[
+                  styles.dayHeader,
+                  index === 0 && styles.sundayHeader
+                ]}>{day}</Text>
               ))}
             </View>
             
             {/* 달력 날짜들 */}
-            <View style={styles.calendarDays}>
+            <View style={styles.calendarGrid}>
               {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => {
                 const hasSchedule = schedules.some(s => 
                   new Date(s.date).getDate() === day
                 );
                 const isSelected = selectedDate === day;
+                const dayOfWeek = (day - 1) % 7;
+                const isSunday = dayOfWeek === 0;
                 
                 return (
                   <TouchableOpacity
                     key={day}
                     style={[
                       styles.dayCell,
-                      hasSchedule && styles.dayWithSchedule,
                       isSelected && styles.daySelected,
                     ]}
                     onPress={() => handleDateSelect(day)}
                   >
                     <Text style={[
                       styles.dayText,
-                      hasSchedule && styles.dayTextWithSchedule,
+                      isSunday && styles.sundayText,
                       isSelected && styles.dayTextSelected,
                     ]}>
                       {day}
                     </Text>
+                    {hasSchedule && <View style={styles.eventDot} />}
                   </TouchableOpacity>
                 );
               })}
             </View>
           </View>
-        </View>
-
-        {/* 일정 목록 */}
-        <View style={styles.scheduleSection}>
-          <Text style={styles.sectionTitle}>이번 달 일정</Text>
-          {schedules.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyText}>등록된 일정이 없습니다</Text>
-              <Text style={styles.emptySubText}>+ 버튼을 눌러 일정을 추가해보세요</Text>
-            </View>
-          ) : (
-            schedules.map((schedule) => (
-              <TouchableOpacity
-                key={schedule.id}
-                style={styles.scheduleCard}
-                onPress={() => handleSchedulePress(schedule.id)}
-                activeOpacity={0.7}
-              >
-                <View style={styles.scheduleHeader}>
-                  <View style={styles.scheduleLeft}>
-                    <Text style={styles.scheduleIcon}>📅</Text>
-                    <View style={styles.scheduleInfo}>
-                      <Text style={styles.scheduleTitle}>{schedule.title}</Text>
-                      <Text style={styles.scheduleDescription}>
-                        {schedule.description}
-                      </Text>
-                      <View style={styles.scheduleMeta}>
-                        <Text style={styles.scheduleDate}>
-                          {formatDate(schedule.date)}
-                        </Text>
-                        <Text style={styles.scheduleTime}>{schedule.time}</Text>
-                      </View>
-                    </View>
-                  </View>
-                  
-                  <View style={styles.scheduleRight}>
-                    <TouchableOpacity
-                      style={styles.deleteButton}
-                      onPress={() => handleDeleteSchedule(schedule.id)}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={styles.deleteButtonText}>삭제</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              </TouchableOpacity>
-            ))
-          )}
         </View>
 
         {/* 일정 추가 버튼 */}
@@ -265,8 +241,35 @@ export const CalendarScreen = () => {
           </TouchableOpacity>
         </View>
 
+        {/* 일정 목록 */}
+        <View style={styles.scheduleSection}>
+          <Text style={styles.scheduleSectionTitle}>이번 달 일정</Text>
+          {schedules.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyText}>등록된 일정이 없습니다</Text>
+              <Text style={styles.emptySubText}>+ 버튼을 눌러 일정을 추가해보세요</Text>
+            </View>
+          ) : (
+            schedules.map((schedule) => (
+              <View
+                key={schedule.id}
+                style={styles.scheduleCard}
+              >
+                <View style={styles.scheduleContent}>
+                  <View style={styles.scheduleInfo}>
+                    <Text style={styles.scheduleTitle}>{schedule.title}</Text>
+                    <Text style={styles.scheduleDate}>{formatDate(schedule.date)}</Text>
+                    <Text style={styles.scheduleTime}>{schedule.time}</Text>
+                  </View>
+                </View>
+              </View>
+            ))
+          )}
+        </View>
+
+
         {/* 하단 여백 */}
-        <View style={[styles.bottomSpacer, { height: 100 + Math.max(insets.bottom, 10) }]} />
+        <View style={{ height: 100 + Math.max(insets.bottom, 10) }} />
       </ScrollView>
 
       {/* 하단 네비게이션 바 */}
@@ -278,8 +281,13 @@ export const CalendarScreen = () => {
         transparent
         animationType="slide"
         onRequestClose={handleCancelAdd}
+        presentationStyle="overFullScreen"
       >
-        <View style={styles.modalContainer}>
+        <KeyboardAvoidingView 
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+        >
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>일정 추가</Text>
@@ -288,7 +296,13 @@ export const CalendarScreen = () => {
               </TouchableOpacity>
             </View>
 
-            <ScrollView style={styles.modalBody}>
+            <ScrollView 
+              style={styles.modalBody}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+              contentInsetAdjustmentBehavior={Platform.OS === 'ios' ? 'automatic' : 'never'}
+              automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+            >
               {/* 제목 입력 */}
               <View style={styles.inputSection}>
                 <Text style={styles.inputLabel}>제목</Text>
@@ -337,13 +351,16 @@ export const CalendarScreen = () => {
                 {/* 드롭다운 목록 */}
                 {showTimePicker && (
                   <View style={styles.timePickerDropdown}>
-                    <ScrollView style={styles.timePickerScroll} nestedScrollEnabled>
+                    <ScrollView 
+                      style={styles.timePickerScroll} 
+                      showsVerticalScrollIndicator={true}
+                    >
                       {timeOptions.map((time) => (
                         <TouchableOpacity
                           key={time}
                           style={[
-                            styles.timeOption,
-                            newSchedule.time === time && styles.timeOptionSelected,
+                            styles.timePickerOption,
+                            newSchedule.time === time && styles.timePickerOptionSelected,
                           ]}
                           onPress={() => {
                             setNewSchedule({ ...newSchedule, time });
@@ -352,8 +369,8 @@ export const CalendarScreen = () => {
                           activeOpacity={0.7}
                         >
                           <Text style={[
-                            styles.timeOptionText,
-                            newSchedule.time === time && styles.timeOptionTextSelected,
+                            styles.timePickerOptionText,
+                            newSchedule.time === time && styles.timePickerOptionTextSelected,
                           ]}>
                             {time}
                           </Text>
@@ -362,15 +379,6 @@ export const CalendarScreen = () => {
                     </ScrollView>
                   </View>
                 )}
-
-                {/* 직접 입력 */}
-                <TextInput
-                  style={styles.timeInput}
-                  value={newSchedule.time}
-                  onChangeText={(text) => setNewSchedule({ ...newSchedule, time: text })}
-                  placeholder="또는 직접 입력해주세요 (예: 오후 3시 30분)"
-                  placeholderTextColor="#999999"
-                />
               </View>
             </ScrollView>
 
@@ -385,8 +393,9 @@ export const CalendarScreen = () => {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
+
     </View>
   );
 };
@@ -400,41 +409,77 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#FFFFFF',
   },
+  
+  // 탭 네비게이션
+  tabContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#FFFFFF',
+    marginHorizontal: 20,
+    marginTop: 10,
+    marginBottom: 20,
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+  },
+  tabActive: {
+    borderBottomColor: '#40B59F',
+  },
+  tabText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#666666',
+  },
+  tabTextActive: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#40B59F',
+  },
+
+  // 캘린더 섹션
   calendarSection: {
     margin: 20,
     marginBottom: 15,
   },
-  sectionTitle: {
-    fontSize: 20,
+  monthTitle: {
+    fontSize: 24,
     fontWeight: '700',
     color: '#333333',
-    marginBottom: 15,
+    marginBottom: 20,
+    textAlign: 'center',
   },
-  calendarGrid: {
+  calendarContainer: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 2,
-    borderColor: '#FF9500',
+    borderRadius: 16,
+    padding: 20,
     shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.06,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
     shadowRadius: 8,
-    elevation: 6,
+    elevation: 4,
   },
   weekHeader: {
     flexDirection: 'row',
-    marginBottom: 10,
+    marginBottom: 16,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
   },
   dayHeader: {
     flex: 1,
     textAlign: 'center',
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '600',
     color: '#666666',
     paddingVertical: 8,
   },
-  calendarDays: {
+  sundayHeader: {
+    color: '#FF6B6B',
+  },
+  calendarGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
   },
@@ -444,167 +489,158 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 8,
-    marginBottom: 4,
-  },
-  dayWithSchedule: {
-    backgroundColor: '#FFF4E6',
-    borderWidth: 1,
-    borderColor: '#FF9500',
+    marginBottom: 8,
+    position: 'relative',
   },
   daySelected: {
-    backgroundColor: '#FF9500',
-    borderWidth: 2,
-    borderColor: '#FF9500',
+    backgroundColor: '#40B59F',
+    borderRadius: 12,
   },
   dayText: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '500',
     color: '#333333',
   },
-  dayTextWithSchedule: {
-    color: '#FF9500',
-    fontWeight: '700',
+  sundayText: {
+    color: '#FF6B6B',
   },
   dayTextSelected: {
     color: '#FFFFFF',
-    fontWeight: '700',
+    fontWeight: '600',
   },
+  eventDot: {
+    position: 'absolute',
+    bottom: 4,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#40B59F',
+  },
+  
+  // 스케줄 섹션
   scheduleSection: {
     margin: 20,
     marginTop: 0,
   },
+  scheduleSectionTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#333333',
+    marginBottom: 20,
+  },
   emptyState: {
     alignItems: 'center',
-    paddingVertical: 40,
+    paddingVertical: 60,
+    backgroundColor: '#F8F9FA',
+    borderRadius: 12,
+    marginTop: 10,
   },
   emptyText: {
     fontSize: 16,
     color: '#666666',
     marginBottom: 8,
+    fontWeight: '500',
   },
   emptySubText: {
     fontSize: 14,
     color: '#999999',
   },
   scheduleCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#F8F9FA',
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
-    borderWidth: 2,
-    borderColor: '#4ECDC4',
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 6,
-    elevation: 4,
+    borderWidth: 1,
+    borderColor: '#E9ECEF',
   },
-  scheduleHeader: {
+  scheduleContent: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  scheduleLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  scheduleIcon: {
-    fontSize: 32,
-    marginRight: 12,
   },
   scheduleInfo: {
     flex: 1,
   },
   scheduleTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#333333',
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#40B59F',
     marginBottom: 4,
-  },
-  scheduleDescription: {
-    fontSize: 14,
-    color: '#666666',
-    marginBottom: 8,
-  },
-  scheduleMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
   },
   scheduleDate: {
     fontSize: 12,
-    color: '#4ECDC4',
+    color: '#40B59F',
     fontWeight: '600',
-    marginRight: 12,
+    marginBottom: 2,
   },
   scheduleTime: {
-    fontSize: 12,
-    color: '#4ECDC4',
-    fontWeight: '600',
+    fontSize: 14,
+    color: '#666666',
+    fontWeight: '500',
   },
-  scheduleRight: {
-    alignItems: 'flex-end',
+  scheduleAction: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#40B59F',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 12,
   },
-  deleteButton: {
-    backgroundColor: '#FF6B6B',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-  },
-  deleteButtonText: {
+  scheduleActionIcon: {
     color: '#FFFFFF',
-    fontSize: 12,
+    fontSize: 18,
     fontWeight: '600',
-  },
-  bottomSpacer: {
-    height: 20,
   },
   // 일정 추가 버튼
   addScheduleSection: {
     margin: 20,
-    marginTop: 10,
+    marginTop: 5,
+    marginBottom: 15,
   },
   addScheduleButton: {
-    backgroundColor: '#FF9500',
-    borderRadius: 12,
-    paddingVertical: 18,
+    backgroundColor: '#40B59F',
+    borderRadius: 16,
+    paddingVertical: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#FF9500',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-    elevation: 5,
+    shadowColor: '#40B59F',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
   },
   addScheduleIcon: {
     fontSize: 20,
     marginRight: 8,
+    color: '#FFFFFF',
   },
   addScheduleText: {
     color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 16,
+    fontWeight: '600',
   },
   // 모달 스타일
-  modalContainer: {
+  modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'flex-end',
+    zIndex: 1000,
   },
   modalContent: {
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    maxHeight: '80%',
+    maxHeight: '85%',
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 20,
+    padding: 24,
     borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
+    borderBottomColor: '#F0F0F0',
   },
   modalTitle: {
     fontSize: 20,
@@ -615,7 +651,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: '#F0F0F0',
+    backgroundColor: '#F8F9FA',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -625,46 +661,46 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   modalBody: {
-    padding: 20,
+    padding: 24,
   },
   inputSection: {
-    marginBottom: 20,
+    marginBottom: 24,
   },
   inputLabel: {
     fontSize: 16,
     fontWeight: '600',
     color: '#333333',
-    marginBottom: 8,
+    marginBottom: 12,
   },
   titleInput: {
-    borderWidth: 2,
-    borderColor: '#FF9500',
+    borderWidth: 1,
+    borderColor: '#E9ECEF',
     borderRadius: 12,
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 14,
     fontSize: 16,
     color: '#333333',
     backgroundColor: '#FFFFFF',
   },
   descriptionInput: {
-    borderWidth: 2,
-    borderColor: '#FF9500',
+    borderWidth: 1,
+    borderColor: '#E9ECEF',
     borderRadius: 12,
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 14,
     fontSize: 16,
     color: '#333333',
     backgroundColor: '#FFFFFF',
     textAlignVertical: 'top',
     minHeight: 100,
   },
-  // 시간 드롭다운 스타일
+  // 시간 선택 스타일
   timePickerButton: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#FF9500',
+    borderWidth: 1,
+    borderColor: '#E9ECEF',
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 14,
@@ -680,72 +716,67 @@ const styles = StyleSheet.create({
   },
   dropdownIcon: {
     fontSize: 12,
-    color: '#FF9500',
+    color: '#40B59F',
     fontWeight: 'bold',
   },
   timePickerDropdown: {
     marginTop: 8,
     backgroundColor: '#FFFFFF',
-    borderWidth: 2,
-    borderColor: '#FF9500',
+    borderWidth: 1,
+    borderColor: '#E9ECEF',
     borderRadius: 12,
-    maxHeight: 200,
+    maxHeight: 250,
     shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 8,
+    zIndex: 1000,
   },
   timePickerScroll: {
     maxHeight: 200,
   },
-  timeOption: {
+  timePickerOption: {
     paddingVertical: 14,
     paddingHorizontal: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#F0F0F0',
   },
-  timeOptionSelected: {
-    backgroundColor: '#FFF4E6',
+  timePickerOptionSelected: {
+    backgroundColor: '#E6F7F4',
   },
-  timeOptionText: {
+  timePickerOptionText: {
     fontSize: 16,
     color: '#333333',
+    textAlign: 'center',
   },
-  timeOptionTextSelected: {
-    color: '#FF9500',
-    fontWeight: '700',
+  timePickerOptionTextSelected: {
+    color: '#40B59F',
+    fontWeight: '600',
   },
-  timeInput: {
-    marginTop: 12,
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: 14,
-    color: '#333333',
-    backgroundColor: '#F8F9FA',
-  },
+
   modalFooter: {
-    padding: 20,
+    padding: 24,
     borderTopWidth: 1,
-    borderTopColor: '#E0E0E0',
+    borderTopColor: '#F0F0F0',
+    backgroundColor: '#FFFFFF',
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
   },
   saveButton: {
-    backgroundColor: '#FF9500',
-    borderRadius: 12,
+    backgroundColor: '#40B59F',
+    borderRadius: 16,
     paddingVertical: 16,
     alignItems: 'center',
-    shadowColor: '#FF9500',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowColor: '#40B59F',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
   },
   saveButtonText: {
     color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
