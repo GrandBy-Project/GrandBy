@@ -46,15 +46,21 @@ conversation_sessions: Dict[str, list] = {}
 # ==================== AudioProcessor ====================
 
 class AudioProcessor:
-    """오디오 처리 클래스 - 실시간 오디오 버퍼링 및 침묵 감지"""
+    """
+    오디오 처리 클래스 - 실시간 오디오 버퍼링 및 침묵 감지
+    
+    Twilio에서 수신한 mulaw 오디오를 버퍼링하고,
+    침묵을 감지하여 STT 처리 시점을 결정합니다.
+    """
     
     def __init__(self, call_sid: str):
         self.call_sid = call_sid
-        self.audio_buffer = []
-        self.is_speaking = False
-        self.silence_threshold = 500  # 침묵 감지 임계값
-        self.silence_duration = 0
-        self.max_silence = 1.5  # 1.5초 침묵 후 처리
+        self.audio_buffer = []  # 오디오 청크 버퍼
+        self.transcript_buffer = []  # 실시간 STT 결과 버퍼
+        self.is_speaking = False  # 사용자가 말하고 있는지 여부
+        self.silence_threshold = 500  # 침묵 감지 임계값 (RMS)
+        self.silence_duration = 0  # 현재 침묵 지속 시간
+        self.max_silence = 1.0  # ⭐ 1초 침묵 후 STT 처리 (응답 속도 최적화)
         
     def add_audio_chunk(self, audio_data: bytes):
         """오디오 청크 추가"""
@@ -77,64 +83,266 @@ class AudioProcessor:
                 len(self.audio_buffer) > 0)
     
     def get_audio(self) -> bytes:
-        """버퍼링된 오디오 가져오기 및 초기화"""
+        """
+        버퍼링된 오디오 가져오기 및 초기화
+        
+        Returns:
+            bytes: 병합된 오디오 데이터 (mulaw 포맷)
+        """
         audio = b''.join(self.audio_buffer)
         self.audio_buffer = []
         self.is_speaking = False
         self.silence_duration = 0
         return audio
+    
+    def add_transcript(self, text: str):
+        """
+        실시간 변환된 텍스트를 버퍼에 추가
+        
+        Args:
+            text: 변환된 텍스트
+        """
+        if text and text.strip():
+            self.transcript_buffer.append(text)
+            logger.debug(f"📝 텍스트 버퍼 추가: {len(self.transcript_buffer)}개 문장")
+    
+    def get_full_transcript(self) -> str:
+        """
+        전체 대화 내용 가져오기
+        
+        Returns:
+            str: 공백으로 결합된 전체 대화 텍스트
+        """
+        return " ".join(self.transcript_buffer)
 
 
 # ==================== Helper Functions ====================
 
-async def transcribe_audio_realtime(audio_data: bytes) -> str:
+async def transcribe_audio_realtime(audio_data: bytes) -> tuple[str, float]:
     """
-    실시간 오디오를 텍스트로 변환 (STT Service 사용)
-    Twilio mulaw 포맷 → WAV 변환 후 Whisper API 전송
+    실시간 오디오를 텍스트로 변환 (실시간 청크 기반 STT)
+    
+    Twilio mulaw 포맷을 WAV로 변환 후 실시간 STT 처리합니다.
+    새로운 transcribe_audio_chunk() 메서드를 사용하여 비동기로 처리합니다.
     
     Args:
         audio_data: Twilio에서 받은 mulaw 오디오 데이터
     
     Returns:
-        str: 변환된 텍스트
+        tuple: (변환된 텍스트, 실행 시간)
     """
     try:
         import wave
+        import io
         
         # mulaw를 16-bit PCM으로 변환
         try:
             pcm_data = audioop.ulaw2lin(audio_data, 2)
         except Exception as conv_error:
             logger.error(f"❌ mulaw 변환 오류: {conv_error}")
-            return ""
+            return "", 0
         
-        # 임시 WAV 파일 생성
-        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_audio:
-            temp_audio_path = temp_audio.name
+        # PCM 데이터를 WAV 포맷으로 변환 (메모리 내)
+        wav_io = io.BytesIO()
+        with wave.open(wav_io, 'wb') as wav_file:
+            wav_file.setnchannels(1)      # Mono
+            wav_file.setsampwidth(2)      # 16-bit (2 bytes)
+            wav_file.setframerate(8000)   # 8kHz (Twilio 샘플레이트)
+            wav_file.writeframes(pcm_data)
         
-        try:
-            # PCM 데이터를 WAV 파일로 저장
-            with wave.open(temp_audio_path, 'wb') as wav_file:
-                wav_file.setnchannels(1)      # Mono
-                wav_file.setsampwidth(2)      # 16-bit (2 bytes)
-                wav_file.setframerate(8000)   # 8kHz (Twilio 샘플레이트)
-                wav_file.writeframes(pcm_data)
-            
-            # STT Service를 사용하여 변환
-            transcript, stt_time = stt_service.transcribe_audio(temp_audio_path, language="ko")
-            logger.info(f"✅ STT 완료 ({stt_time:.2f}초): {transcript[:50]}...")
-            return transcript
-            
-        except Exception as e:
-            logger.error(f"❌ STT 변환 실패: {e}")
-            return ""
-        finally:
-            # 임시 파일 삭제
-            if os.path.exists(temp_audio_path):
-                os.unlink(temp_audio_path)
-    
+        wav_data = wav_io.getvalue()
+        logger.debug(f"📝 WAV 변환 완료: {len(wav_data)} bytes")
+        
+        # 실시간 STT 변환 (비동기 처리)
+        transcript, stt_time = await stt_service.transcribe_audio_chunk(
+            wav_data,
+            language="ko"
+        )
+        
+        return transcript, stt_time
+        
     except Exception as e:
         logger.error(f"❌ 실시간 음성 인식 오류: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return "", 0
+
+
+async def convert_and_send_audio(websocket: WebSocket, stream_sid: str, text: str):
+    """
+    단일 문장을 TTS 변환하고 Twilio로 즉시 전송 (병렬 처리용)
+    
+    이 함수는 LLM 스트리밍 중 문장이 완성될 때마다 호출됩니다.
+    사용자는 AI가 말하는 것을 거의 실시간으로 들을 수 있습니다.
+    
+    처리 플로우:
+    1. 문장 TTS 변환 (비동기)
+    2. WAV → mulaw 변환
+    3. Base64 인코딩
+    4. Twilio WebSocket으로 전송
+    
+    Args:
+        websocket: Twilio WebSocket 연결
+        stream_sid: Twilio Stream SID
+        text: 변환할 문장
+    """
+    try:
+        import wave
+        import io
+        
+        # 1. TTS 변환 (문장 단위, 비동기)
+        audio_data, tts_time = await tts_service.text_to_speech_sentence(text)
+        
+        if not audio_data:
+            logger.warning(f"⚠️ TTS 변환 실패, 건너뜀: {text[:30]}...")
+            return
+        
+        # 2. WAV → mulaw 변환 (Twilio 호환)
+        wav_io = io.BytesIO(audio_data)
+        with wave.open(wav_io, 'rb') as wav_file:
+            channels = wav_file.getnchannels()
+            sample_width = wav_file.getsampwidth()
+            framerate = wav_file.getframerate()
+            pcm_data = wav_file.readframes(wav_file.getnframes())
+        
+        # Stereo → Mono 변환 (필요 시)
+        if channels == 2:
+            pcm_data = audioop.tomono(pcm_data, sample_width, 1, 1)
+        
+        # 샘플레이트 변환: Twilio는 8kHz 요구
+        if framerate != 8000:
+            pcm_data, _ = audioop.ratecv(pcm_data, sample_width, 1, framerate, 8000, None)
+        
+        # PCM → mulaw 변환
+        mulaw_data = audioop.lin2ulaw(pcm_data, 2)
+        
+        # 3. Base64 인코딩
+        audio_base64 = base64.b64encode(mulaw_data).decode('utf-8')
+        
+        # 4. Twilio로 청크 단위 전송
+        chunk_size = 8000  # 8KB 청크
+        for i in range(0, len(audio_base64), chunk_size):
+            chunk = audio_base64[i:i + chunk_size]
+            
+            message = {
+                "event": "media",
+                "streamSid": stream_sid,
+                "media": {
+                    "payload": chunk
+                }
+            }
+            
+            await websocket.send_text(json.dumps(message))
+            await asyncio.sleep(0.02)  # 부드러운 재생을 위한 작은 지연
+        
+        logger.info(f"✅ 문장 전송 완료 ({tts_time:.2f}초): {text[:30]}...")
+        
+    except Exception as e:
+        logger.error(f"❌ 오디오 변환/전송 오류: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+
+
+async def process_streaming_response(
+    websocket: WebSocket,
+    stream_sid: str,
+    user_text: str,
+    conversation_history: list
+) -> str:
+    """
+    스트리밍 방식으로 LLM → TTS → Twilio 전송을 병렬 처리
+    
+    이것이 핵심 최적화 함수입니다!
+    
+    동작 방식:
+    1. LLM이 단어/구를 생성하면 즉시 받기 시작
+    2. 문장이 완성되면 (. ! ? 감지) 즉시 TTS 변환
+    3. TTS 변환과 동시에 다음 문장 LLM 생성 진행
+    4. 변환된 음성을 바로 Twilio로 전송
+    
+    결과: 사용자는 AI가 생각하는 것처럼 자연스럽게 느낌
+    
+    Args:
+        websocket: Twilio WebSocket 연결
+        stream_sid: Twilio Stream SID  
+        user_text: 사용자 발화 전체 텍스트
+        conversation_history: 대화 기록
+    
+    Returns:
+        str: 생성된 전체 AI 응답
+    """
+    import re
+    
+    try:
+        logger.info(f"\n{'='*60}")
+        logger.info(f"🚀 스트리밍 응답 파이프라인 시작")
+        logger.info(f"{'='*60}")
+        
+        pipeline_start = time.time()
+        
+        # 문장 버퍼 및 전체 응답 저장
+        sentence_buffer = ""
+        full_response = []
+        sentence_tasks = []  # 병렬 TTS 태스크 추적
+        
+        # LLM 스트리밍 시작 (비동기 생성기)
+        async for chunk in llm_service.generate_response_streaming(
+            user_text,
+            conversation_history
+        ):
+            sentence_buffer += chunk
+            full_response.append(chunk)
+            
+            # 문장 종료 감지: 마침표, 느낌표, 물음표
+            if re.search(r'[.!?\n]', chunk):
+                # 완성된 문장 추출
+                sentences = re.split(r'([.!?\n]+)', sentence_buffer)
+                
+                # 문장과 구두점을 쌍으로 처리
+                for i in range(0, len(sentences)-1, 2):
+                    sentence = sentences[i] + (sentences[i+1] if i+1 < len(sentences) else "")
+                    sentence = sentence.strip()
+                    
+                    if sentence:
+                        logger.info(f"📝 문장 완성: {sentence}")
+                        
+                        # 즉시 TTS 변환 및 전송 (비동기 태스크로 실행)
+                        # 여러 문장이 동시에 처리될 수 있음 (병렬 처리)
+                        task = asyncio.create_task(
+                            convert_and_send_audio(websocket, stream_sid, sentence)
+                        )
+                        sentence_tasks.append(task)
+                
+                # 마지막 불완전한 문장은 버퍼에 유지
+                sentence_buffer = sentences[-1] if len(sentences) % 2 == 1 else ""
+        
+        # 남은 버퍼 처리 (마지막 문장)
+        if sentence_buffer.strip():
+            logger.info(f"📝 마지막 문장: {sentence_buffer}")
+            task = asyncio.create_task(
+                convert_and_send_audio(websocket, stream_sid, sentence_buffer)
+            )
+            sentence_tasks.append(task)
+        
+        # 모든 TTS 변환/전송이 완료될 때까지 대기
+        if sentence_tasks:
+            await asyncio.gather(*sentence_tasks, return_exceptions=True)
+        
+        pipeline_time = time.time() - pipeline_start
+        final_text = "".join(full_response)
+        
+        logger.info(f"\n{'='*60}")
+        logger.info(f"✅ 스트리밍 파이프라인 완료")
+        logger.info(f"⏱️  총 소요 시간: {pipeline_time:.2f}초")
+        logger.info(f"📤 전체 응답: {final_text}")
+        logger.info(f"{'='*60}\n")
+        
+        return final_text
+        
+    except Exception as e:
+        logger.error(f"❌ 스트리밍 파이프라인 오류: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         return ""
 
 
@@ -786,10 +994,16 @@ async def voice_handler():
 @app.websocket("/api/twilio/media-stream")
 async def media_stream_handler(websocket: WebSocket):
     """
-    Twilio Media Streams WebSocket 핸들러
-    실시간 오디오 데이터 양방향 처리
+    Twilio Media Streams WebSocket 핸들러 (실시간 STT 적용)
     
-    STT → LLM → TTS 파이프라인을 통한 실시간 음성 대화
+    실시간 오디오 데이터 양방향 처리:
+    1. 오디오 청크 수신 및 버퍼링
+    2. 침묵 감지 시 실시간 STT 변환
+    3. 변환된 텍스트를 실시간으로 누적
+    4. 각 발화마다 즉시 AI 응답 생성 및 TTS 재생
+    5. 통화 종료 시 전체 대화 내용 저장
+    
+    실시간 STT → LLM → TTS 파이프라인
     """
     await websocket.accept()
     logger.info("📞 Twilio WebSocket 연결됨")
@@ -803,8 +1017,8 @@ async def media_stream_handler(websocket: WebSocket):
             data = json.loads(message)
             event_type = data.get('event')
             
+            # ========== 1. 스트림 시작 ==========
             if event_type == 'start':
-                # 스트림 시작
                 call_sid = data['start']['callSid']
                 stream_sid = data['start']['streamSid']
                 audio_processor = AudioProcessor(call_sid)
@@ -814,80 +1028,113 @@ async def media_stream_handler(websocket: WebSocket):
                 if call_sid not in conversation_sessions:
                     conversation_sessions[call_sid] = []
                 
-                logger.info(f"🎙️ 스트림 시작 - Call: {call_sid}, Stream: {stream_sid}")
+                logger.info(f"┌{'─'*58}┐")
+                logger.info(f"│ 🎙️  Twilio 통화 시작                                   │")
+                logger.info(f"│ Call SID: {call_sid:43} │")
+                logger.info(f"│ Stream SID: {stream_sid:41} │")
+                logger.info(f"└{'─'*58}┘")
                 
                 # 시작 안내 메시지 (TTS 서비스 사용)
                 welcome_text = "안녕하세요! 무엇을 도와드릴까요?"
                 await send_audio_to_twilio_with_tts(websocket, stream_sid, welcome_text)
                 
+            # ========== 2. 오디오 데이터 수신 및 실시간 STT 처리 ==========
             elif event_type == 'media':
-                # 오디오 데이터 수신 (실시간 스트리밍)
                 if audio_processor:
                     # Base64 디코딩 (Twilio는 mulaw 8kHz로 전송)
                     audio_payload = base64.b64decode(data['media']['payload'])
                     audio_processor.add_audio_chunk(audio_payload)
                     
-                    # 사용자가 말을 멈췄는지 확인 (침묵 감지)
+                    # 사용자가 말을 멈췄는지 확인 (침묵 감지 - 1초로 단축!)
                     if audio_processor.should_process():
                         cycle_start = time.time()
                         logger.info(f"\n{'='*60}")
-                        logger.info(f"🔄 실시간 대화 사이클 시작")
+                        logger.info(f"🎯 발화 종료 감지 → 즉시 스트리밍 응답")
+                        logger.info(f"{'='*60}")
                         
-                        # 1️⃣ STT: 오디오 → 텍스트 변환
+                        # 1️⃣ STT: 오디오 → 텍스트 변환 (실시간 청크 기반)
                         audio_data = audio_processor.get_audio()
-                        user_text = await transcribe_audio_realtime(audio_data)
+                        user_text, stt_time = await transcribe_audio_realtime(audio_data)
                         
-                        if user_text:
-                            logger.info(f"👤 사용자: {user_text}")
+                        if user_text and user_text.strip():
+                            logger.info(f"✅ STT 완료 ({stt_time:.2f}초)")
+                            logger.info(f"👤 [사용자 발화] {user_text}")
+                            
+                            # 변환된 텍스트를 버퍼에 저장 (전체 대화 추적용)
+                            audio_processor.add_transcript(user_text)
                             
                             # 종료 키워드 확인
                             if any(keyword in user_text.lower() 
                                    for keyword in ['종료', '끝', '그만', 'goodbye', '끊어', '안녕']):
+                                logger.info(f"🛑 종료 키워드 감지: '{user_text}'")
                                 goodbye_text = "대화를 종료합니다. 감사합니다. 좋은 하루 보내세요!"
                                 await send_audio_to_twilio_with_tts(websocket, stream_sid, goodbye_text)
                                 await asyncio.sleep(2)  # 마지막 메시지 재생 대기
                                 await websocket.close()
                                 break
                             
-                            # 2️⃣ LLM: 응답 생성
+                            # 2️⃣+3️⃣ LLM 스트리밍 + TTS 병렬 처리
+                            # 이것이 핵심 최적화!
+                            # LLM이 문장을 생성하면 즉시 TTS 변환하여 전송
                             conversation_history = conversation_sessions.get(call_sid, [])
-                            ai_response, llm_time = llm_service.generate_response(
-                                user_message=user_text,
-                                conversation_history=conversation_history
-                            )
-                            logger.info(f"🤖 AI: {ai_response}")
                             
-                            # 대화 히스토리 저장 (최근 10개만)
+                            ai_response = await process_streaming_response(
+                                websocket,
+                                stream_sid,
+                                user_text,
+                                conversation_history
+                            )
+                            
+                            # 대화 히스토리 저장 (최근 10개만 유지)
                             conversation_sessions[call_sid].append({"role": "user", "content": user_text})
                             conversation_sessions[call_sid].append({"role": "assistant", "content": ai_response})
                             if len(conversation_sessions[call_sid]) > 10:
                                 conversation_sessions[call_sid] = conversation_sessions[call_sid][-10:]
                             
-                            # 3️⃣ TTS: 텍스트 → 음성 → Twilio 전송
-                            await send_audio_to_twilio_with_tts(websocket, stream_sid, ai_response)
-                            
                             total_cycle_time = time.time() - cycle_start
-                            logger.info(f"⏱️  전체 사이클 완료: {total_cycle_time:.2f}초")
+                            logger.info(f"⏱️  전체 응답 사이클: {total_cycle_time:.2f}초")
                             logger.info(f"{'='*60}\n")
+                        else:
+                            logger.debug("⏭️  STT 결과 없음 (침묵 또는 잡음)")
                         
+            # ========== 3. 스트림 종료 ==========
             elif event_type == 'stop':
-                # 스트림 종료
-                logger.info(f"📞 스트림 종료 - Call: {call_sid}")
+                logger.info(f"\n{'='*60}")
+                logger.info(f"📞 Twilio 통화 종료 - Call: {call_sid}")
+                logger.info(f"{'='*60}")
+                
+                # 전체 대화 내용 확인
+                if audio_processor:
+                    full_transcript = audio_processor.get_full_transcript()
+                    if full_transcript:
+                        logger.info(f"\n📋 전체 대화 내용:")
+                        logger.info(f"─" * 60)
+                        logger.info(f"{full_transcript}")
+                        logger.info(f"─" * 60)
+                
+                # 대화 세션 정리
                 if call_sid in conversation_sessions:
-                    # 통화 내용 저장 가능 (향후 일기 생성 등에 활용)
                     conversation = conversation_sessions[call_sid]
-                    logger.info(f"💾 대화 내용 저장 가능: {len(conversation)}개 메시지")
+                    logger.info(f"💾 대화 기록: {len(conversation)}개 메시지 저장 가능")
                     
-                    # TODO: 일기 생성 로직 추가 (llm_service.summarize_conversation_to_diary 사용)
-                    # TODO: 일정 추출 로직 추가 (llm_service.extract_schedule_from_conversation 사용)
+                    # TODO: 일기 생성 로직 추가
+                    # diary = llm_service.summarize_conversation_to_diary(conversation)
+                    
+                    # TODO: 일정 추출 로직 추가
+                    # schedules = llm_service.extract_schedule_from_conversation(conversation)
                     
                     del conversation_sessions[call_sid]
+                
                 if call_sid in active_connections:
                     del active_connections[call_sid]
+                
+                logger.info(f"┌{'─'*58}┐")
+                logger.info(f"│ ✅ Twilio 통화 정리 완료                               │")
+                logger.info(f"└{'─'*58}┘\n")
                 break
                 
     except WebSocketDisconnect:
-        logger.info("📞 Twilio WebSocket 연결 해제")
+        logger.info(f"📞 Twilio WebSocket 연결 해제 (Call: {call_sid})")
     except Exception as e:
         logger.error(f"❌ Twilio WebSocket 오류: {str(e)}")
         import traceback

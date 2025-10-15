@@ -10,6 +10,7 @@ from pathlib import Path
 import time
 import tempfile
 import os
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +113,80 @@ class TTSService:
             import traceback
             logger.error(f"상세 오류:\n{traceback.format_exc()}")
             raise
+    
+    async def text_to_speech_sentence(self, text: str):
+        """
+        단일 문장을 빠르게 음성으로 변환 (스트리밍 최적화용)
+        
+        LLM이 문장 단위로 생성하면 즉시 TTS 변환하여
+        사용자 대기 시간을 최소화합니다.
+        
+        OpenAI TTS API는 스트리밍을 지원하지 않으므로,
+        짧은 문장 단위로 빠르게 변환하는 방식을 사용합니다.
+        
+        Args:
+            text: 변환할 문장 (짧은 텍스트 권장)
+        
+        Returns:
+            tuple: (음성 데이터 bytes, 실행 시간)
+            - 실패 시 (None, 0) 반환
+        
+        Example:
+            audio_data, tts_time = await tts_service.text_to_speech_sentence("안녕하세요")
+            if audio_data:
+                # Twilio로 전송
+        """
+        try:
+            start_time = time.time()
+            
+            # 빈 문장 체크
+            if not text or len(text.strip()) < 2:
+                logger.debug("⏭️  빈 문장, TTS 건너뜀")
+                return None, 0
+            
+            logger.info(f"🔊 TTS 문장 변환: {text[:50]}...")
+            
+            # 비동기로 TTS API 호출 (블로킹 방지)
+            loop = asyncio.get_event_loop()
+            audio_content = await loop.run_in_executor(
+                None,
+                self._tts_sync,
+                text
+            )
+            
+            elapsed_time = time.time() - start_time
+            
+            if audio_content:
+                logger.info(f"✅ TTS 완료 ({elapsed_time:.2f}초, {len(audio_content)} bytes)")
+                return audio_content, elapsed_time
+            else:
+                logger.error("❌ TTS 응답이 비어있습니다")
+                return None, 0
+            
+        except Exception as e:
+            logger.error(f"❌ TTS 변환 실패: {e}")
+            return None, 0
+    
+    def _tts_sync(self, text: str) -> bytes:
+        """
+        동기 방식 TTS 변환 (executor에서 실행용)
+        
+        이 메서드는 직접 호출하지 마세요.
+        text_to_speech_sentence()에서 내부적으로 사용됩니다.
+        
+        Args:
+            text: 변환할 텍스트
+        
+        Returns:
+            bytes: WAV 음성 데이터
+        """
+        response = self.client.audio.speech.create(
+            model=self.model,
+            voice=self.voice,
+            input=text,
+            response_format="wav"
+        )
+        return response.content
     
     def text_to_speech_streaming(self, text: str):
         """
