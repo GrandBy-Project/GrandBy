@@ -95,6 +95,9 @@ services:
       SMTP_FROM_NAME: ${SMTP_FROM_NAME:-그랜비 Grandby}
       ENABLE_EMAIL: ${ENABLE_EMAIL:-true}
       
+      # Auto Seed (자동 더미 데이터 생성)
+      AUTO_SEED: ${AUTO_SEED:-true}
+      
     ports:
       - "8000:8000"
     volumes:
