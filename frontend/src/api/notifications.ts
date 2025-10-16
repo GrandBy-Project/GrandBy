@@ -27,3 +27,4 @@ export const getUnreadCount = async (): Promise<number> => {
   return notifications.filter(n => !n.is_read).length;
 };
 
+
