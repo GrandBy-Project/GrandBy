@@ -29,8 +29,12 @@ from app.services.ai_call.tts_service import TTSService
 from app.services.ai_call.llm_service import LLMService
 from app.services.ai_call.twilio_service import TwilioService
 
-# 로거 설정
-logging.basicConfig(level=settings.LOG_LEVEL)
+# 로거 설정 (시간 포함)
+logging.basicConfig(
+    level=settings.LOG_LEVEL,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 logger = logging.getLogger(__name__)
 
 # OpenAI 클라이언트 및 서비스 초기화
@@ -58,27 +62,93 @@ class AudioProcessor:
         self.audio_buffer = []  # 오디오 청크 버퍼
         self.transcript_buffer = []  # 실시간 STT 결과 버퍼
         self.is_speaking = False  # 사용자가 말하고 있는지 여부
-        self.silence_threshold = 500  # 침묵 감지 임계값 (RMS)
+        # mulaw RMS 범위에 맞게 임계값 조정 (0~127)
+        self.silence_threshold = 20  # 침묵 감지 임계값 (RMS)
         self.silence_duration = 0  # 현재 침묵 지속 시간
         self.max_silence = 1.0  # ⭐ 1초 침묵 후 STT 처리 (응답 속도 최적화)
+
+        # 초기 노이즈 필터링
+        self.warmup_chunks = 0  # 받은 청크 수
+        self.warmup_threshold = 25  # 처음 0.5초 무시
         
+        # 연속 음성 감지
+        self.voice_chunks = 0  # 연속 음성 감지 카운터
+        self.voice_threshold = 3  # 최소 3번 연속 감지
+        
+        # TTS 재생 상태 (에코 방지)
+        self.is_bot_speaking = False
+        self.bot_silence_delay = 0
+        
+    # def add_audio_chunk(self, audio_data: bytes):
+    #     """오디오 청크 추가"""
+    #     self.audio_buffer.append(audio_data)
+        
+    #     # 음성 활동 감지 (RMS - Root Mean Square)
+    #     rms = audioop.rms(audio_data, 2)  # 16-bit audio
+        
+    #     if rms > self.silence_threshold:
+    #         self.is_speaking = True
+    #         self.silence_duration = 0
+    #     else:
+    #         if self.is_speaking:
+    #             self.silence_duration += 0.02  # 20ms per chunk
+
     def add_audio_chunk(self, audio_data: bytes):
-        """오디오 청크 추가"""
+        """오디오 청크 추가 및 음성 활동 감지"""
         self.audio_buffer.append(audio_data)
         
-        # 음성 활동 감지 (RMS - Root Mean Square)
-        rms = audioop.rms(audio_data, 2)  # 16-bit audio
+        # 워밍업: 초기 청크 무시 (연결 노이즈 방지)
+        self.warmup_chunks += 1
+        if self.warmup_chunks <= self.warmup_threshold:
+            if self.warmup_chunks == 1:
+                logger.info("⏳ 오디오 초기화 중...")
+            return
         
+        # AI가 말하는 동안 + 종료 후 1초간 사용자 입력 무시 (에코 방지)
+        if self.is_bot_speaking or self.bot_silence_delay > 0:
+            if self.bot_silence_delay > 0:
+                self.bot_silence_delay -= 1
+                if self.bot_silence_delay == 0:
+                    logger.info("✅ AI 응답 종료 후 대기 완료, 사용자 입력 재개")
+            return
+        
+        # RMS 계산 (음량 측정)
+        rms = audioop.rms(audio_data, 1)
+        
+        # 비정상적으로 큰 RMS 값 필터링 (연결음, 에러 등)
+        if rms > 100:
+            logger.warning(f"⚠️  비정상적인 RMS 무시: {rms}")
+            self.voice_chunks = 0
+            return
+        
+        # 음성 활동 감지
         if rms > self.silence_threshold:
-            self.is_speaking = True
-            self.silence_duration = 0
+            self.voice_chunks += 1
+            
+            # 연속으로 여러 번 감지되어야 음성으로 인정
+            if self.voice_chunks >= self.voice_threshold:
+                if not self.is_speaking:
+                    logger.info(f"🎤 [음성 감지] 말하기 시작 (RMS: {rms})")
+                self.is_speaking = True
+                self.silence_duration = 0
         else:
+            # 조용하면 음성 카운터 리셋
+            self.voice_chunks = 0
+            
+            # 이전에 말하고 있었다면 침묵 카운터 증가
             if self.is_speaking:
+                if self.silence_duration == 0:
+                    logger.info(f"🔇 [침묵 감지] 말을 멈춤")
+                
                 self.silence_duration += 0.02  # 20ms per chunk
+                
+                # 침묵 진행 상황 (0.5초마다)
+                if int(self.silence_duration * 10) % 5 == 0:
+                    logger.debug(f"⏱️  침묵: {self.silence_duration:.1f}초 / {self.max_silence}초")
                 
     def should_process(self) -> bool:
         """오디오 처리가 필요한지 확인 (사용자가 말을 멈췄는지)"""
-        return (self.is_speaking and 
+        return (self.is_speaking and
                 self.silence_duration >= self.max_silence and 
                 len(self.audio_buffer) > 0)
     
@@ -114,6 +184,21 @@ class AudioProcessor:
             str: 공백으로 결합된 전체 대화 텍스트
         """
         return " ".join(self.transcript_buffer)
+    
+    def start_bot_speaking(self):
+        """AI 응답 시작 - 사용자 입력 차단 (에코 방지)"""
+        logger.info("🤖 [에코 방지] AI 응답 중 - 사용자 입력 차단")
+        self.is_bot_speaking = True
+        # 기존 상태 초기화
+        self.is_speaking = False
+        self.voice_chunks = 0
+        self.silence_duration = 0
+    
+    def stop_bot_speaking(self):
+        """AI 응답 종료 - 1초 대기 후 사용자 입력 재개"""
+        self.is_bot_speaking = False
+        self.bot_silence_delay = 50  # 50개 청크 = 1초 대기
+        logger.info("🤖 [에코 방지] AI 응답 종료 - 1초 후 사용자 입력 재개")
 
 
 # ==================== Helper Functions ====================
@@ -247,7 +332,8 @@ async def process_streaming_response(
     websocket: WebSocket,
     stream_sid: str,
     user_text: str,
-    conversation_history: list
+    conversation_history: list,
+    audio_processor=None
 ) -> str:
     """
     스트리밍 방식으로 LLM → TTS → Twilio 전송을 병렬 처리
@@ -272,6 +358,10 @@ async def process_streaming_response(
         str: 생성된 전체 AI 응답
     """
     import re
+    
+    # TTS 시작 알림 (에코 방지)
+    if audio_processor:
+        audio_processor.start_bot_speaking()
     
     try:
         logger.info(f"\n{'='*60}")
@@ -344,9 +434,13 @@ async def process_streaming_response(
         import traceback
         logger.error(traceback.format_exc())
         return ""
+    finally:
+        # TTS 종료 알림 (에코 방지)
+        if audio_processor:
+            audio_processor.stop_bot_speaking()
 
 
-async def send_audio_to_twilio_with_tts(websocket: WebSocket, stream_sid: str, text: str):
+async def send_audio_to_twilio_with_tts(websocket: WebSocket, stream_sid: str, text: str, audio_processor=None):
     """
     TTS Service를 사용하여 텍스트를 음성으로 변환 후 Twilio WebSocket으로 전송
     WAV → mulaw 변환 포함
@@ -355,7 +449,12 @@ async def send_audio_to_twilio_with_tts(websocket: WebSocket, stream_sid: str, t
         websocket: Twilio WebSocket 연결
         stream_sid: Twilio Stream SID
         text: 변환할 텍스트
+        audio_processor: AudioProcessor 인스턴스 (에코 방지용)
     """
+    # TTS 시작 알림 (에코 방지)
+    if audio_processor:
+        audio_processor.start_bot_speaking()
+    
     try:
         import wave
         import io
@@ -478,6 +577,10 @@ async def send_audio_to_twilio_with_tts(websocket: WebSocket, stream_sid: str, t
         logger.error(f"❌ 음성 전송 오류: {str(e)}")
         import traceback
         logger.error(traceback.format_exc())
+    finally:
+        # TTS 종료 알림 (에코 방지)
+        if audio_processor:
+            audio_processor.stop_bot_speaking()
 
 
 # Lifespan 이벤트 (startup/shutdown)
@@ -968,10 +1071,10 @@ async def voice_handler():
     response = VoiceResponse()
     
     # 환영 메시지
-    response.say(
-        "안녕하세요. AI 어시스턴트에 연결되었습니다.",
-        language='ko-KR'
-    )
+    # response.say(
+    #     "안녕하세요. AI 어시스턴트에 연결되었습니다.",
+    #     language='ko-KR'
+    # )
     
     # WebSocket 스트림 연결 설정
     if not settings.API_BASE_URL:
@@ -1036,7 +1139,7 @@ async def media_stream_handler(websocket: WebSocket):
                 
                 # 시작 안내 메시지 (TTS 서비스 사용)
                 welcome_text = "안녕하세요! 무엇을 도와드릴까요?"
-                await send_audio_to_twilio_with_tts(websocket, stream_sid, welcome_text)
+                await send_audio_to_twilio_with_tts(websocket, stream_sid, welcome_text, audio_processor)
                 
             # ========== 2. 오디오 데이터 수신 및 실시간 STT 처리 ==========
             elif event_type == 'media':
@@ -1048,7 +1151,7 @@ async def media_stream_handler(websocket: WebSocket):
                     # 사용자가 말을 멈췄는지 확인 (침묵 감지 - 1초로 단축!)
                     if audio_processor.should_process():
                         cycle_start = time.time()
-                        logger.info(f"\n{'='*60}")
+                        logger.info(f"{'='*60}")
                         logger.info(f"🎯 발화 종료 감지 → 즉시 스트리밍 응답")
                         logger.info(f"{'='*60}")
                         
@@ -1068,7 +1171,7 @@ async def media_stream_handler(websocket: WebSocket):
                                    for keyword in ['종료', '끝', '그만', 'goodbye', '끊어', '안녕']):
                                 logger.info(f"🛑 종료 키워드 감지: '{user_text}'")
                                 goodbye_text = "대화를 종료합니다. 감사합니다. 좋은 하루 보내세요!"
-                                await send_audio_to_twilio_with_tts(websocket, stream_sid, goodbye_text)
+                                await send_audio_to_twilio_with_tts(websocket, stream_sid, goodbye_text, audio_processor)
                                 await asyncio.sleep(2)  # 마지막 메시지 재생 대기
                                 await websocket.close()
                                 break
@@ -1082,7 +1185,8 @@ async def media_stream_handler(websocket: WebSocket):
                                 websocket,
                                 stream_sid,
                                 user_text,
-                                conversation_history
+                                conversation_history,
+                                audio_processor
                             )
                             
                             # 대화 히스토리 저장 (최근 10개만 유지)
@@ -1093,7 +1197,7 @@ async def media_stream_handler(websocket: WebSocket):
                             
                             total_cycle_time = time.time() - cycle_start
                             logger.info(f"⏱️  전체 응답 사이클: {total_cycle_time:.2f}초")
-                            logger.info(f"{'='*60}\n")
+                            logger.info(f"{'='*60}\n\n")
                         else:
                             logger.debug("⏭️  STT 결과 없음 (침묵 또는 잡음)")
                         

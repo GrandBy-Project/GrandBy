@@ -150,7 +150,8 @@ class STTService:
                     model=self.model,
                     file=audio_file,
                     response_format="verbose_json",
-                    timestamp_granularities=["segment"]
+                    timestamp_granularities=["segment"],
+                    temperature=0.0
                 )
             return transcript
         except Exception as e:
