@@ -40,6 +40,7 @@ RUN useradd -m -u 1000 app && \
 RUN apt-get update && apt-get install -y \
     libpq5 \
     curl \
+    netcat-traditional \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
@@ -56,6 +57,10 @@ COPY --chown=app:app ./scripts ./scripts
 COPY --chown=app:app ./alembic.ini ./alembic.ini
 COPY --chown=app:app ./requirements.txt .
 
+# Copy and set permissions for entrypoint script
+COPY --chown=app:app ./scripts/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 # Switch to app user
 USER app
 
@@ -65,6 +70,9 @@ EXPOSE 8000
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
+
+# Set entrypoint
+ENTRYPOINT ["/entrypoint.sh"]
 
 # Default command (can be overridden in docker-compose.yml)
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
