@@ -1,8 +1,8 @@
-"""Initial tables
+"""Initial tables with all columns
 
-Revision ID: 7c30e54c1546
+Revision ID: aec47b8e33b6
 Revises: 
-Create Date: 2025-10-10 07:27:51.349843
+Create Date: 2025-10-16 02:17:59.783128
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '7c30e54c1546'
+revision: str = 'aec47b8e33b6'
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -142,8 +142,17 @@ def upgrade() -> None:
     sa.Column('call_id', sa.String(length=36), nullable=True),
     sa.Column('title', sa.String(length=200), nullable=False),
     sa.Column('description', sa.Text(), nullable=True),
+    sa.Column('category', sa.Enum('MEDICINE', 'EXERCISE', 'MEAL', 'HOSPITAL', 'OTHER', name='todocategory'), nullable=True),
     sa.Column('due_date', sa.Date(), nullable=False),
     sa.Column('due_time', sa.Time(), nullable=True),
+    sa.Column('is_recurring', sa.Boolean(), nullable=True),
+    sa.Column('recurring_type', sa.Enum('DAILY', 'WEEKLY', 'MONTHLY', name='recurringtype'), nullable=True),
+    sa.Column('recurring_interval', sa.Integer(), nullable=True),
+    sa.Column('recurring_days', sa.ARRAY(sa.Integer()), nullable=True),
+    sa.Column('recurring_day_of_month', sa.Integer(), nullable=True),
+    sa.Column('recurring_start_date', sa.Date(), nullable=True),
+    sa.Column('recurring_end_date', sa.Date(), nullable=True),
+    sa.Column('parent_recurring_id', sa.String(length=36), nullable=True),
     sa.Column('creator_type', sa.Enum('CAREGIVER', 'AI', 'ELDERLY', name='creatortype'), nullable=False),
     sa.Column('status', sa.Enum('PENDING', 'COMPLETED', 'CANCELLED', name='todostatus'), nullable=True),
     sa.Column('is_confirmed', sa.Boolean(), nullable=True),
@@ -153,6 +162,7 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['call_id'], ['call_logs.call_id'], ),
     sa.ForeignKeyConstraint(['creator_id'], ['users.user_id'], ),
     sa.ForeignKeyConstraint(['elderly_id'], ['users.user_id'], ),
+    sa.ForeignKeyConstraint(['parent_recurring_id'], ['todos.todo_id'], ),
     sa.PrimaryKeyConstraint('todo_id')
     )
     op.create_table('diary_comments',
@@ -195,4 +205,3 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_users_email'), table_name='users')
     op.drop_table('users')
     # ### end Alembic commands ###
-
