@@ -1,7 +1,7 @@
 /**
  * 어르신 전용 홈 화면
  */
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,11 +9,14 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { useAuthStore } from '../store/authStore';
 import { useRouter } from 'expo-router';
 import { BottomNavigationBar, Header } from '../components';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as todoApi from '../api/todo';
+import { Colors } from '../constants/Colors';
 
 // 커스텀 아이콘 컴포넌트들
 const CheckIcon = ({ size = 24, color = '#34B79F' }: { size?: number; color?: string }) => (
@@ -220,6 +223,41 @@ export const ElderlyHomeScreen = () => {
   const { user, logout } = useAuthStore();
   const insets = useSafeAreaInsets();
   const [isLargeView, setIsLargeView] = useState(false);
+  const [todayTodos, setTodayTodos] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // 오늘의 할 일 불러오기
+  useEffect(() => {
+    loadTodayTodos();
+  }, []);
+
+  const loadTodayTodos = async () => {
+    try {
+      const todos = await todoApi.getTodos('today');
+      setTodayTodos(todos);
+    } catch (error) {
+      console.error('오늘 할 일 불러오기 실패:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // 카테고리 한글 이름 변환
+  const getCategoryName = (category: string): string => {
+    const categoryMap: Record<string, string> = {
+      'MEDICINE': '복약',
+      'medicine': '복약',
+      'HOSPITAL': '병원',
+      'hospital': '병원',
+      'EXERCISE': '운동',
+      'exercise': '운동',
+      'MEAL': '식사',
+      'meal': '식사',
+      'OTHER': '기타',
+      'other': '기타',
+    };
+    return categoryMap[category] || '기타';
+  };
 
   const handleLogout = async () => {
     Alert.alert(
@@ -343,38 +381,46 @@ export const ElderlyHomeScreen = () => {
         <View style={styles.scheduleCard}>
           <View style={styles.cardHeader}>
             <Text style={[styles.cardTitle, isLargeView && styles.cardTitleLarge]}>오늘의 일정</Text>
-            <TouchableOpacity>
+            <TouchableOpacity onPress={() => router.push('/todos')}>
               <Text style={[styles.viewAllText, isLargeView && styles.viewAllTextLarge]}>전체보기</Text>
             </TouchableOpacity>
           </View>
           
-          <View style={styles.scheduleItem}>
-            <View style={styles.scheduleTime}>
-              <Text style={[styles.scheduleTimeText, isLargeView && styles.scheduleTimeTextLarge]}>16:00</Text>
+          {isLoading ? (
+            <View style={{ paddingVertical: 40, alignItems: 'center' }}>
+              <ActivityIndicator size="large" color={Colors.primary} />
             </View>
-            <View style={styles.scheduleContent}>
-              <Text style={[styles.scheduleTitle, isLargeView && styles.scheduleTitleLarge]}>정형외과 진료</Text>
-              <Text style={[styles.scheduleLocation, isLargeView && styles.scheduleLocationLarge]}>서울대학교병원 정형외과</Text>
-              <Text style={[styles.scheduleDate, isLargeView && styles.scheduleDateLarge]}>무릎 관절 정기검진</Text>
+          ) : todayTodos.length === 0 ? (
+            <View style={{ paddingVertical: 40, alignItems: 'center' }}>
+              <Text style={{ fontSize: 16, color: '#999999' }}>오늘 할 일이 없습니다</Text>
             </View>
-            <View style={styles.scheduleStatus}>
-              <Text style={[styles.scheduleStatusText, isLargeView && styles.scheduleStatusTextLarge]}>예정</Text>
-            </View>
-          </View>
-
-          <View style={styles.scheduleItem}>
-            <View style={styles.scheduleTime}>
-              <Text style={[styles.scheduleTimeText, isLargeView && styles.scheduleTimeTextLarge]}>19:00</Text>
-            </View>
-            <View style={styles.scheduleContent}>
-              <Text style={[styles.scheduleTitle, isLargeView && styles.scheduleTitleLarge]}>저녁 복약</Text>
-              <Text style={[styles.scheduleLocation, isLargeView && styles.scheduleLocationLarge]}>혈압약, 당뇨약 복용</Text>
-              <Text style={[styles.scheduleDate, isLargeView && styles.scheduleDateLarge]}>식후 30분 복용</Text>
-            </View>
-            <View style={styles.scheduleStatus}>
-              <Text style={[styles.scheduleStatusText, isLargeView && styles.scheduleStatusTextLarge]}>완료</Text>
-            </View>
-          </View>
+          ) : (
+            todayTodos.slice(0, 3).map((todo, index) => (
+              <View key={todo.todo_id} style={styles.scheduleItem}>
+                <View style={styles.scheduleTime}>
+                  <Text style={[styles.scheduleTimeText, isLargeView && styles.scheduleTimeTextLarge]}>
+                    {todo.due_time ? todo.due_time.substring(0, 5) : '시간미정'}
+                  </Text>
+                </View>
+                <View style={styles.scheduleContent}>
+                  <Text style={[styles.scheduleTitle, isLargeView && styles.scheduleTitleLarge]}>
+                    {todo.title}
+                  </Text>
+                  <Text style={[styles.scheduleLocation, isLargeView && styles.scheduleLocationLarge]}>
+                    {todo.description || ''}
+                  </Text>
+                  <Text style={[styles.scheduleDate, isLargeView && styles.scheduleDateLarge]}>
+                    {todo.category ? `[${getCategoryName(todo.category)}]` : ''}
+                  </Text>
+                </View>
+                <View style={styles.scheduleStatus}>
+                  <Text style={[styles.scheduleStatusText, isLargeView && styles.scheduleStatusTextLarge]}>
+                    {todo.status === 'COMPLETED' || todo.status === 'completed' ? '완료' : '예정'}
+                  </Text>
+                </View>
+              </View>
+            ))
+          )}
         </View>
 
         {/* 건강 상태 요약 */}

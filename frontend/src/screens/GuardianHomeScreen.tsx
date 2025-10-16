@@ -1,7 +1,7 @@
 /**
  * 보호자 전용 홈 화면
  */
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,11 +9,15 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
+  ActivityIndicator,
+  Modal,
+  TextInput,
 } from 'react-native';
 import { useAuthStore } from '../store/authStore';
 import { useRouter } from 'expo-router';
 import { BottomNavigationBar, Header } from '../components';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as todoApi from '../api/todo';
 
 interface ElderlyProfile {
   id: string;
@@ -42,6 +46,20 @@ export const GuardianHomeScreen = () => {
   const insets = useSafeAreaInsets();
   const [currentElderlyIndex, setCurrentElderlyIndex] = useState(0);
   const [activeTab, setActiveTab] = useState<TabType>('family');
+  const [todayTodos, setTodayTodos] = useState<todoApi.TodoItem[]>([]);
+  const [isLoadingTodos, setIsLoadingTodos] = useState(false);
+  const [selectedTodo, setSelectedTodo] = useState<todoApi.TodoItem | null>(null);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [editedTodo, setEditedTodo] = useState({
+    title: '',
+    description: '',
+    category: '',
+    time: '',
+  });
+  const [showCategoryPicker, setShowCategoryPicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   // 연결된 어르신 목업 데이터
   const connectedElderly: ElderlyProfile[] = [
@@ -251,27 +269,39 @@ export const GuardianHomeScreen = () => {
 
           {/* 할일 목록 */}
           <View style={styles.tasksList}>
-            {todayTasks.map((task: Task) => (
-              <TouchableOpacity
-                key={task.id}
-                style={[
-                  styles.taskItem,
-                  task.completed && styles.taskItemCompleted
-                ]}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.taskIcon}>{task.icon}</Text>
-                <Text style={[
-                  styles.taskTitle,
-                  task.completed && styles.taskTitleCompleted
-                ]}>
-                  {task.title}
-                </Text>
-                {task.completed && (
-                  <Text style={styles.taskCompletedIcon}>✓</Text>
-                )}
-              </TouchableOpacity>
-            ))}
+            {isLoadingTodos ? (
+              <ActivityIndicator size="large" color="#34B79F" style={{ marginVertical: 20 }} />
+            ) : todayTodos.length === 0 ? (
+              <Text style={{ textAlign: 'center', color: '#999', paddingVertical: 20 }}>
+                오늘 등록된 할 일이 없습니다
+              </Text>
+            ) : (
+              todayTodos.map((todo) => (
+                <TouchableOpacity
+                  key={todo.todo_id}
+                  style={[
+                    styles.taskItem,
+                    todo.status === 'completed' && styles.taskItemCompleted
+                  ]}
+                  activeOpacity={0.7}
+                  onPress={() => {
+                    setSelectedTodo(todo);
+                    setShowEditModal(true);
+                  }}
+                >
+                  <Text style={styles.taskIcon}>{getCategoryIcon(todo.category)}</Text>
+                  <Text style={[
+                    styles.taskTitle,
+                    todo.status === 'completed' && styles.taskTitleCompleted
+                  ]}>
+                    {todo.title}
+                  </Text>
+                  {todo.status === 'completed' && (
+                    <Text style={styles.taskCompletedIcon}>✓</Text>
+                  )}
+                </TouchableOpacity>
+              ))
+            )}
           </View>
 
           {/* 새 할일 추가 버튼 */}
@@ -527,33 +557,250 @@ export const GuardianHomeScreen = () => {
     },
   ];
 
-  // 현재 선택된 어르신의 오늘 할일 데이터
-  const getTodayTasksForElderly = (elderlyId: string): Task[] => {
-    const tasksByElderly: Record<string, Task[]> = {
-      '1': [
-        { id: 1, icon: '💊', title: '아침 약 드시기', completed: true },
-        { id: 2, icon: '🏃', title: '산책하기 (30분)', completed: true },
-        { id: 3, icon: '🍽️', title: '점심 식사', completed: true },
-        { id: 4, icon: '💊', title: '저녁 약 드시기', completed: false },
-        { id: 5, icon: '📞', title: 'AI 통화 (오후 7시)', completed: false },
-      ],
-      '2': [
-        { id: 1, icon: '💊', title: '혈압약 복용', completed: true },
-        { id: 2, icon: '🏥', title: '병원 방문 (정형외과)', completed: false },
-        { id: 3, icon: '🍽️', title: '식사 관리', completed: false },
-        { id: 4, icon: '📞', title: 'AI 통화 확인', completed: false },
-      ],
-      '3': [
-        { id: 1, icon: '💊', title: '당뇨약 복용', completed: true },
-        { id: 2, icon: '🏃', title: '가벼운 운동', completed: true },
-        { id: 3, icon: '👥', title: '이웃과 대화', completed: true },
-        { id: 4, icon: '📞', title: 'AI 통화', completed: true },
-      ],
-    };
-    return tasksByElderly[elderlyId] || [];
+  // 어르신의 오늘 TODO 불러오기
+  const loadTodosForElderly = async (elderlyId: string) => {
+    setIsLoadingTodos(true);
+    try {
+      const todos = await todoApi.getTodos('today', elderlyId);
+      setTodayTodos(todos);
+    } catch (error) {
+      console.error('TODO 로딩 실패:', error);
+    } finally {
+      setIsLoadingTodos(false);
+    }
   };
 
-  const todayTasks = getTodayTasksForElderly(currentElderly?.id || '1');
+  // 현재 어르신 변경 시 TODO 다시 로딩
+  useEffect(() => {
+    if (currentElderly) {
+      // 실제 elderly_id로 변환 필요 (현재는 Mock ID '1', '2', '3')
+      // TODO: connectedElderly를 실제 API로 교체 후 real elderly_id 사용
+      const realElderlyId = '39aa74fd-80f7-434e-baf7-1d09357ee623'; // 테스트용 고정 ID
+      loadTodosForElderly(realElderlyId);
+    }
+  }, [currentElderlyIndex]);
+
+  // 카테고리 아이콘 매핑
+  const getCategoryIcon = (category: string | null): string => {
+    const iconMap: Record<string, string> = {
+      'medicine': '💊',
+      'MEDICINE': '💊',
+      'exercise': '🏃',
+      'EXERCISE': '🏃',
+      'meal': '🍽️',
+      'MEAL': '🍽️',
+      'hospital': '🏥',
+      'HOSPITAL': '🏥',
+      'other': '📝',
+      'OTHER': '📝',
+    };
+    return iconMap[category || 'other'] || '📝';
+  };
+
+  // 카테고리 한국어 이름
+  const getCategoryName = (category: string | null): string => {
+    const nameMap: Record<string, string> = {
+      'medicine': '약 복용',
+      'MEDICINE': '약 복용',
+      'exercise': '운동',
+      'EXERCISE': '운동',
+      'meal': '식사',
+      'MEAL': '식사',
+      'hospital': '병원 방문',
+      'HOSPITAL': '병원 방문',
+      'other': '기타',
+      'OTHER': '기타',
+    };
+    return nameMap[category || 'other'] || '기타';
+  };
+
+  // 카테고리 옵션 (GuardianTodoAddScreen과 동일)
+  const categories = [
+    { id: 'MEDICINE', name: '💊 약 복용', color: '#FF6B6B' },
+    { id: 'HOSPITAL', name: '🏥 병원 방문', color: '#4ECDC4' },
+    { id: 'EXERCISE', name: '🏃 운동', color: '#45B7D1' },
+    { id: 'MEAL', name: '🍽️ 식사', color: '#96CEB4' },
+    { id: 'OTHER', name: '📝 기타', color: '#95A5A6' },
+  ];
+
+  // 시간 옵션
+  const timeOptions = [
+    '오전 6시', '오전 7시', '오전 8시', '오전 9시', '오전 10시',
+    '오전 11시', '오후 12시', '오후 1시', '오후 2시', '오후 3시',
+    '오후 4시', '오후 5시', '오후 6시', '오후 7시', '오후 8시',
+    '오후 9시', '오후 10시'
+  ];
+
+  // 시간을 "오전/오후 X시" 형식으로 변환
+  const formatTimeToDisplay = (time24: string | null): string => {
+    if (!time24) return '';
+    const [hour] = time24.split(':').map(Number);
+    if (hour === 0) return '오전 12시';
+    if (hour < 12) return `오전 ${hour}시`;
+    if (hour === 12) return '오후 12시';
+    return `오후 ${hour - 12}시`;
+  };
+
+  // "오전/오후 X시"를 24시간 형식으로 변환
+  const parseDisplayTimeToApi = (displayTime: string): string => {
+    const timeStr = displayTime.replace(/[^0-9]/g, '');
+    const hour = displayTime.includes('오후')
+      ? (parseInt(timeStr) === 12 ? 12 : parseInt(timeStr) + 12)
+      : (parseInt(timeStr) === 12 ? 0 : parseInt(timeStr));
+    return `${hour.toString().padStart(2, '0')}:00`;
+  };
+
+  // TODO 수정 모드 활성화
+  const handleEditMode = () => {
+    if (selectedTodo) {
+      setEditedTodo({
+        title: selectedTodo.title,
+        description: selectedTodo.description || '',
+        category: selectedTodo.category || '',
+        time: formatTimeToDisplay(selectedTodo.due_time),
+      });
+      setIsEditMode(true);
+    }
+  };
+
+  // TODO 수정 저장
+  const handleSaveEdit = async () => {
+    if (!editedTodo.title.trim()) {
+      Alert.alert('알림', '제목을 입력해주세요.');
+      return;
+    }
+
+    if (!editedTodo.category) {
+      Alert.alert('알림', '카테고리를 선택해주세요.');
+      return;
+    }
+
+    if (!editedTodo.time) {
+      Alert.alert('알림', '시간을 선택해주세요.');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const updateData: todoApi.TodoUpdateRequest = {
+        title: editedTodo.title,
+        description: editedTodo.description || undefined,
+        category: editedTodo.category.toUpperCase() as any,
+        due_time: parseDisplayTimeToApi(editedTodo.time),
+      };
+
+      await todoApi.updateTodo(selectedTodo!.todo_id, updateData);
+      
+      Alert.alert('수정 완료', '할 일이 수정되었습니다.', [
+        {
+          text: '확인',
+          onPress: () => {
+            setShowEditModal(false);
+            setSelectedTodo(null);
+            setIsEditMode(false);
+            // TODO 목록 새로고침
+            if (currentElderly) {
+              const realElderlyId = '39aa74fd-80f7-434e-baf7-1d09357ee623';
+              loadTodosForElderly(realElderlyId);
+            }
+          },
+        },
+      ]);
+    } catch (error) {
+      console.error('수정 실패:', error);
+      Alert.alert('수정 실패', '할 일 수정 중 오류가 발생했습니다.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // TODO 삭제 핸들러
+  const handleDeleteTodo = async (todoId: string, isRecurring: boolean) => {
+    if (isRecurring) {
+      // 반복 일정 삭제 옵션 선택
+      Alert.alert(
+        '반복 일정 삭제',
+        '어떻게 삭제하시겠습니까?',
+        [
+          {
+            text: '취소',
+            style: 'cancel',
+          },
+          {
+            text: '오늘만 삭제',
+            onPress: async () => {
+              try {
+                await todoApi.deleteTodo(todoId, false);
+                Alert.alert('삭제 완료', '할 일이 삭제되었습니다.');
+                setShowEditModal(false);
+                setSelectedTodo(null);
+                // TODO 목록 새로고침
+                if (currentElderly) {
+                  const realElderlyId = '39aa74fd-80f7-434e-baf7-1d09357ee623';
+                  loadTodosForElderly(realElderlyId);
+                }
+              } catch (error) {
+                console.error('삭제 실패:', error);
+                Alert.alert('삭제 실패', '할 일 삭제 중 오류가 발생했습니다.');
+              }
+            },
+          },
+          {
+            text: '모든 반복 일정 삭제',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                await todoApi.deleteTodo(todoId, true);
+                Alert.alert('삭제 완료', '반복 일정이 모두 삭제되었습니다.');
+                setShowEditModal(false);
+                setSelectedTodo(null);
+                // TODO 목록 새로고침
+                if (currentElderly) {
+                  const realElderlyId = '39aa74fd-80f7-434e-baf7-1d09357ee623';
+                  loadTodosForElderly(realElderlyId);
+                }
+              } catch (error) {
+                console.error('삭제 실패:', error);
+                Alert.alert('삭제 실패', '할 일 삭제 중 오류가 발생했습니다.');
+              }
+            },
+          },
+        ]
+      );
+    } else {
+      // 일반 TODO 삭제
+      Alert.alert(
+        '할 일 삭제',
+        '정말 삭제하시겠습니까?',
+        [
+          {
+            text: '취소',
+            style: 'cancel',
+          },
+          {
+            text: '삭제',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                await todoApi.deleteTodo(todoId, false);
+                Alert.alert('삭제 완료', '할 일이 삭제되었습니다.');
+                setShowEditModal(false);
+                setSelectedTodo(null);
+                // TODO 목록 새로고침
+                if (currentElderly) {
+                  const realElderlyId = '39aa74fd-80f7-434e-baf7-1d09357ee623';
+                  loadTodosForElderly(realElderlyId);
+                }
+              } catch (error) {
+                console.error('삭제 실패:', error);
+                Alert.alert('삭제 실패', '할 일 삭제 중 오류가 발생했습니다.');
+              }
+            },
+          },
+        ]
+      );
+    }
+  };
 
   // 탭 데이터
   const tabs = [
@@ -612,6 +859,268 @@ export const GuardianHomeScreen = () => {
         {/* 하단 여백 (네비게이션 바 공간 확보) */}
         <View style={[styles.bottomSpacer, { height: 100 + Math.max(insets.bottom, 10) }]} />
       </ScrollView>
+
+      {/* TODO 수정/삭제 모달 */}
+      <Modal
+        visible={showEditModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => {
+          setShowEditModal(false);
+          setSelectedTodo(null);
+          setIsEditMode(false);
+          setShowCategoryPicker(false);
+          setShowTimePicker(false);
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.editModalContent}>
+            {/* 모달 헤더 */}
+            <View style={styles.editModalHeader}>
+              <Text style={styles.editModalTitle}>
+                {isEditMode ? '할 일 수정' : '할 일 상세'}
+              </Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setShowEditModal(false);
+                  setSelectedTodo(null);
+                  setIsEditMode(false);
+                  setShowCategoryPicker(false);
+                  setShowTimePicker(false);
+                }}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.closeButton}>×</Text>
+              </TouchableOpacity>
+          </View>
+
+            {/* TODO 정보 */}
+            {selectedTodo && (
+              <ScrollView style={styles.editModalBody} showsVerticalScrollIndicator={false}>
+                {!isEditMode ? (
+                  // 상세 보기 모드
+                  <>
+                    <View style={styles.todoDetailSection}>
+                      <Text style={styles.todoDetailLabel}>제목</Text>
+                      <Text style={styles.todoDetailValue}>{selectedTodo.title}</Text>
+          </View>
+
+                    {selectedTodo.description && (
+                      <View style={styles.todoDetailSection}>
+                        <Text style={styles.todoDetailLabel}>설명</Text>
+                        <Text style={styles.todoDetailValue}>{selectedTodo.description}</Text>
+        </View>
+                    )}
+
+                    <View style={styles.todoDetailRow}>
+                      <View style={[styles.todoDetailSection, { flex: 1 }]}>
+                        <Text style={styles.todoDetailLabel}>카테고리</Text>
+                        <Text style={styles.todoDetailValue}>
+                          {getCategoryIcon(selectedTodo.category)} {getCategoryName(selectedTodo.category)}
+                        </Text>
+                      </View>
+
+                      <View style={[styles.todoDetailSection, { flex: 1 }]}>
+                        <Text style={styles.todoDetailLabel}>시간</Text>
+                        <Text style={styles.todoDetailValue}>
+                          {formatTimeToDisplay(selectedTodo.due_time) || '-'}
+                        </Text>
+            </View>
+          </View>
+
+                    <View style={styles.todoDetailSection}>
+                      <Text style={styles.todoDetailLabel}>상태</Text>
+                      <Text style={[
+                        styles.todoDetailValue,
+                        { color: selectedTodo.status === 'completed' ? '#34B79F' : '#666666' }
+                      ]}>
+                        {selectedTodo.status === 'completed' ? '완료' : 
+                         selectedTodo.status === 'cancelled' ? '취소' : '대기'}
+                      </Text>
+                    </View>
+
+                    {selectedTodo.is_recurring && (
+                      <View style={styles.todoDetailSection}>
+                        <Text style={styles.todoDetailLabel}>반복 일정</Text>
+                        <Text style={styles.todoDetailValue}>
+                          {selectedTodo.recurring_type === 'daily' ? '매일' :
+                           selectedTodo.recurring_type === 'weekly' ? '매주' :
+                           selectedTodo.recurring_type === 'monthly' ? '매월' : '-'}
+                        </Text>
+                      </View>
+                    )}
+                  </>
+                ) : (
+                  // 수정 모드
+                  <>
+                    <View style={styles.inputSection}>
+                      <Text style={styles.inputLabel}>제목</Text>
+                      <TextInput
+                        style={styles.textInput}
+                        value={editedTodo.title}
+                        onChangeText={(text) => setEditedTodo({ ...editedTodo, title: text })}
+                        placeholder="할 일 제목을 입력하세요"
+                        placeholderTextColor="#999999"
+                      />
+                    </View>
+
+                    <View style={styles.inputSection}>
+                      <Text style={styles.inputLabel}>설명</Text>
+                      <TextInput
+                        style={[styles.textInput, styles.textArea]}
+                        value={editedTodo.description}
+                        onChangeText={(text) => setEditedTodo({ ...editedTodo, description: text })}
+                        placeholder="상세 설명을 입력하세요"
+                        placeholderTextColor="#999999"
+                        multiline
+                        numberOfLines={3}
+                      />
+                    </View>
+
+                    <View style={styles.inputSection}>
+                      <Text style={styles.inputLabel}>카테고리</Text>
+              <TouchableOpacity
+                        style={styles.pickerButton}
+                        onPress={() => setShowCategoryPicker(!showCategoryPicker)}
+                activeOpacity={0.7}
+              >
+                        <Text style={[
+                          styles.pickerButtonText,
+                          !editedTodo.category && styles.pickerPlaceholder
+                        ]}>
+                          {editedTodo.category 
+                            ? `${getCategoryIcon(editedTodo.category)} ${getCategoryName(editedTodo.category)}`
+                            : '카테고리를 선택하세요'}
+                        </Text>
+                        <Text style={styles.dropdownIcon}>{showCategoryPicker ? '▲' : '▼'}</Text>
+                      </TouchableOpacity>
+
+                      {showCategoryPicker && (
+                        <View style={styles.pickerDropdown}>
+                          {categories.map((cat) => (
+                            <TouchableOpacity
+                              key={cat.id}
+                              style={[
+                                styles.pickerOption,
+                                editedTodo.category === cat.id && styles.pickerOptionSelected,
+                              ]}
+                              onPress={() => {
+                                setEditedTodo({ ...editedTodo, category: cat.id });
+                                setShowCategoryPicker(false);
+                              }}
+                              activeOpacity={0.7}
+                            >
+                              <Text style={styles.pickerOptionText}>{cat.name}</Text>
+              </TouchableOpacity>
+            ))}
+                        </View>
+                      )}
+          </View>
+
+                    <View style={styles.inputSection}>
+                      <Text style={styles.inputLabel}>시간</Text>
+          <TouchableOpacity
+                        style={styles.pickerButton}
+                        onPress={() => setShowTimePicker(!showTimePicker)}
+            activeOpacity={0.7}
+          >
+                        <Text style={[
+                          styles.pickerButtonText,
+                          !editedTodo.time && styles.pickerPlaceholder
+                        ]}>
+                          {editedTodo.time || '시간을 선택하세요'}
+                        </Text>
+                        <Text style={styles.dropdownIcon}>{showTimePicker ? '▲' : '▼'}</Text>
+          </TouchableOpacity>
+
+                      {showTimePicker && (
+                        <View style={styles.pickerDropdown}>
+                          <ScrollView style={styles.pickerScroll} showsVerticalScrollIndicator={true}>
+                            {timeOptions.map((time) => (
+                              <TouchableOpacity
+                                key={time}
+                                style={[
+                                  styles.pickerOption,
+                                  editedTodo.time === time && styles.pickerOptionSelected,
+                                ]}
+                                onPress={() => {
+                                  setEditedTodo({ ...editedTodo, time });
+                                  setShowTimePicker(false);
+                                }}
+                                activeOpacity={0.7}
+                              >
+                                <Text style={styles.pickerOptionText}>{time}</Text>
+            </TouchableOpacity>
+                            ))}
+                          </ScrollView>
+          </View>
+                      )}
+          </View>
+                  </>
+                )}
+              </ScrollView>
+            )}
+
+            {/* 모달 액션 버튼 */}
+            <View style={[styles.editModalFooter, { paddingBottom: Math.max(insets.bottom, 20) }]}>
+              {!isEditMode ? (
+                // 상세 보기 모드 버튼
+                <>
+                  {selectedTodo && selectedTodo.status !== 'completed' && (
+          <TouchableOpacity
+                      style={[styles.modalActionButton, styles.editButton]}
+                      onPress={handleEditMode}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.editButtonText}>수정</Text>
+          </TouchableOpacity>
+                  )}
+                  
+                  <TouchableOpacity
+                    style={[styles.modalActionButton, styles.deleteButton]}
+                    onPress={() => {
+                      if (selectedTodo) {
+                        handleDeleteTodo(selectedTodo.todo_id, selectedTodo.is_recurring);
+                      }
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.deleteButtonText}>삭제</Text>
+                  </TouchableOpacity>
+                </>
+              ) : (
+                // 수정 모드 버튼
+                <>
+                  <TouchableOpacity
+                    style={[styles.modalActionButton, styles.cancelButton]}
+                    onPress={() => {
+                      setIsEditMode(false);
+                      setShowCategoryPicker(false);
+                      setShowTimePicker(false);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.cancelButtonText}>취소</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.modalActionButton, styles.saveButton]}
+                    onPress={handleSaveEdit}
+                    activeOpacity={0.7}
+                    disabled={isSaving}
+                  >
+                    {isSaving ? (
+                      <ActivityIndicator color="#FFFFFF" />
+                    ) : (
+                      <Text style={styles.saveButtonText}>저장</Text>
+                    )}
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* 하단 네비게이션 바 */}
       <BottomNavigationBar />
@@ -1235,6 +1744,188 @@ const styles = StyleSheet.create({
   },
   bottomSpacer: {
     height: 20,
+  },
+
+  // 수정/삭제 모달 스타일
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  editModalContent: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '80%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  editModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E0E0E0',
+  },
+  editModalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333333',
+  },
+  closeButton: {
+    fontSize: 32,
+    color: '#999999',
+    fontWeight: '300',
+  },
+  editModalBody: {
+    padding: 20,
+    maxHeight: 400,
+  },
+  todoDetailSection: {
+    marginBottom: 20,
+  },
+  todoDetailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  todoDetailLabel: {
+    fontSize: 14,
+    color: '#666666',
+    marginBottom: 6,
+  },
+  todoDetailValue: {
+    fontSize: 16,
+    color: '#333333',
+    fontWeight: '500',
+  },
+  editModalFooter: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    gap: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#E0E0E0',
+  },
+  modalActionButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  editButton: {
+    backgroundColor: '#34B79F',
+  },
+  editButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  deleteButton: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#FF3B30',
+  },
+  deleteButtonText: {
+    color: '#FF3B30',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  cancelButton: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+  },
+  cancelButtonText: {
+    color: '#666666',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  saveButton: {
+    backgroundColor: '#34B79F',
+  },
+  saveButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+
+  // 수정 모드 입력 필드
+  inputSection: {
+    marginBottom: 20,
+  },
+  inputLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#333333',
+    marginBottom: 8,
+  },
+  textInput: {
+    backgroundColor: '#F8F9FA',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    color: '#333333',
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+  },
+  textArea: {
+    height: 80,
+    textAlignVertical: 'top',
+  },
+  pickerButton: {
+    backgroundColor: '#F8F9FA',
+    borderRadius: 8,
+    padding: 12,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+  },
+  pickerButtonText: {
+    fontSize: 16,
+    color: '#333333',
+  },
+  pickerPlaceholder: {
+    color: '#999999',
+  },
+  dropdownIcon: {
+    fontSize: 12,
+    color: '#666666',
+  },
+  pickerDropdown: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    marginTop: 8,
+    maxHeight: 200,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  pickerScroll: {
+    maxHeight: 200,
+  },
+  pickerOption: {
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  pickerOptionSelected: {
+    backgroundColor: '#E8F5F2',
+  },
+  pickerOptionText: {
+    fontSize: 16,
+    color: '#333333',
   },
 });
 
