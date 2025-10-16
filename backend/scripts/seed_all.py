@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from seed_users import seed_users
 from seed_todos import seed_todos
+from seed_connections import seed_connections
 # 나중에 추가할 시드 스크립트들:
 # from seed_diaries import seed_diaries
 # from seed_calls import seed_calls
@@ -27,7 +28,12 @@ def seed_all():
     print("-" * 50)
     seed_todos()
     
-    # print("\n3️⃣ 일기 데이터 생성")
+    # 3. 연결 시드
+    print("\n3️⃣ 연결 요청 데이터 생성")
+    print("-" * 50)
+    seed_connections()
+    
+    # print("\n4️⃣ 일기 데이터 생성")
     # print("-" * 50)
     # seed_diaries()
     
