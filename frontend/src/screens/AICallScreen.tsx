@@ -2,7 +2,7 @@
  * AI 통화 화면
  * REST API를 통한 전화 발신 + 자동 통화 스케줄 설정
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -24,7 +24,7 @@ type CallStatus = 'idle' | 'calling' | 'ringing' | 'completed' | 'error';
 
 // 시간 선택 옵션
 const HOURS = Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, '0'));
-const MINUTES = ['00', '10', '20', '30', '40', '50'];
+const MINUTES = Array.from({ length: 60 }, (_, i) => i.toString().padStart(2, '0'));
 
 export const AICallScreen = () => {
   const router = useRouter();
@@ -46,6 +46,10 @@ export const AICallScreen = () => {
   const [selectedHour, setSelectedHour] = useState('14');
   const [selectedMinute, setSelectedMinute] = useState('00');
   
+  // 시간 선택 스크롤 ref
+  const hourScrollRef = useRef<ScrollView>(null);
+  const minuteScrollRef = useRef<ScrollView>(null);
+  
   /**
    * 초기 설정 로드
    */
@@ -65,9 +69,7 @@ export const AICallScreen = () => {
         // 시간과 분 분리
         const [hour, minute] = schedule.scheduled_call_time.split(':');
         setSelectedHour(hour);
-        // 10분 단위로 반올림
-        const roundedMinute = Math.round(parseInt(minute) / 10) * 10;
-        setSelectedMinute(roundedMinute.toString().padStart(2, '0'));
+        setSelectedMinute(minute);
       }
     } catch (error: any) {
       console.error('자동 통화 스케줄 로드 실패:', error);
@@ -88,14 +90,6 @@ export const AICallScreen = () => {
       };
       
       await updateCallSchedule(schedule);
-      
-      Alert.alert(
-        '✅ 설정 완료',
-        enabled
-          ? `매일 ${time}에 자동으로 전화가 걸립니다.`
-          : '자동 통화가 비활성화되었습니다.',
-        [{ text: '확인' }]
-      );
     } catch (error: any) {
       console.error('자동 통화 스케줄 업데이트 실패:', error);
       Alert.alert(
@@ -134,11 +128,28 @@ export const AICallScreen = () => {
     // 현재 시간 분리
     const [hour, minute] = scheduledTime.split(':');
     setSelectedHour(hour);
-    // 10분 단위로 반올림
-    const roundedMinute = Math.round(parseInt(minute) / 10) * 10;
-    setSelectedMinute(roundedMinute.toString().padStart(2, '0'));
+    setSelectedMinute(minute);
     setIsEditingTime(true);
   };
+  
+  /**
+   * 시간 선택기가 열릴 때 현재 시간으로 스크롤
+   */
+  useEffect(() => {
+    if (isEditingTime) {
+      const hourIndex = parseInt(selectedHour);
+      hourScrollRef.current?.scrollTo({
+        y: hourIndex * 44, // timeOption 높이 (padding + height)
+        animated: false,
+      });
+      
+      const minuteIndex = parseInt(selectedMinute);
+      minuteScrollRef.current?.scrollTo({
+        y: minuteIndex * 44,
+        animated: false,
+      });
+    }
+  }, [isEditingTime]);
   
   /**
    * 시간 수정 저장
@@ -156,8 +167,7 @@ export const AICallScreen = () => {
     // 원래 시간으로 복원
     const [hour, minute] = scheduledTime.split(':');
     setSelectedHour(hour);
-    const roundedMinute = Math.round(parseInt(minute) / 10) * 10;
-    setSelectedMinute(roundedMinute.toString().padStart(2, '0'));
+    setSelectedMinute(minute);
     setIsEditingTime(false);
   };
   
@@ -415,6 +425,7 @@ export const AICallScreen = () => {
                     <View style={styles.timePickerColumn}>
                       <Text style={styles.timePickerLabel}>시</Text>
                       <ScrollView 
+                        ref={hourScrollRef}
                         style={styles.timeScrollView}
                         showsVerticalScrollIndicator={false}
                         nestedScrollEnabled={true}
@@ -443,10 +454,11 @@ export const AICallScreen = () => {
                     
                     <Text style={styles.timeSeparator}>:</Text>
                     
-                    {/* 분 선택 (10분 단위) */}
+                    {/* 분 선택 (1분 단위) */}
                     <View style={styles.timePickerColumn}>
                       <Text style={styles.timePickerLabel}>분</Text>
                       <ScrollView 
+                        ref={minuteScrollRef}
                         style={styles.timeScrollView}
                         showsVerticalScrollIndicator={false}
                         nestedScrollEnabled={true}
