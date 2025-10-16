@@ -18,6 +18,7 @@ import { useRouter } from 'expo-router';
 import { BottomNavigationBar, Header } from '../components';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as todoApi from '../api/todo';
+import * as connectionsApi from '../api/connections';
 
 interface ElderlyProfile {
   id: string;
@@ -60,6 +61,13 @@ export const GuardianHomeScreen = () => {
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+
+  // 어르신 추가 모달 관련 state
+  const [showAddElderlyModal, setShowAddElderlyModal] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<connectionsApi.ElderlySearchResult[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
 
   // 연결된 어르신 목업 데이터
   const connectedElderly: ElderlyProfile[] = [
@@ -234,7 +242,7 @@ export const GuardianHomeScreen = () => {
           {/* 어르신 추가 버튼 */}
           <TouchableOpacity 
             style={styles.addElderlyButton}
-            onPress={() => Alert.alert('준비중', '어르신 추가 기능은 개발 중입니다.')}
+            onPress={() => setShowAddElderlyModal(true)}
             activeOpacity={0.7}
           >
             <Text style={styles.addElderlyButtonText}>+ 어르신 추가하기</Text>
@@ -244,7 +252,7 @@ export const GuardianHomeScreen = () => {
         /* 연결된 어르신이 없을 때 */
         <TouchableOpacity 
           style={[styles.elderlyCard, styles.addElderlyCard]}
-          onPress={() => Alert.alert('준비중', '어르신 추가 기능은 개발 중입니다.')}
+          onPress={() => setShowAddElderlyModal(true)}
           activeOpacity={0.7}
         >
           <View style={styles.addElderlyContent}>
@@ -802,6 +810,80 @@ export const GuardianHomeScreen = () => {
     }
   };
 
+  // 어르신 검색
+  const handleSearchElderly = async () => {
+    if (!searchQuery.trim()) {
+      Alert.alert('알림', '이메일 또는 전화번호를 입력해주세요.');
+      return;
+    }
+
+    setIsSearching(true);
+    try {
+      const results = await connectionsApi.searchElderly(searchQuery);
+      setSearchResults(results);
+      
+      if (results.length === 0) {
+        Alert.alert('알림', '검색 결과가 없습니다.');
+      }
+    } catch (error: any) {
+      console.error('검색 실패:', error);
+      Alert.alert('오류', error.message || '검색에 실패했습니다.');
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  // 연결 요청 전송
+  const handleSendConnectionRequest = async (elderly: connectionsApi.ElderlySearchResult) => {
+    // 이미 연결된 경우
+    if (elderly.is_already_connected) {
+      const statusText = 
+        elderly.connection_status === 'active' ? '이미 연결되어 있습니다.' :
+        elderly.connection_status === 'pending' ? '연결 수락 대기 중입니다.' :
+        '이전 연결 요청이 거절되었습니다.';
+      
+      Alert.alert('알림', statusText);
+      return;
+    }
+
+    Alert.alert(
+      '연결 요청',
+      `${elderly.name}님에게 연결 요청을 보내시겠습니까?`,
+      [
+        { text: '취소', style: 'cancel' },
+        {
+          text: '요청',
+          onPress: async () => {
+            setIsConnecting(true);
+            try {
+              await connectionsApi.createConnection(elderly.email);
+              
+              Alert.alert(
+                '성공',
+                `${elderly.name}님에게 연결 요청을 보냈습니다.\n어르신이 수락하면 연결됩니다.`,
+                [
+                  {
+                    text: '확인',
+                    onPress: () => {
+                      setShowAddElderlyModal(false);
+                      setSearchQuery('');
+                      setSearchResults([]);
+                    }
+                  }
+                ]
+              );
+            } catch (error: any) {
+              console.error('연결 요청 실패:', error);
+              Alert.alert('오류', error.message || '연결 요청에 실패했습니다.');
+            } finally {
+              setIsConnecting(false);
+            }
+          }
+        }
+      ]
+    );
+  };
+
   // 탭 데이터
   const tabs = [
     { id: 'family', label: '가족', icon: '👥' },
@@ -1116,6 +1198,131 @@ export const GuardianHomeScreen = () => {
                     )}
                   </TouchableOpacity>
                 </>
+              )}
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 어르신 추가 모달 */}
+      <Modal
+        visible={showAddElderlyModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => {
+          setShowAddElderlyModal(false);
+          setSearchQuery('');
+          setSearchResults([]);
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.editModalContent}>
+            {/* 헤더 */}
+            <View style={styles.editModalHeader}>
+              <Text style={styles.editModalTitle}>어르신 추가하기</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setShowAddElderlyModal(false);
+                  setSearchQuery('');
+                  setSearchResults([]);
+                }}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.closeButton}>×</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* 검색 입력 */}
+            <View style={styles.editModalBody}>
+              <View style={styles.inputSection}>
+                <Text style={styles.inputLabel}>이메일 또는 전화번호</Text>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <TextInput
+                    style={[styles.textInput, { flex: 1 }]}
+                    placeholder="예: elderly@example.com"
+                    value={searchQuery}
+                    onChangeText={setSearchQuery}
+                    autoCapitalize="none"
+                    keyboardType="email-address"
+                    placeholderTextColor="#999999"
+                  />
+                  <TouchableOpacity
+                    style={[styles.modalActionButton, styles.editButton, { flex: 0, paddingHorizontal: 20 }]}
+                    onPress={handleSearchElderly}
+                    disabled={isSearching}
+                    activeOpacity={0.7}
+                  >
+                    {isSearching ? (
+                      <ActivityIndicator color="#FFFFFF" size="small" />
+                    ) : (
+                      <Text style={styles.editButtonText}>검색</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* 검색 결과 */}
+              {searchResults.length > 0 && (
+                <ScrollView style={{ maxHeight: 300 }} showsVerticalScrollIndicator={true}>
+                  {searchResults.map((elderly) => (
+                    <View
+                      key={elderly.user_id}
+                      style={{
+                        backgroundColor: '#F8F9FA',
+                        borderRadius: 12,
+                        padding: 16,
+                        marginBottom: 12,
+                        borderWidth: 1,
+                        borderColor: elderly.is_already_connected ? '#E0E0E0' : '#34B79F',
+                      }}
+                    >
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ fontSize: 18, fontWeight: '600', color: '#333', marginBottom: 4 }}>
+                            👵 {elderly.name}
+                          </Text>
+                          <Text style={{ fontSize: 14, color: '#666', marginBottom: 2 }}>
+                            📧 {elderly.email}
+                          </Text>
+                          {elderly.phone_number && (
+                            <Text style={{ fontSize: 14, color: '#666' }}>
+                              📞 {elderly.phone_number}
+                            </Text>
+                          )}
+                        </View>
+
+                        {/* 연결 버튼 */}
+                        <TouchableOpacity
+                          style={[
+                            styles.modalActionButton,
+                            elderly.is_already_connected ? styles.cancelButton : styles.editButton,
+                            { paddingHorizontal: 16, paddingVertical: 10 }
+                          ]}
+                          onPress={() => handleSendConnectionRequest(elderly)}
+                          disabled={isConnecting || (elderly.is_already_connected && elderly.connection_status !== 'rejected')}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={elderly.is_already_connected ? styles.cancelButtonText : styles.editButtonText}>
+                            {elderly.is_already_connected
+                              ? (elderly.connection_status === 'active' ? '연결됨' :
+                                 elderly.connection_status === 'pending' ? '대기중' : '거절됨')
+                              : '연결 요청'}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ))}
+                </ScrollView>
+              )}
+
+              {/* 안내 문구 */}
+              {!isSearching && searchResults.length === 0 && searchQuery.length === 0 && (
+                <View style={{ padding: 20, alignItems: 'center' }}>
+                  <Text style={{ fontSize: 16, color: '#999', textAlign: 'center', lineHeight: 24 }}>
+                    어르신의 이메일 또는 전화번호를{'\n'}
+                    입력하고 검색해주세요
+                  </Text>
+                </View>
               )}
             </View>
           </View>
