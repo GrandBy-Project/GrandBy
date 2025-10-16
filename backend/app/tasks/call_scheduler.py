@@ -4,10 +4,11 @@ AI 자동 전화 스케줄링 작업 (Celery Beat)
 
 from app.tasks.celery_app import celery_app
 from app.database import SessionLocal
-from app.models.call import CallSettings, CallLog, CallStatus
-from app.models.user import User
+from app.models.call import CallLog, CallStatus
+from app.models.user import User, UserSettings
 from app.services.ai_call.twilio_service import TwilioService
 from app.config import settings
+from app.utils.phone import normalize_phone_number
 from datetime import datetime
 import logging
 
@@ -31,8 +32,9 @@ def check_and_make_calls():
         logger.info(f"⏰ Current time: {current_hour:02d}:{current_minute:02d}")
         
         # 자동 통화가 활성화된 설정 조회
-        settings_list = db.query(CallSettings).filter(
-            CallSettings.is_active == True
+        settings_list = db.query(UserSettings).filter(
+            UserSettings.auto_call_enabled == True,
+            UserSettings.scheduled_call_time != None
         ).all()
         
         if not settings_list:
@@ -45,28 +47,33 @@ def check_and_make_calls():
         settings_to_call = []
         
         for setting in settings_list:
-            call_hour = setting.call_time.hour
-            call_minute = setting.call_time.minute
+            try:
+                time_parts = setting.scheduled_call_time.split(":")
+                call_hour = int(time_parts[0])
+                call_minute = int(time_parts[1])
+            except (ValueError, AttributeError, IndexError) as e:
+                logger.warning(f"Invalid time format for user {setting.user_id}: {setting.scheduled_call_time}")
+                continue
             
             # 시간 차이 계산 (분 단위)
             time_diff = abs((call_hour * 60 + call_minute) - (current_hour * 60 + current_minute))
             
             # ±5분 이내인지 확인
-            if time_diff <= 5:
+            if time_diff <= 1:
                 # 오늘 이미 전화했는지 확인 (중복 방지)
                 today_start = current_datetime.replace(hour=0, minute=0, second=0, microsecond=0)
                 existing_call = db.query(CallLog).filter(
-                    CallLog.elderly_id == setting.elderly_id,
+                    CallLog.elderly_id == setting.user_id,
                     CallLog.created_at >= today_start,
                     CallLog.call_status.in_([CallStatus.INITIATED, CallStatus.ANSWERED, CallStatus.COMPLETED])
                 ).first()
                 
                 if existing_call:
-                    logger.info(f"⏭️  Already called today: {setting.elderly_id}")
+                    logger.info(f"⏭️  Already called today: {setting.user_id}")
                     continue
                 
                 settings_to_call.append(setting)
-                logger.info(f"📞 Scheduled call: {setting.elderly_id} at {call_hour:02d}:{call_minute:02d}")
+                logger.info(f"📞 Scheduled call: {setting.user_id} at {call_hour:02d}:{call_minute:02d}")
         
         if not settings_to_call:
             logger.info("No calls to make at this time")
@@ -80,11 +87,15 @@ def check_and_make_calls():
         for setting in settings_to_call:
             try:
                 # 사용자 정보 조회
-                elderly = db.query(User).filter(User.user_id == setting.elderly_id).first()
+                elderly = db.query(User).filter(User.user_id == setting.user_id).first()
                 
                 if not elderly or not elderly.phone_number:
-                    logger.warning(f"⚠️  No phone number for user {setting.elderly_id}")
+                    logger.warning(f"⚠️  No phone number for user {setting.user_id}")
                     continue
+
+                # 전화번호 국제 형식으로 변환
+                normalized_phone = normalize_phone_number(elderly.phone_number)
+                logger.info(f"📞 Making call to {elderly.name} ({elderly.phone_number} -> {normalized_phone})")
                 
                 # API Base URL 확인
                 if not settings.API_BASE_URL:
@@ -100,7 +111,7 @@ def check_and_make_calls():
                 
                 # 전화 발신
                 call_sid = twilio_service.make_call(
-                    to_number=elderly.phone_number,
+                    to_number=normalized_phone,
                     voice_url=voice_url,
                     status_callback_url=status_callback_url
                 )
@@ -119,7 +130,7 @@ def check_and_make_calls():
                 logger.info(f"✅ Call initiated for {elderly.name}: {call_sid}")
                 
             except Exception as e:
-                logger.error(f"❌ Failed to make call for {setting.elderly_id}: {e}")
+                logger.error(f"❌ Failed to make call for {setting.user_id}: {e}")
                 db.rollback()
                 continue
         

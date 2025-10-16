@@ -136,7 +136,7 @@ services:
     networks:
       - grandby_network
     restart: unless-stopped
-    command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2
+    command: celery -A app.tasks.celery_app:celery_app worker --loglevel=info --concurrency=2
 
   # Celery Beat (스케줄러 - AI 자동 전화)
   celery_beat:
@@ -168,7 +168,7 @@ services:
     networks:
       - grandby_network
     restart: unless-stopped
-    command: celery -A app.tasks.celery_app beat --loglevel=info
+    command: celery -A app.tasks.celery_app:celery_app beat --loglevel=info
 
   # Flower (Celery 모니터링 - 선택사항)
   flower:
@@ -187,7 +187,7 @@ services:
     networks:
       - grandby_network
     restart: unless-stopped
-    command: celery -A app.tasks.celery_app flower --port=5555
+    command: celery -A app.tasks.celery_app:celery_app flower --port=5555
 
 networks:
   grandby_network:
