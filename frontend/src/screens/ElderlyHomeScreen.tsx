@@ -468,7 +468,7 @@ export const ElderlyHomeScreen = () => {
             </View>
             <Text style={[styles.actionLabel, isLargeView && styles.actionLabelLarge]}>할 일</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.actionButton, isLargeView && styles.actionButtonLarge]} onPress={() => Alert.alert('준비중', 'AI 통화 기능은 개발 중입니다.')}>
+          <TouchableOpacity style={[styles.actionButton, isLargeView && styles.actionButtonLarge]} onPress={() => router.push('/ai-call')}>
             <View style={[styles.actionIcon, isLargeView && styles.actionIconLarge]}>
               <PhoneIcon size={isLargeView ? 32 : 24} color="#34B79F" />
             </View>
