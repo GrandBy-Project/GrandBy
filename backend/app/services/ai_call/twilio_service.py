@@ -3,6 +3,8 @@ Twilio 음성 통화 서비스
 """
 
 from twilio.rest import Client
+from twilio.jwt.access_token import AccessToken
+from twilio.jwt.access_token.grants import VoiceGrant
 from app.config import settings
 import logging
 
@@ -79,6 +81,49 @@ class TwilioService:
             }
         except Exception as e:
             logger.error(f"Failed to fetch call status: {e}")
+            raise
+    
+    def generate_voice_access_token(self, identity: str, ttl: int = 3600):
+        """
+        Twilio Voice SDK용 Access Token 생성
+        
+        Args:
+            identity: 사용자 식별자 (예: user_id)
+            ttl: 토큰 유효 시간(초), 기본 1시간
+        
+        Returns:
+            str: JWT Access Token
+        """
+        try:
+            if not settings.TWILIO_API_KEY_SID or not settings.TWILIO_API_KEY_SECRET:
+                raise ValueError("Twilio API Key credentials are not configured")
+            
+            if not settings.TWILIO_TWIML_APP_SID:
+                raise ValueError("Twilio TwiML App SID is not configured")
+            
+            # Access Token 생성
+            token = AccessToken(
+                settings.TWILIO_ACCOUNT_SID,
+                settings.TWILIO_API_KEY_SID,
+                settings.TWILIO_API_KEY_SECRET,
+                identity=identity,
+                ttl=ttl
+            )
+            
+            # Voice Grant 추가
+            voice_grant = VoiceGrant(
+                outgoing_application_sid=settings.TWILIO_TWIML_APP_SID,
+                incoming_allow=True  # 수신 전화 허용
+            )
+            token.add_grant(voice_grant)
+            
+            jwt_token = token.to_jwt()
+            
+            logger.info(f"✅ Voice access token generated for identity: {identity}")
+            return jwt_token.decode('utf-8') if isinstance(jwt_token, bytes) else jwt_token
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to generate voice access token: {e}")
             raise
     
     # TODO: TwiML 생성, 음성 스트리밍 처리 등 추가 구현 필요

@@ -83,6 +83,17 @@ class ConnectionResponse(BaseModel):
         from_attributes = True
 
 
+class CallScheduleUpdate(BaseModel):
+    """자동 통화 스케줄 설정 업데이트"""
+    auto_call_enabled: bool
+    scheduled_call_time: Optional[str] = None  # HH:MM 형식 (예: "14:30")
+
+
+class CallScheduleResponse(BaseModel):
+    """자동 통화 스케줄 설정 응답"""
+    auto_call_enabled: bool
+    scheduled_call_time: Optional[str] = None
+
 class ElderlySearchResult(BaseModel):
     """어르신 검색 결과"""
     user_id: str

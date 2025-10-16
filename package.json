@@ -20,7 +20,9 @@
     "backend:shell": "docker exec -it grandby_api bash",
     "db:shell": "docker exec -it grandby_postgres psql -U grandby -d grandby_db",
     "clean": "docker-compose down -v && cd frontend && rmdir /s /q node_modules 2>nul || echo Cleaned",
-    "help": "echo 사용 가능한 명령어: setup, docker:up, docker:down, docker:logs, migrate, frontend, clean"
+    "help": "echo 사용 가능한 명령어: setup, docker:up, docker:down, docker:logs, migrate, frontend, clean",
+    "android": "expo run:android",
+    "ios": "expo run:ios"
   },
   "repository": {
     "type": "git",
@@ -35,6 +37,10 @@
     "expo"
   ],
   "author": "GrandBy Team",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "expo": "^54.0.13",
+    "react": "19.1.0",
+    "react-native": "0.81.4"
+  }
 }
-

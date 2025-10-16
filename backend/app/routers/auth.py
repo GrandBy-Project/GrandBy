@@ -6,6 +6,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
+from sqlalchemy import and_
 from app.database import get_db
 from app.schemas.user import UserCreate, UserLogin, Token, UserResponse
 from app.models.user import User, UserSettings
@@ -18,6 +19,7 @@ import uuid
 import random
 import string
 from app.utils.email import send_verification_email, send_password_reset_email
+from app.utils.phone import normalize_phone_number
 
 router = APIRouter()
 security = HTTPBearer()
@@ -56,6 +58,7 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
     - **password**: 비밀번호
     - **name**: 이름
     - **role**: elderly (어르신) 또는 caregiver (보호자)
+    - **phone_number**: 전화번호 (010으로 시작, 자동으로 +82 형식으로 저장)
     """
     # 이메일 중복 체크
     existing_user = db.query(User).filter(User.email == user_data.email).first()
@@ -81,7 +84,7 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
         password_hash=hashed_password,
         name=user_data.name,
         role=user_data.role,
-        phone_number=user_data.phone_number,
+        phone_number=normalize_phone_number(user_data.phone_number),
         birth_date=user_data.birth_date,
         gender=user_data.gender,
         auth_provider=user_data.auth_provider,
