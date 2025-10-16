@@ -10,6 +10,8 @@ import {
   TouchableOpacity,
   Alert,
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { useAuthStore } from '../store/authStore';
 import { useRouter } from 'expo-router';
@@ -574,8 +576,13 @@ export const ElderlyHomeScreen = () => {
           setSelectedConnection(null);
         }}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.connectionModalContent}>
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={{ flex: 1 }}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.connectionModalContent}>
             {selectedConnection && (
               <>
                 <Text style={[styles.modalTitle, isLargeView && { fontSize: 24 }]}>연결 요청</Text>
@@ -645,8 +652,9 @@ export const ElderlyHomeScreen = () => {
                 </View>
               </>
             )}
+            </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* 하단 네비게이션 바 */}

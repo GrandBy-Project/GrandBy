@@ -12,6 +12,8 @@ import {
   ActivityIndicator,
   Modal,
   TextInput,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { useAuthStore } from '../store/authStore';
 import { useRouter } from 'expo-router';
@@ -1208,32 +1210,41 @@ export const GuardianHomeScreen = () => {
       <Modal
         visible={showAddElderlyModal}
         transparent
-        animationType="slide"
+        animationType="fade"
         onRequestClose={() => {
           setShowAddElderlyModal(false);
           setSearchQuery('');
           setSearchResults([]);
         }}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.editModalContent}>
-            {/* 헤더 */}
-            <View style={styles.editModalHeader}>
-              <Text style={styles.editModalTitle}>어르신 추가하기</Text>
-              <TouchableOpacity
-                onPress={() => {
-                  setShowAddElderlyModal(false);
-                  setSearchQuery('');
-                  setSearchResults([]);
-                }}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.closeButton}>×</Text>
-              </TouchableOpacity>
-            </View>
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={{ flex: 1 }}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.editModalContent}>
+              {/* 헤더 */}
+              <View style={styles.editModalHeader}>
+                <Text style={styles.editModalTitle}>어르신 추가하기</Text>
+                <TouchableOpacity
+                  onPress={() => {
+                    setShowAddElderlyModal(false);
+                    setSearchQuery('');
+                    setSearchResults([]);
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.closeButton}>×</Text>
+                </TouchableOpacity>
+              </View>
 
-            {/* 검색 입력 */}
-            <View style={styles.editModalBody}>
+              {/* 검색 입력 - ScrollView로 감싸기 */}
+              <ScrollView 
+                style={styles.editModalBody}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+              >
               <View style={styles.inputSection}>
                 <Text style={styles.inputLabel}>이메일 또는 전화번호</Text>
                 <View style={{ flexDirection: 'row', gap: 8 }}>
@@ -1263,7 +1274,7 @@ export const GuardianHomeScreen = () => {
 
               {/* 검색 결과 */}
               {searchResults.length > 0 && (
-                <ScrollView style={{ maxHeight: 300 }} showsVerticalScrollIndicator={true}>
+                <View style={{ maxHeight: 300 }}>
                   {searchResults.map((elderly) => (
                     <View
                       key={elderly.user_id}
@@ -1312,7 +1323,7 @@ export const GuardianHomeScreen = () => {
                       </View>
                     </View>
                   ))}
-                </ScrollView>
+                </View>
               )}
 
               {/* 안내 문구 */}
@@ -1324,9 +1335,10 @@ export const GuardianHomeScreen = () => {
                   </Text>
                 </View>
               )}
+              </ScrollView>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* 하단 네비게이션 바 */}
@@ -1957,18 +1969,21 @@ const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
+    justifyContent: 'center',  // 중앙 배치
+    alignItems: 'center',      // 가로 중앙
+    padding: 20,               // 여백 추가
   },
   editModalContent: {
     backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    borderRadius: 20,          // 4면 모두 둥글게
+    width: '100%',             // 너비 100%
+    maxWidth: 500,             // 최대 너비 제한
     maxHeight: '80%',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    elevation: 8,
   },
   editModalHeader: {
     flexDirection: 'row',
