@@ -104,9 +104,11 @@ services:
       # Live code reloading for development
       - ./backend/app:/app/app
       - ./backend/migrations:/app/migrations
+      - ./backend/scripts:/app/scripts
     networks:
       - grandby_network
     restart: unless-stopped
+    # entrypoint.sh가 자동으로 마이그레이션 실행 후 아래 명령어 실행
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   # Celery Worker (비동기 작업 처리)
