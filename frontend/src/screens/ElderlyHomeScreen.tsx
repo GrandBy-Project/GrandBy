@@ -1,7 +1,7 @@
 /**
  * 어르신 전용 홈 화면
  */
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,11 +9,19 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { useAuthStore } from '../store/authStore';
 import { useRouter } from 'expo-router';
 import { BottomNavigationBar, Header } from '../components';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as todoApi from '../api/todo';
+import { Colors } from '../constants/Colors';
+import * as connectionsApi from '../api/connections';
+import * as notificationsApi from '../api/notifications';
+import { Modal } from 'react-native';
 
 // 커스텀 아이콘 컴포넌트들
 const CheckIcon = ({ size = 24, color = '#34B79F' }: { size?: number; color?: string }) => (
@@ -220,6 +228,122 @@ export const ElderlyHomeScreen = () => {
   const { user, logout } = useAuthStore();
   const insets = useSafeAreaInsets();
   const [isLargeView, setIsLargeView] = useState(false);
+  const [todayTodos, setTodayTodos] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // 연결 요청 알림 관련 state
+  const [pendingConnections, setPendingConnections] = useState<connectionsApi.ConnectionWithUserInfo[]>([]);
+  const [showConnectionModal, setShowConnectionModal] = useState(false);
+  const [selectedConnection, setSelectedConnection] = useState<connectionsApi.ConnectionWithUserInfo | null>(null);
+
+  // 오늘의 할 일 및 연결 요청 불러오기
+  useEffect(() => {
+    loadTodayTodos();
+    loadPendingConnections();
+  }, []);
+
+  const loadTodayTodos = async () => {
+    try {
+      const todos = await todoApi.getTodos('today');
+      setTodayTodos(todos);
+    } catch (error) {
+      console.error('오늘 할 일 불러오기 실패:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // 대기 중인 연결 요청 불러오기
+  const loadPendingConnections = async () => {
+    try {
+      const connections = await connectionsApi.getConnections();
+      setPendingConnections(connections.pending);
+    } catch (error) {
+      console.error('연결 요청 불러오기 실패:', error);
+    }
+  };
+
+  // 연결 요청 수락
+  const handleAcceptConnection = async () => {
+    if (!selectedConnection) return;
+
+    try {
+      await connectionsApi.acceptConnection(selectedConnection.connection_id);
+      Alert.alert(
+        '연결 완료',
+        `${selectedConnection.name}님과 연결되었습니다!`,
+        [
+          {
+            text: '확인',
+            onPress: () => {
+              setShowConnectionModal(false);
+              setSelectedConnection(null);
+              loadPendingConnections(); // 목록 새로고침
+            }
+          }
+        ]
+      );
+    } catch (error: any) {
+      console.error('연결 수락 실패:', error);
+      Alert.alert('오류', error.message || '연결 수락에 실패했습니다.');
+    }
+  };
+
+  // 연결 요청 거절
+  const handleRejectConnection = async () => {
+    if (!selectedConnection) return;
+
+    Alert.alert(
+      '연결 거절',
+      `${selectedConnection.name}님의 연결 요청을 거절하시겠습니까?`,
+      [
+        { text: '취소', style: 'cancel' },
+        {
+          text: '거절',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await connectionsApi.rejectConnection(selectedConnection.connection_id);
+              Alert.alert(
+                '거절 완료',
+                '연결 요청을 거절했습니다.',
+                [
+                  {
+                    text: '확인',
+                    onPress: () => {
+                      setShowConnectionModal(false);
+                      setSelectedConnection(null);
+                      loadPendingConnections(); // 목록 새로고침
+                    }
+                  }
+                ]
+              );
+            } catch (error: any) {
+              console.error('연결 거절 실패:', error);
+              Alert.alert('오류', error.message || '연결 거절에 실패했습니다.');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  // 카테고리 한글 이름 변환
+  const getCategoryName = (category: string): string => {
+    const categoryMap: Record<string, string> = {
+      'MEDICINE': '복약',
+      'medicine': '복약',
+      'HOSPITAL': '병원',
+      'hospital': '병원',
+      'EXERCISE': '운동',
+      'exercise': '운동',
+      'MEAL': '식사',
+      'meal': '식사',
+      'OTHER': '기타',
+      'other': '기타',
+    };
+    return categoryMap[category] || '기타';
+  };
 
   const handleLogout = async () => {
     Alert.alert(
@@ -263,6 +387,31 @@ export const ElderlyHomeScreen = () => {
       <Header 
         rightButton={<LargeViewButton />}
       />
+
+      {/* 연결 요청 알림 배너 */}
+      {pendingConnections.length > 0 && (
+        <TouchableOpacity
+          style={styles.notificationBanner}
+          onPress={() => {
+            setSelectedConnection(pendingConnections[0]);
+            setShowConnectionModal(true);
+          }}
+          activeOpacity={0.8}
+        >
+          <View style={styles.bannerContent}>
+            <Text style={styles.bannerIcon}>🔔</Text>
+            <View style={styles.bannerText}>
+              <Text style={[styles.bannerTitle, isLargeView && { fontSize: 18 }]}>
+                새로운 연결 요청 ({pendingConnections.length})
+              </Text>
+              <Text style={[styles.bannerSubtitle, isLargeView && { fontSize: 16 }]}>
+                {pendingConnections[0].name}님이 보호자 연결을 요청했습니다
+              </Text>
+            </View>
+            <Text style={styles.bannerArrow}>›</Text>
+          </View>
+        </TouchableOpacity>
+      )}
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* 어르신 프로필 카드 */}
@@ -343,38 +492,46 @@ export const ElderlyHomeScreen = () => {
         <View style={styles.scheduleCard}>
           <View style={styles.cardHeader}>
             <Text style={[styles.cardTitle, isLargeView && styles.cardTitleLarge]}>오늘의 일정</Text>
-            <TouchableOpacity>
+            <TouchableOpacity onPress={() => router.push('/todos')}>
               <Text style={[styles.viewAllText, isLargeView && styles.viewAllTextLarge]}>전체보기</Text>
             </TouchableOpacity>
           </View>
           
-          <View style={styles.scheduleItem}>
-            <View style={styles.scheduleTime}>
-              <Text style={[styles.scheduleTimeText, isLargeView && styles.scheduleTimeTextLarge]}>16:00</Text>
+          {isLoading ? (
+            <View style={{ paddingVertical: 40, alignItems: 'center' }}>
+              <ActivityIndicator size="large" color={Colors.primary} />
             </View>
-            <View style={styles.scheduleContent}>
-              <Text style={[styles.scheduleTitle, isLargeView && styles.scheduleTitleLarge]}>정형외과 진료</Text>
-              <Text style={[styles.scheduleLocation, isLargeView && styles.scheduleLocationLarge]}>서울대학교병원 정형외과</Text>
-              <Text style={[styles.scheduleDate, isLargeView && styles.scheduleDateLarge]}>무릎 관절 정기검진</Text>
+          ) : todayTodos.length === 0 ? (
+            <View style={{ paddingVertical: 40, alignItems: 'center' }}>
+              <Text style={{ fontSize: 16, color: '#999999' }}>오늘 할 일이 없습니다</Text>
             </View>
-            <View style={styles.scheduleStatus}>
-              <Text style={[styles.scheduleStatusText, isLargeView && styles.scheduleStatusTextLarge]}>예정</Text>
-            </View>
-          </View>
-
-          <View style={styles.scheduleItem}>
-            <View style={styles.scheduleTime}>
-              <Text style={[styles.scheduleTimeText, isLargeView && styles.scheduleTimeTextLarge]}>19:00</Text>
-            </View>
-            <View style={styles.scheduleContent}>
-              <Text style={[styles.scheduleTitle, isLargeView && styles.scheduleTitleLarge]}>저녁 복약</Text>
-              <Text style={[styles.scheduleLocation, isLargeView && styles.scheduleLocationLarge]}>혈압약, 당뇨약 복용</Text>
-              <Text style={[styles.scheduleDate, isLargeView && styles.scheduleDateLarge]}>식후 30분 복용</Text>
-            </View>
-            <View style={styles.scheduleStatus}>
-              <Text style={[styles.scheduleStatusText, isLargeView && styles.scheduleStatusTextLarge]}>완료</Text>
-            </View>
-          </View>
+          ) : (
+            todayTodos.slice(0, 3).map((todo, index) => (
+              <View key={todo.todo_id} style={styles.scheduleItem}>
+                <View style={styles.scheduleTime}>
+                  <Text style={[styles.scheduleTimeText, isLargeView && styles.scheduleTimeTextLarge]}>
+                    {todo.due_time ? todo.due_time.substring(0, 5) : '시간미정'}
+                  </Text>
+                </View>
+                <View style={styles.scheduleContent}>
+                  <Text style={[styles.scheduleTitle, isLargeView && styles.scheduleTitleLarge]}>
+                    {todo.title}
+                  </Text>
+                  <Text style={[styles.scheduleLocation, isLargeView && styles.scheduleLocationLarge]}>
+                    {todo.description || ''}
+                  </Text>
+                  <Text style={[styles.scheduleDate, isLargeView && styles.scheduleDateLarge]}>
+                    {todo.category ? `[${getCategoryName(todo.category)}]` : ''}
+                  </Text>
+                </View>
+                <View style={styles.scheduleStatus}>
+                  <Text style={[styles.scheduleStatusText, isLargeView && styles.scheduleStatusTextLarge]}>
+                    {todo.status === 'COMPLETED' || todo.status === 'completed' ? '완료' : '예정'}
+                  </Text>
+                </View>
+              </View>
+            ))
+          )}
         </View>
 
         {/* 건강 상태 요약 */}
@@ -408,6 +565,97 @@ export const ElderlyHomeScreen = () => {
         {/* 하단 여백 */}
         <View style={[styles.bottomSpacer, { height: 100 + Math.max(insets.bottom, 10) }]} />
       </ScrollView>
+
+      {/* 연결 요청 수락/거절 모달 */}
+      <Modal
+        visible={showConnectionModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          setShowConnectionModal(false);
+          setSelectedConnection(null);
+        }}
+      >
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={{ flex: 1 }}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.connectionModalContent}>
+            {selectedConnection && (
+              <>
+                <Text style={[styles.modalTitle, isLargeView && { fontSize: 24 }]}>연결 요청</Text>
+                
+                <View style={styles.modalProfileSection}>
+                  <Text style={styles.modalProfileIcon}>👨‍💼</Text>
+                  <Text style={[styles.modalProfileName, isLargeView && { fontSize: 24 }]}>
+                    {selectedConnection.name}님이
+                  </Text>
+                  <Text style={[styles.modalProfileSubtitle, isLargeView && { fontSize: 18 }]}>
+                    보호자 연결을 요청했습니다
+                  </Text>
+                </View>
+
+                <View style={styles.modalInfoSection}>
+                  <View style={styles.modalInfoRow}>
+                    <Text style={[styles.modalInfoLabel, isLargeView && { fontSize: 16 }]}>📧</Text>
+                    <Text style={[styles.modalInfoText, isLargeView && { fontSize: 16 }]}>
+                      {selectedConnection.email}
+                    </Text>
+                  </View>
+                  {selectedConnection.phone_number && (
+                    <View style={styles.modalInfoRow}>
+                      <Text style={[styles.modalInfoLabel, isLargeView && { fontSize: 16 }]}>📞</Text>
+                      <Text style={[styles.modalInfoText, isLargeView && { fontSize: 16 }]}>
+                        {selectedConnection.phone_number}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+
+                <View style={styles.modalPermissionSection}>
+                  <Text style={[styles.modalPermissionTitle, isLargeView && { fontSize: 16 }]}>
+                    ℹ️ 연결하시면 다음을 공유합니다:
+                  </Text>
+                  <Text style={[styles.modalPermissionItem, isLargeView && { fontSize: 16 }]}>
+                    • 할일 관리
+                  </Text>
+                  <Text style={[styles.modalPermissionItem, isLargeView && { fontSize: 16 }]}>
+                    • 일기 열람
+                  </Text>
+                  <Text style={[styles.modalPermissionItem, isLargeView && { fontSize: 16 }]}>
+                    • 건강 정보
+                  </Text>
+                </View>
+
+                <View style={styles.modalButtons}>
+                  <TouchableOpacity
+                    style={[styles.modalButton, styles.rejectButton]}
+                    onPress={handleRejectConnection}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.rejectButtonText, isLargeView && { fontSize: 18 }]}>
+                      거절
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.modalButton, styles.acceptButton]}
+                    onPress={handleAcceptConnection}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.acceptButtonText, isLargeView && { fontSize: 18 }]}>
+                      수락
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
 
       {/* 하단 네비게이션 바 */}
       <BottomNavigationBar />
@@ -797,6 +1045,162 @@ const styles = StyleSheet.create({
   },
   metricStatusLarge: {
     fontSize: 16,
+  },
+
+  // 연결 요청 알림 배너
+  notificationBanner: {
+    backgroundColor: '#FFF4E6',
+    borderRadius: 12,
+    padding: 16,
+    marginHorizontal: 16,
+    marginTop: 16,
+    marginBottom: 8,
+    borderLeftWidth: 4,
+    borderLeftColor: '#FF9500',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  bannerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  bannerIcon: {
+    fontSize: 24,
+    marginRight: 12,
+  },
+  bannerText: {
+    flex: 1,
+  },
+  bannerTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+  bannerSubtitle: {
+    fontSize: 14,
+    color: '#666',
+  },
+  bannerArrow: {
+    fontSize: 24,
+    color: '#999',
+  },
+
+  // 연결 요청 모달
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  connectionModalContent: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 24,
+    width: '100%',
+    maxWidth: 400,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#333',
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  modalProfileSection: {
+    alignItems: 'center',
+    marginBottom: 24,
+    paddingVertical: 20,
+    backgroundColor: '#F8F9FA',
+    borderRadius: 12,
+  },
+  modalProfileIcon: {
+    fontSize: 48,
+    marginBottom: 12,
+  },
+  modalProfileName: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+  modalProfileSubtitle: {
+    fontSize: 16,
+    color: '#666',
+  },
+  modalInfoSection: {
+    marginBottom: 20,
+  },
+  modalInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  modalInfoLabel: {
+    fontSize: 14,
+    marginRight: 8,
+    width: 24,
+  },
+  modalInfoText: {
+    fontSize: 14,
+    color: '#333',
+    flex: 1,
+  },
+  modalPermissionSection: {
+    backgroundColor: '#E8F5F2',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 24,
+  },
+  modalPermissionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 12,
+  },
+  modalPermissionItem: {
+    fontSize: 14,
+    color: '#666',
+    marginLeft: 8,
+    marginBottom: 6,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  modalButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rejectButton: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+  },
+  rejectButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#666',
+  },
+  acceptButton: {
+    backgroundColor: '#34B79F',
+  },
+  acceptButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
 });
 

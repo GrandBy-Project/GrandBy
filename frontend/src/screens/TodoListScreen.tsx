@@ -1,7 +1,7 @@
 /**
  * 어르신 할일 목록 화면 - 리디자인 버전
  */
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,11 +10,13 @@ import {
   TouchableOpacity,
   Alert,
   Animated,
+  ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Header, BottomNavigationBar } from '../components';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../constants/Colors';
+import * as todoApi from '../api/todo';
 
 interface TodoItem {
   id: string;
@@ -23,8 +25,10 @@ interface TodoItem {
   time: string;
   isCompleted: boolean;
   priority: 'high' | 'medium' | 'low';
-  category: 'medicine' | 'hospital' | 'daily' | 'other';
+  category: 'medicine' | 'hospital' | 'daily' | 'other' | 'exercise' | 'meal';
 }
+
+type DateFilter = 'yesterday' | 'today' | 'tomorrow';
 
 export const TodoListScreen = () => {
   const router = useRouter();
@@ -34,94 +38,130 @@ export const TodoListScreen = () => {
   const [fadeAnim] = useState(new Animated.Value(0));
   const [expandedTodoId, setExpandedTodoId] = useState<string | null>(null);
   const [expandAnim] = useState(new Animated.Value(0));
-  const [todos, setTodos] = useState<TodoItem[]>([
-    {
-      id: '1',
-      title: '혈압약 복용',
-      description: '아침 식사 후 혈압약 복용',
-      time: '오전 8시',
-      isCompleted: false,
-      priority: 'high',
-      category: 'medicine',
-    },
-    {
-      id: '2',
-      title: '정형외과 진료',
-      description: '무릎 관절 진료 예약',
-      time: '오후 2시',
-      isCompleted: false,
-      priority: 'high',
-      category: 'hospital',
-    },
-    {
-      id: '3',
-      title: '산책하기',
-      description: '공원에서 30분 산책',
-      time: '오후 4시',
-      isCompleted: true,
-      priority: 'medium',
-      category: 'daily',
-    },
-    {
-      id: '4',
-      title: '물 마시기',
-      description: '하루 8잔 물 마시기',
-      time: '하루 종일',
-      isCompleted: false,
-      priority: 'medium',
-      category: 'daily',
-    },
-    {
-      id: '5',
-      title: '가족과 통화',
-      description: '딸과 전화 통화',
-      time: '오후 7시',
-      isCompleted: false,
-      priority: 'low',
-      category: 'other',
-    },
-  ]);
+  const [selectedDate, setSelectedDate] = useState<DateFilter>('today');
+  const [todos, setTodos] = useState<TodoItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const handleCompletePress = (id: string) => {
+  // TODO 목록 불러오기
+  const loadTodos = async () => {
+    try {
+      setIsRefreshing(true);
+      
+      // 디버깅: 토큰 확인
+      const { TokenManager } = await import('../api/client');
+      const tokens = await TokenManager.getTokens();
+      console.log('🔑 토큰 상태:', tokens ? '있음' : '없음');
+      
+      const apiTodos = await todoApi.getTodos(selectedDate);
+      
+      // API 데이터를 화면 형식에 맞게 변환
+      const mappedTodos: TodoItem[] = apiTodos.map(todo => ({
+        id: todo.todo_id,
+        title: todo.title,
+        description: todo.description || '',
+        time: todo.due_time ? formatTime(todo.due_time) : '시간 미정',
+        isCompleted: todo.status === 'completed',
+        priority: getPriority(todo.category),
+        category: mapCategory(todo.category),
+      }));
+      
+      setTodos(mappedTodos);
+    } catch (error: any) {
+      console.error('TODO 목록 불러오기 실패:', error);
+      Alert.alert('오류', '할 일 목록을 불러오지 못했습니다.');
+    } finally {
+      setIsLoading(false);
+      setIsRefreshing(false);
+    }
+  };
+
+  // 시간 포맷 변환 (HH:MM -> 오전/오후 H시)
+  const formatTime = (time: string): string => {
+    const [hours, minutes] = time.split(':').map(Number);
+    const period = hours < 12 ? '오전' : '오후';
+    const displayHours = hours % 12 || 12;
+    return `${period} ${displayHours}시${minutes > 0 ? ` ${minutes}분` : ''}`;
+  };
+
+  // 카테고리 우선순위 매핑
+  const getPriority = (category: string | null): 'high' | 'medium' | 'low' => {
+    if (category === 'medicine' || category === 'hospital') return 'high';
+    if (category === 'exercise' || category === 'meal') return 'medium';
+    return 'low';
+  };
+
+  // 카테고리 매핑
+  const mapCategory = (category: string | null): 'medicine' | 'hospital' | 'daily' | 'other' | 'exercise' | 'meal' => {
+    if (!category) return 'other';
+    if (category === 'medicine') return 'medicine';
+    if (category === 'hospital') return 'hospital';
+    if (category === 'exercise') return 'exercise';
+    if (category === 'meal') return 'meal';
+    return 'daily';
+  };
+
+  // 날짜 변경 시 TODO 목록 다시 불러오기
+  useEffect(() => {
+    loadTodos();
+  }, [selectedDate]);
+
+  // 초기 로딩
+  useEffect(() => {
+    loadTodos();
+  }, []);
+
+  const handleCompletePress = async (id: string) => {
     const todo = todos.find(t => t.id === id);
     if (!todo) return;
 
-    if (todo.isCompleted) {
-      // 완료된 할일을 누르면 미완료로 변경
-      setTodos(prevTodos =>
-        prevTodos.map(t => 
-          t.id === id ? { ...t, isCompleted: false } : t
-        )
-      );
-    } else {
-      // 미완료 할일을 누르면 완료 처리
-      setTodos(prevTodos =>
-        prevTodos.map(t => 
-          t.id === id ? { ...t, isCompleted: true } : t
-        )
-      );
-      
-      // 성공 애니메이션 표시
-      setCompletedTodoTitle(todo.title);
-      setShowSuccessAnimation(true);
-      
-      // Fade in 애니메이션
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 500,
-        useNativeDriver: true,
-      }).start();
-
-      // 2.5초 후 fade out 애니메이션
-      setTimeout(() => {
+    try {
+      if (todo.isCompleted) {
+        // 완료된 할일을 누르면 미완료로 변경 (완료 취소)
+        await todoApi.cancelTodo(id);
+        
+        // 로컬 상태 업데이트
+        setTodos(prevTodos =>
+          prevTodos.map(t => 
+            t.id === id ? { ...t, isCompleted: false } : t
+          )
+        );
+      } else {
+        // 미완료 할일을 누르면 완료 처리
+        await todoApi.completeTodo(id);
+        
+        // 로컬 상태 업데이트
+        setTodos(prevTodos =>
+          prevTodos.map(t => 
+            t.id === id ? { ...t, isCompleted: true } : t
+          )
+        );
+        
+        // 성공 애니메이션 표시
+        setCompletedTodoTitle(todo.title);
+        setShowSuccessAnimation(true);
+        
+        // Fade in 애니메이션
         Animated.timing(fadeAnim, {
-          toValue: 0,
+          toValue: 1,
           duration: 500,
           useNativeDriver: true,
-        }).start(() => {
-          setShowSuccessAnimation(false);
-        });
-      }, 2000);
+        }).start();
+
+        // 2.5초 후 fade out 애니메이션
+        setTimeout(() => {
+          Animated.timing(fadeAnim, {
+            toValue: 0,
+            duration: 500,
+            useNativeDriver: true,
+          }).start(() => {
+            setShowSuccessAnimation(false);
+          });
+        }, 2000);
+      }
+    } catch (error: any) {
+      console.error('TODO 상태 변경 실패:', error);
+      Alert.alert('오류', '할 일 상태를 변경하지 못했습니다.');
     }
   };
 
@@ -366,6 +406,38 @@ export const TodoListScreen = () => {
     );
   };
 
+  // 날짜 정보 계산
+  const getDateInfo = (dateType: DateFilter) => {
+    const today = new Date();
+    let targetDate: Date;
+    
+    switch (dateType) {
+      case 'yesterday':
+        targetDate = new Date(today);
+        targetDate.setDate(today.getDate() - 1);
+        break;
+      case 'tomorrow':
+        targetDate = new Date(today);
+        targetDate.setDate(today.getDate() + 1);
+        break;
+      default:
+        targetDate = today;
+    }
+    
+    const days = ['일', '월', '화', '수', '목', '금', '토'];
+    const month = targetDate.getMonth() + 1;
+    const date = targetDate.getDate();
+    const day = days[targetDate.getDay()];
+    
+    return {
+      dateString: `${month}월 ${date}일`,
+      dayString: `${day}요일`,
+      fullDate: targetDate,
+    };
+  };
+
+  const dateInfo = getDateInfo(selectedDate);
+
   return (
     <View style={styles.container}>
       {/* 공통 헤더 */}
@@ -374,7 +446,58 @@ export const TodoListScreen = () => {
         showBackButton 
       />
 
+      {/* 날짜 탭 네비게이션 */}
+      <View style={styles.dateTabContainer}>
+        <TouchableOpacity 
+          style={[styles.dateTab, selectedDate === 'yesterday' && styles.dateTabActive]}
+          onPress={() => setSelectedDate('yesterday')}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.dateTabText, selectedDate === 'yesterday' && styles.dateTabTextActive]}>
+            어제
+          </Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={[styles.dateTab, selectedDate === 'today' && styles.dateTabActive]}
+          onPress={() => setSelectedDate('today')}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.dateTabText, selectedDate === 'today' && styles.dateTabTextActive]}>
+            오늘
+          </Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={[styles.dateTab, selectedDate === 'tomorrow' && styles.dateTabActive]}
+          onPress={() => setSelectedDate('tomorrow')}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.dateTabText, selectedDate === 'tomorrow' && styles.dateTabTextActive]}>
+            내일
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* 선택된 날짜 정보 */}
+      <View style={styles.dateInfoCard}>
+        <Text style={styles.dateInfoText}>
+          {dateInfo.dateString}
+        </Text>
+        <Text style={styles.dateInfoDay}>
+          {dateInfo.dayString}
+        </Text>
+      </View>
+
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        {/* 로딩 상태 */}
+        {isLoading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={Colors.primary} />
+            <Text style={styles.loadingText}>할 일을 불러오는 중...</Text>
+          </View>
+        ) : (
+          <>
         {/* 오늘의 할일 요약 */}
         <View style={styles.summaryCard}>
           <View style={styles.summaryHeader}>
@@ -455,6 +578,8 @@ export const TodoListScreen = () => {
 
         {/* 하단 여백 (네비게이션 바 공간 확보) */}
         <View style={[styles.bottomSpacer, { height: 100 + Math.max(insets.bottom, 10) }]} />
+          </>
+        )}
       </ScrollView>
 
       {/* 하단 네비게이션 바 */}
@@ -474,6 +599,74 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     backgroundColor: '#FFFFFF',
+  },
+  
+  // 날짜 탭 네비게이션
+  dateTabContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+    gap: 12,
+  },
+  dateTab: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    backgroundColor: '#F8F9FA',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dateTabActive: {
+    backgroundColor: Colors.primary,
+  },
+  dateTabText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#666666',
+  },
+  dateTabTextActive: {
+    color: '#FFFFFF',
+  },
+  
+  // 날짜 정보 카드
+  dateInfoCard: {
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  dateInfoText: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#2C3E50',
+  },
+  dateInfoDay: {
+    fontSize: 18,
+    fontWeight: '500',
+    color: Colors.primary,
+  },
+  
+  // 로딩 상태
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 80,
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#666666',
+    fontWeight: '500',
   },
   
   // 새로운 아이콘 스타일들

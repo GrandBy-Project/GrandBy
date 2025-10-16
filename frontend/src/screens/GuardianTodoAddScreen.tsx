@@ -12,10 +12,14 @@ import {
   Alert,
   Modal,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Header, BottomNavigationBar } from '../components';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as todoApi from '../api/todo';
+import { useAuthStore } from '../store/authStore';
+import { Colors } from '../constants/Colors';
 
 interface TodoItem {
   id: string;
@@ -33,6 +37,8 @@ interface TodoItem {
 export const GuardianTodoAddScreen = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { user } = useAuthStore();
+  const [isSaving, setIsSaving] = useState(false);
 
   // 폼 상태
   const [newTodo, setNewTodo] = useState({
@@ -40,7 +46,8 @@ export const GuardianTodoAddScreen = () => {
     description: '',
     category: '',
     time: '',
-    date: '',
+    date: new Date().toISOString().split('T')[0], // YYYY-MM-DD
+    elderlyId: '39aa74fd-80f7-434e-baf7-1d09357ee623', // TODO: 연결된 어르신 목록에서 선택
     isRecurring: false,
     recurringType: 'daily' as 'daily' | 'weekly' | 'monthly',
     reminderEnabled: true,
@@ -52,15 +59,13 @@ export const GuardianTodoAddScreen = () => {
   const [showTimeModal, setShowTimeModal] = useState(false);
   const [showRecurringModal, setShowRecurringModal] = useState(false);
 
-  // 카테고리 옵션
+  // 카테고리 옵션 (Backend Enum과 일치)
   const categories = [
-    { id: 'medicine', name: '💊 약 복용', color: '#FF6B6B' },
-    { id: 'hospital', name: '🏥 병원 방문', color: '#4ECDC4' },
-    { id: 'exercise', name: '🏃 운동', color: '#45B7D1' },
-    { id: 'meal', name: '🍽️ 식사', color: '#96CEB4' },
-    { id: 'social', name: '👥 사회활동', color: '#FFEAA7' },
-    { id: 'hobby', name: '🎨 취미활동', color: '#DDA0DD' },
-    { id: 'other', name: '📝 기타', color: '#95A5A6' },
+    { id: 'MEDICINE', name: '💊 약 복용', color: '#FF6B6B' },
+    { id: 'HOSPITAL', name: '🏥 병원 방문', color: '#4ECDC4' },
+    { id: 'EXERCISE', name: '🏃 운동', color: '#45B7D1' },
+    { id: 'MEAL', name: '🍽️ 식사', color: '#96CEB4' },
+    { id: 'OTHER', name: '📝 기타', color: '#95A5A6' },
   ];
 
   // 시간 옵션
@@ -78,7 +83,7 @@ export const GuardianTodoAddScreen = () => {
     { id: 'monthly', name: '매월' },
   ];
 
-  const handleSaveTodo = () => {
+  const handleSaveTodo = async () => {
     if (!newTodo.title.trim()) {
       Alert.alert('알림', '할일 제목을 입력해주세요.');
       return;
@@ -94,17 +99,49 @@ export const GuardianTodoAddScreen = () => {
       return;
     }
 
-    // TODO: 실제 저장 로직 구현
-    Alert.alert(
-      '저장 완료',
-      '어르신의 할일이 등록되었습니다.',
-      [
-        {
-          text: '확인',
-          onPress: () => router.back(),
-        },
-      ]
-    );
+    try {
+      setIsSaving(true);
+
+      // 시간 변환 (오전 8시 → 08:00)
+      const timeStr = newTodo.time.replace('오전 ', '').replace('오후 ', '').replace('시', '');
+      const hour = newTodo.time.includes('오후') 
+        ? (parseInt(timeStr) === 12 ? 12 : parseInt(timeStr) + 12)
+        : (parseInt(timeStr) === 12 ? 0 : parseInt(timeStr));
+      const formattedTime = `${hour.toString().padStart(2, '0')}:00`;
+
+      // API 요청 데이터
+      const todoData: todoApi.TodoCreateRequest = {
+        elderly_id: newTodo.elderlyId,
+        title: newTodo.title,
+        description: newTodo.description || undefined,
+        category: newTodo.category as any, // 이미 대문자로 저장됨
+        due_date: newTodo.date,
+        due_time: formattedTime,
+        is_recurring: newTodo.isRecurring,
+        recurring_type: newTodo.isRecurring ? newTodo.recurringType.toUpperCase() as any : undefined,
+      };
+
+      console.log('📤 TODO 생성 요청:', JSON.stringify(todoData, null, 2));
+
+      const result = await todoApi.createTodo(todoData);
+      console.log('✅ TODO 생성 성공:', result.todo_id);
+
+      Alert.alert(
+        '저장 완료',
+        '어르신의 할일이 등록되었습니다.',
+        [
+          {
+            text: '확인',
+            onPress: () => router.back(),
+          },
+        ]
+      );
+    } catch (error: any) {
+      console.error('TODO 저장 실패:', error);
+      Alert.alert('오류', '할일 등록에 실패했습니다.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const getCategoryById = (id: string) => {
@@ -260,11 +297,16 @@ export const GuardianTodoAddScreen = () => {
       {/* 저장 버튼 */}
       <View style={styles.footer}>
         <TouchableOpacity
-          style={styles.saveButton}
+          style={[styles.saveButton, isSaving && { opacity: 0.6 }]}
           onPress={handleSaveTodo}
           activeOpacity={0.8}
+          disabled={isSaving}
         >
-          <Text style={styles.saveButtonText}>할일 등록하기</Text>
+          {isSaving ? (
+            <ActivityIndicator color="#FFFFFF" />
+          ) : (
+            <Text style={styles.saveButtonText}>할일 등록하기</Text>
+          )}
         </TouchableOpacity>
       </View>
 

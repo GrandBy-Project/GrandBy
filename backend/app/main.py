@@ -6,6 +6,8 @@ Grandby FastAPI Application
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Form, HTTPException, Depends, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 import logging
@@ -562,6 +564,25 @@ async def log_requests(request: Request, call_next):
 
 
 # ==================== Exception Handlers ====================
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """422 Validation Error 상세 정보 로깅"""
+    logger.error(f"❌ 422 Validation Error:")
+    logger.error(f"❌ URL: {request.url}")
+    logger.error(f"❌ Method: {request.method}")
+    logger.error(f"❌ Body: {exc.body}")
+    logger.error(f"❌ Errors: {exc.errors()}")
+    
+    # 상세 에러 정보를 JSON으로 반환
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": "Validation Error",
+            "errors": exc.errors(),
+            "body": exc.body if isinstance(exc.body, dict) else (exc.body.decode() if exc.body else None)
+        }
+    )
 
 @app.exception_handler(404)
 async def not_found_handler(request: Request, exc):
