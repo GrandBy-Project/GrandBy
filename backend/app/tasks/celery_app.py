@@ -34,12 +34,32 @@ celery_app.conf.beat_schedule = {
     # AI 자동 전화 스케줄링 (매 시간마다 체크)
     "check-call-schedule": {
         "task": "app.tasks.call_scheduler.check_and_make_calls",
-        "schedule": crontab(minute="*/30"),  # 30분마다 체크
+        "schedule": crontab(minute="*/1"),  # 1분마다 체크
     },
     # 감정 분석 알림 체크 (매일 오전 9시)
     "check-emotion-alerts": {
         "task": "app.tasks.notification_sender.check_emotion_alerts",
         "schedule": crontab(hour=9, minute=0),
+    },
+    # 반복 TODO 자동 생성 (매일 자정)
+    "generate-daily-recurring-todos": {
+        "task": "app.tasks.todo_scheduler.generate_daily_recurring_todos",
+        "schedule": crontab(hour=0, minute=0),  # 매일 00:00
+    },
+    # TODO 리마인더 전송 (매 30분마다)
+    "send-todo-reminders": {
+        "task": "app.tasks.todo_scheduler.send_todo_reminders",
+        "schedule": crontab(minute="*/30"),  # 30분마다
+    },
+    # 미완료 TODO 체크 (매일 밤 9시)
+    "check-overdue-todos": {
+        "task": "app.tasks.todo_scheduler.check_overdue_todos",
+        "schedule": crontab(hour=21, minute=0),  # 매일 21:00
+    },
+    # 오래된 TODO 정리 (매주 일요일 자정)
+    "cleanup-old-todos": {
+        "task": "app.tasks.todo_scheduler.cleanup_old_todos",
+        "schedule": crontab(hour=0, minute=0, day_of_week=0),  # 매주 일요일 00:00
     },
 }
 
