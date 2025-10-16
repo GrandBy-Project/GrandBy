@@ -6,6 +6,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
+from sqlalchemy import and_
 from app.database import get_db
 from app.schemas.user import UserCreate, UserLogin, Token, UserResponse
 from app.models.user import User, UserSettings
@@ -17,7 +18,7 @@ from pydantic import BaseModel, EmailStr
 import uuid
 import random
 import string
-from app.utils.email import send_verification_email
+from app.utils.email import send_verification_email, send_password_reset_email
 from app.utils.phone import normalize_phone_number
 
 router = APIRouter()
@@ -84,6 +85,8 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
         name=user_data.name,
         role=user_data.role,
         phone_number=normalize_phone_number(user_data.phone_number),
+        birth_date=user_data.birth_date,
+        gender=user_data.gender,
         auth_provider=user_data.auth_provider,
         is_active=True,
         is_verified=False,
@@ -470,5 +473,218 @@ async def verify_email(request: VerifyEmailRequest):
     return {
         "success": True,
         "message": "이메일 인증이 완료되었습니다."
+    }
+
+
+# ==================== 계정 찾기 ====================
+# 이메일 찾기
+class FindEmailRequest(BaseModel):
+    name: str
+    phone_number: str
+
+
+class FindEmailResponse(BaseModel):
+    success: bool
+    masked_email: str
+    message: str
+
+
+@router.post("/find-email", response_model=FindEmailResponse)
+async def find_email(
+    request: FindEmailRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    이메일 찾기 (이름 + 전화번호)
+    """
+    # 전화번호에서 숫자만 추출
+    phone = ''.join(filter(str.isdigit, request.phone_number))
+    
+    # 사용자 검색
+    user = db.query(User).filter(
+        and_(
+            User.name == request.name,
+            User.phone_number == phone,
+            User.is_active == True,
+            User.deleted_at == None
+        )
+    ).first()
+    
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="일치하는 사용자를 찾을 수 없습니다"
+        )
+    
+    # 이메일 마스킹
+    email = user.email
+    at_index = email.index('@')
+    local = email[:at_index]
+    domain = email[at_index:]
+    
+    if len(local) <= 3:
+        masked_local = local[0] + '*' * (len(local) - 1)
+    else:
+        masked_local = local[:3] + '*' * (len(local) - 3)
+    
+    masked_email = masked_local + domain
+    
+    return {
+        "success": True,
+        "masked_email": masked_email,
+        "message": f"가입하신 이메일은 {masked_email} 입니다"
+    }
+
+
+# 비밀번호 재설정 요청
+class ResetPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordResponse(BaseModel):
+    success: bool
+    message: str
+    expires_in: int
+
+
+# 비밀번호 재설정 코드 저장소
+password_reset_codes: dict[str, dict] = {}
+
+
+@router.post("/reset-password-request", response_model=ResetPasswordResponse)
+async def reset_password_request(
+    request: ResetPasswordRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    비밀번호 재설정 요청 (6자리 코드 발송)
+    """
+    # 사용자 확인
+    user = db.query(User).filter(
+        and_(
+            User.email == request.email,
+            User.is_active == True,
+            User.deleted_at == None
+        )
+    ).first()
+    
+    if not user:
+        # 보안상 이유로 동일한 메시지 반환
+        return {
+            "success": True,
+            "message": "해당 이메일로 비밀번호 재설정 코드가 발송되었습니다",
+            "expires_in": 300
+        }
+    
+    # 인증 코드 생성
+    code = generate_verification_code()
+    expires_at = datetime.utcnow() + timedelta(minutes=5)
+    
+    # 메모리에 저장
+    password_reset_codes[request.email] = {
+        "code": code,
+        "expires_at": expires_at,
+        "attempts": 0,
+        "user_id": user.user_id
+    }
+    
+    # 이메일 발송
+    email_sent = await send_password_reset_email(request.email, code)
+    
+    if not email_sent and settings.ENABLE_EMAIL:
+        raise HTTPException(
+            status_code=500,
+            detail="이메일 발송에 실패했습니다"
+        )
+    
+    return {
+        "success": True,
+        "message": "해당 이메일로 비밀번호 재설정 코드가 발송되었습니다",
+        "expires_in": 300
+    }
+
+
+# 비밀번호 재설정 확인 및 변경
+class ResetPasswordVerifyRequest(BaseModel):
+    email: EmailStr
+    code: str
+    new_password: str
+
+
+@router.post("/reset-password-verify")
+async def reset_password_verify(
+    request: ResetPasswordVerifyRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    비밀번호 재설정 코드 확인 및 비밀번호 변경
+    """
+    # 저장된 코드 확인
+    stored = password_reset_codes.get(request.email)
+    
+    if not stored:
+        raise HTTPException(
+            status_code=400,
+            detail="재설정 코드를 찾을 수 없습니다. 다시 요청해주세요"
+        )
+    
+    # 만료 확인
+    if datetime.utcnow() > stored["expires_at"]:
+        del password_reset_codes[request.email]
+        raise HTTPException(
+            status_code=400,
+            detail="재설정 코드가 만료되었습니다"
+        )
+    
+    # 시도 횟수 확인
+    if stored["attempts"] >= 5:
+        del password_reset_codes[request.email]
+        raise HTTPException(
+            status_code=429,
+            detail="시도 횟수를 초과했습니다"
+        )
+    
+    # 코드 확인
+    if stored["code"] != request.code:
+        stored["attempts"] += 1
+        raise HTTPException(
+            status_code=400,
+            detail=f"재설정 코드가 일치하지 않습니다 ({5 - stored['attempts']}회 남음)"
+        )
+    
+    # 비밀번호 검증
+    if len(request.new_password) < 6:
+        raise HTTPException(
+            status_code=400,
+            detail="비밀번호는 최소 6자 이상이어야 합니다"
+        )
+    
+    # 사용자 조회
+    user = db.query(User).filter(User.user_id == stored["user_id"]).first()
+    
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="사용자를 찾을 수 없습니다"
+        )
+    
+    # 비밀번호 해싱 및 업데이트
+    password_bytes = request.new_password.encode('utf-8')
+    if len(password_bytes) > 72:
+        password_to_hash = password_bytes[:72].decode('utf-8', errors='ignore')
+    else:
+        password_to_hash = request.new_password
+    
+    user.password_hash = pwd_context.hash(password_to_hash)
+    user.updated_at = datetime.utcnow()
+    
+    db.commit()
+    
+    # 재설정 코드 삭제
+    del password_reset_codes[request.email]
+    
+    return {
+        "success": True,
+        "message": "비밀번호가 성공적으로 변경되었습니다"
     }
 
