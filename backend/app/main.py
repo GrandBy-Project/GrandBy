@@ -25,7 +25,7 @@ import time
 from twilio.twiml.voice_response import VoiceResponse, Connect, Stream
 from openai import OpenAI
 
-from app.routers import auth, users, calls, diaries, todos, notifications, dashboard, twilio
+from app.routers import auth, users, calls, diaries, todos, notifications, dashboard
 from app.config import settings, is_development
 from app.database import test_db_connection, get_db
 from app.services.ai_call.stt_service import STTService
@@ -662,13 +662,6 @@ app.include_router(
     calls.router,
     prefix="/api/calls",
     tags=["AI Calls"]
-)
-
-# Twilio Voice (VoIP)
-app.include_router(
-    twilio.router,
-    prefix="/api/twilio",
-    tags=["Twilio Voice"]
 )
 
 # 다이어리

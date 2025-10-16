@@ -43,11 +43,6 @@ class Settings(BaseSettings):
     API_BASE_URL: str | None = None  # WebSocket용 공개 도메인 (예: your-domain.com)
     TEST_PHONE_NUMBER: str | None = None  # 테스트용 전화번호 (예: +821012345678)
     
-    # Twilio Voice SDK (VoIP)
-    TWILIO_API_KEY_SID: str | None = None  # Twilio API Key SID
-    TWILIO_API_KEY_SECRET: str | None = None  # Twilio API Key Secret
-    TWILIO_TWIML_APP_SID: str | None = None  # TwiML App SID
-    
     # ==================== AWS S3 ====================
     AWS_ACCESS_KEY_ID: str
     AWS_SECRET_ACCESS_KEY: str
