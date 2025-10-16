@@ -3,12 +3,14 @@
 사용자 연결, 프로필 등
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_
 from typing import List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
+from pydantic import BaseModel, EmailStr
 import uuid
+import re
 
 from app.database import get_db
 from app.schemas.user import (
@@ -16,9 +18,10 @@ from app.schemas.user import (
     ElderlySearchResult, ConnectionListResponse, ConnectionWithUserInfo,
     ConnectionCancelRequest
 )
-from app.models.user import User, UserConnection, UserRole, ConnectionStatus
+from app.models.user import User, UserConnection, UserRole, ConnectionStatus, Gender
 from app.models.notification import Notification, NotificationType
-from app.routers.auth import get_current_user
+from app.routers.auth import get_current_user, pwd_context
+from app.utils.image import save_profile_image, delete_profile_image
 
 router = APIRouter()
 
@@ -562,4 +565,236 @@ async def get_connected_elderly(
             elderly_list.append(UserResponse.from_orm(elderly))
     
     return elderly_list
+
+
+# ==================== 프로필 이미지 업로드 ====================
+@router.post("/profile-image")
+async def upload_profile_image(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    프로필 이미지 업로드
+    
+    - 최대 5MB
+    - JPG, PNG, WEBP 지원
+    - 자동 리사이징 (512x512)
+    """
+    # 기존 이미지 삭제
+    if current_user.profile_image_url:
+        await delete_profile_image(current_user.profile_image_url)
+    
+    # 새 이미지 저장
+    image_url = await save_profile_image(file, current_user.user_id)
+    
+    # DB 업데이트
+    current_user.profile_image_url = image_url
+    current_user.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(current_user)
+    
+    return {
+        "message": "프로필 이미지가 업로드되었습니다",
+        "profile_image_url": image_url
+    }
+
+
+# ==================== 프로필 이미지 삭제 ====================
+@router.delete("/profile-image")
+async def delete_profile_image_endpoint(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """프로필 이미지 삭제"""
+    if not current_user.profile_image_url:
+        raise HTTPException(
+            status_code=404,
+            detail="프로필 이미지가 없습니다"
+        )
+    
+    # 이미지 파일 삭제
+    await delete_profile_image(current_user.profile_image_url)
+    
+    # DB 업데이트
+    current_user.profile_image_url = None
+    current_user.updated_at = datetime.utcnow()
+    db.commit()
+    
+    return {"message": "프로필 이미지가 삭제되었습니다"}
+
+
+# ==================== 프로필 수정 ====================
+class ProfileUpdateRequest(BaseModel):
+    name: str
+    phone_number: str
+    birth_date: date
+    gender: Gender
+
+
+@router.put("/profile", response_model=UserResponse)
+async def update_profile(
+    request: ProfileUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    프로필 정보 수정
+    
+    - 이름, 전화번호, 생년월일, 성별 수정 가능
+    - 이메일 변경은 별도 인증 필요 (미구현)
+    """
+    # 전화번호 중복 확인 (본인 제외)
+    if request.phone_number:
+        existing_user = db.query(User).filter(
+            and_(
+                User.phone_number == request.phone_number,
+                User.user_id != current_user.user_id
+            )
+        ).first()
+        
+        if existing_user:
+            raise HTTPException(
+                status_code=400,
+                detail="이미 사용 중인 전화번호입니다"
+            )
+    
+    # 생년월일 검증
+    today = date.today()
+    age = today.year - request.birth_date.year - (
+        (today.month, today.day) < (request.birth_date.month, request.birth_date.day)
+    )
+    
+    if age < 14:
+        raise HTTPException(
+            status_code=400,
+            detail="만 14세 이상만 가입 가능합니다"
+        )
+    
+    # 프로필 업데이트
+    current_user.name = request.name
+    current_user.phone_number = request.phone_number
+    current_user.birth_date = request.birth_date
+    current_user.gender = request.gender
+    current_user.updated_at = datetime.utcnow()
+    
+    db.commit()
+    db.refresh(current_user)
+    
+    return UserResponse.from_orm(current_user)
+
+
+# ==================== 비밀번호 변경 ====================
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+@router.put("/change-password")
+async def change_password(
+    request: ChangePasswordRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    비밀번호 변경
+    
+    - 현재 비밀번호 확인 필수
+    - 새 비밀번호 유효성 검증
+    """
+    # 소셜 로그인 사용자는 비밀번호 변경 불가
+    if not current_user.password_hash:
+        raise HTTPException(
+            status_code=400,
+            detail="소셜 로그인 사용자는 비밀번호를 변경할 수 없습니다"
+        )
+    
+    # 현재 비밀번호 확인
+    if not pwd_context.verify(request.current_password, current_user.password_hash):
+        raise HTTPException(
+            status_code=400,
+            detail="현재 비밀번호가 일치하지 않습니다"
+        )
+    
+    # 새 비밀번호 검증
+    if len(request.new_password) < 6:
+        raise HTTPException(
+            status_code=400,
+            detail="비밀번호는 최소 6자 이상이어야 합니다"
+        )
+    
+    # 새 비밀번호가 현재 비밀번호와 동일한지 확인
+    if request.current_password == request.new_password:
+        raise HTTPException(
+            status_code=400,
+            detail="새 비밀번호는 현재 비밀번호와 달라야 합니다"
+        )
+    
+    # 비밀번호 해싱 및 업데이트
+    password_bytes = request.new_password.encode('utf-8')
+    if len(password_bytes) > 72:
+        password_to_hash = password_bytes[:72].decode('utf-8', errors='ignore')
+    else:
+        password_to_hash = request.new_password
+    
+    current_user.password_hash = pwd_context.hash(password_to_hash)
+    current_user.updated_at = datetime.utcnow()
+    
+    db.commit()
+    
+    return {
+        "success": True,
+        "message": "비밀번호가 성공적으로 변경되었습니다"
+    }
+
+
+# ==================== 계정 삭제 ====================
+class DeleteAccountRequest(BaseModel):
+    password: str
+    reason: str | None = None
+
+
+@router.delete("/account")
+async def delete_account(
+    request: DeleteAccountRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    계정 삭제 (Soft Delete)
+    
+    - 비밀번호 확인 필수
+    - 30일 유예 기간 후 완전 삭제
+    - 관련 데이터 익명화
+    """
+    # 소셜 로그인이 아닌 경우 비밀번호 확인
+    if current_user.password_hash:
+        if not pwd_context.verify(request.password, current_user.password_hash):
+            raise HTTPException(
+                status_code=400,
+                detail="비밀번호가 일치하지 않습니다"
+            )
+    
+    # Soft Delete 처리
+    current_user.is_active = False
+    current_user.deleted_at = datetime.utcnow()
+    current_user.updated_at = datetime.utcnow()
+    
+    # 프로필 이미지 삭제
+    if current_user.profile_image_url:
+        await delete_profile_image(current_user.profile_image_url)
+        current_user.profile_image_url = None
+    
+    # 개인정보 익명화
+    current_user.email = f"deleted_{current_user.user_id}@deleted.com"
+    current_user.name = "탈퇴한 사용자"
+    current_user.phone_number = None
+    
+    db.commit()
+    
+    return {
+        "success": True,
+        "message": "계정이 삭제되었습니다. 30일 이내 복구 가능합니다.",
+        "deleted_at": current_user.deleted_at.isoformat()
+    }
 

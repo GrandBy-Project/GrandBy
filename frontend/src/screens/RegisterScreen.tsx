@@ -26,8 +26,10 @@ import {
   formatPhoneNumber,
   validateName,
   validateVerificationCode,
+  validateBirthDate,
+  formatBirthDate,
 } from '../utils/validation';
-import { UserRole } from '../types';
+import { UserRole, Gender } from '../types';
 import apiClient, { TokenManager } from '../api/client';
 import { TermsModal } from '../components/TermsModal';
 import { useAuthStore } from '../store/authStore';
@@ -43,6 +45,7 @@ export const RegisterScreen = () => {
   const confirmPasswordRef = useRef<TextInput>(null);
   const nameRef = useRef<TextInput>(null);
   const phoneRef = useRef<TextInput>(null);
+  const birthDateRef = useRef<TextInput>(null);
   
   // 폼 상태
   const [email, setEmail] = useState('');
@@ -55,6 +58,8 @@ export const RegisterScreen = () => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [name, setName] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
+  const [birthDate, setBirthDate] = useState('');
+  const [gender, setGender] = useState<Gender>(Gender.MALE);
   const [role, setRole] = useState<UserRole>(UserRole.ELDERLY);
   
   // 에러 상태
@@ -154,6 +159,12 @@ export const RegisterScreen = () => {
     const formatted = formatPhoneNumber(text);
     setPhoneNumber(formatted);
   };
+  
+  // 생년월일 입력 처리
+  const handleBirthDateChange = (text: string) => {
+    const formatted = formatBirthDate(text);
+    setBirthDate(formatted);
+  };
 
   // 폼 검증
   const validateForm = (): boolean => {
@@ -186,6 +197,12 @@ export const RegisterScreen = () => {
     if (!phoneValidation.valid) {
       newErrors.phoneNumber = phoneValidation.message;
     }
+    
+    // 생년월일 검증 (필수)
+    const birthDateValidation = validateBirthDate(birthDate);
+    if (!birthDateValidation.valid) {
+      newErrors.birthDate = birthDateValidation.message;
+    }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -216,6 +233,8 @@ export const RegisterScreen = () => {
         name: name.trim(),
         role,
         phone_number: phoneNumber.replace(/[^\d]/g, ''),
+        birth_date: birthDate,
+        gender: gender,
         auth_provider: 'email',
       });
 
@@ -410,9 +429,63 @@ export const RegisterScreen = () => {
             placeholder="010-1234-5678"
             keyboardType="phone-pad"
             error={errors.phoneNumber}
+            returnKeyType="next"
+            onSubmitEditing={() => birthDateRef.current?.focus()}
+          />
+        </View>
+
+        {/* 생년월일 */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>생년월일 * (YYYY-MM-DD)</Text>
+          <Input
+            inputRef={birthDateRef}
+            label=""
+            value={birthDate}
+            onChangeText={handleBirthDateChange}
+            placeholder="1990-01-01"
+            keyboardType="numeric"
+            error={errors.birthDate}
+            maxLength={10}
             returnKeyType="done"
             onSubmitEditing={() => {}}
           />
+          <Text style={styles.helperText}>만 14세 이상만 가입 가능합니다</Text>
+        </View>
+
+        {/* 성별 */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>성별 *</Text>
+          <View style={styles.genderButtons}>
+            <TouchableOpacity
+              style={[
+                styles.genderButton,
+                gender === Gender.MALE && styles.genderButtonActive,
+              ]}
+              onPress={() => setGender(Gender.MALE)}
+            >
+              <Text style={[
+                styles.genderButtonText,
+                gender === Gender.MALE && styles.genderButtonTextActive,
+              ]}>
+                남성
+              </Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={[
+                styles.genderButton,
+                gender === Gender.FEMALE && styles.genderButtonActive,
+              ]}
+              onPress={() => setGender(Gender.FEMALE)}
+            >
+              <Text style={[
+                styles.genderButtonText,
+                gender === Gender.FEMALE && styles.genderButtonTextActive,
+              ]}>
+                여성
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* 사용자 유형 */}
@@ -600,5 +673,39 @@ const styles = StyleSheet.create({
   buttonContainer: {
     marginTop: 16,
     marginBottom: 32,
+  },
+  helperText: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+    marginTop: 4,
+  },
+  genderButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  genderButton: {
+    flex: 1,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: Colors.border,
+    backgroundColor: Colors.backgroundLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 54,
+  },
+  genderButtonActive: {
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primaryPale,
+  },
+  genderButtonText: {
+    fontSize: 16,
+    color: Colors.textSecondary,
+    fontWeight: '600',
+  },
+  genderButtonTextActive: {
+    color: Colors.primary,
+    fontWeight: '700',
   },
 });

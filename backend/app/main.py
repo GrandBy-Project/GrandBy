@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Form, HTTP
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.exceptions import RequestValidationError
+from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 from contextlib import asynccontextmanager
 import logging
@@ -20,6 +21,7 @@ import audioop
 from datetime import datetime
 from sqlalchemy.orm import Session
 import time
+from pathlib import Path
 
 from twilio.twiml.voice_response import VoiceResponse, Connect, Stream
 from openai import OpenAI
@@ -527,6 +529,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ==================== Static Files ====================
+# uploads 디렉토리가 없으면 생성
+uploads_dir = Path(settings.UPLOAD_DIR)
+uploads_dir.mkdir(parents=True, exist_ok=True)
+
+# 정적 파일 서빙 (프로필 이미지 등)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 
 # 요청 로깅 Middleware

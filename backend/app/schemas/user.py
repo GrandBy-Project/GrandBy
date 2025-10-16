@@ -2,10 +2,10 @@
 사용자 관련 Pydantic 스키마
 """
 
-from pydantic import BaseModel, EmailStr
-from datetime import datetime
+from pydantic import BaseModel, EmailStr, validator
+from datetime import datetime, date
 from typing import Optional
-from app.models.user import UserRole, AuthProvider, ConnectionStatus
+from app.models.user import UserRole, AuthProvider, ConnectionStatus, Gender
 
 
 class UserBase(BaseModel):
@@ -19,7 +19,24 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     """회원가입 요청"""
     password: str
+    birth_date: date  # 필수
+    gender: Gender  # 필수
     auth_provider: AuthProvider = AuthProvider.EMAIL
+    
+    @validator('birth_date')
+    def validate_birth_date(cls, v):
+        """생년월일 유효성 검증"""
+        today = date.today()
+        age = today.year - v.year - ((today.month, today.day) < (v.month, v.day))
+        
+        if age < 14:
+            raise ValueError('만 14세 이상만 가입 가능합니다')
+        if age > 120:
+            raise ValueError('올바른 생년월일을 입력해주세요')
+        if v > today:
+            raise ValueError('미래 날짜는 입력할 수 없습니다')
+        
+        return v
 
 
 class UserLogin(BaseModel):
@@ -33,6 +50,9 @@ class UserResponse(UserBase):
     user_id: str
     is_active: bool
     created_at: datetime
+    birth_date: Optional[date] = None
+    gender: Optional[Gender] = None
+    profile_image_url: Optional[str] = None
     
     class Config:
         from_attributes = True
