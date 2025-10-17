@@ -129,6 +129,70 @@ JSON 형식으로 응답:
             logger.error(f"❌ 감정 분석 실패: {e}")
             raise
     
+    async def generate_response_streaming(self, user_message: str, conversation_history: list = None):
+        """
+        스트리밍 방식으로 LLM 응답 생성 (실시간 최적화)
+        
+        이 메서드는 OpenAI의 stream=True 옵션을 사용하여
+        응답이 생성되는 즉시 yield로 반환합니다.
+        사용자는 AI가 말하는 것을 거의 실시간으로 들을 수 있습니다.
+        
+        Args:
+            user_message: 사용자(어르신)의 메시지
+            conversation_history: 이전 대화 기록 (옵션)
+        
+        Yields:
+            str: 생성된 텍스트 청크 (단어 또는 구 단위)
+        
+        Example:
+            async for chunk in llm_service.generate_response_streaming("안녕하세요"):
+                print(chunk, end='', flush=True)
+        """
+        try:
+            start_time = time.time()
+            logger.info(f"🤖 LLM 스트리밍 응답 생성 시작")
+            logger.info(f"📥 사용자 입력: {user_message}")
+            
+            # 메시지 구성
+            messages = [{"role": "system", "content": self.elderly_care_prompt}]
+            
+            # 대화 기록이 있으면 추가 (최근 5개만)
+            if conversation_history:
+                messages.extend(conversation_history[-5:])
+            
+            # 현재 사용자 메시지 추가
+            messages.append({"role": "user", "content": user_message})
+            
+            # 스트리밍 API 호출
+            # stream=True로 설정하면 응답이 생성되는 즉시 받을 수 있습니다
+            stream = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                max_tokens=200,
+                temperature=0.8,
+                stream=True  # ⭐ 핵심: 스트리밍 활성화
+            )
+            
+            full_response = []  # 전체 응답 저장용
+            
+            # 스트리밍으로 받은 청크를 즉시 yield
+            for chunk in stream:
+                # delta.content가 있으면 생성된 텍스트 조각입니다
+                if chunk.choices[0].delta.content:
+                    content = chunk.choices[0].delta.content
+                    full_response.append(content)
+                    yield content  # 즉시 반환 (TTS가 바로 처리 가능)
+            
+            elapsed_time = time.time() - start_time
+            final_text = "".join(full_response)
+            
+            logger.info(f"✅ LLM 스트리밍 완료 ({elapsed_time:.2f}초)")
+            logger.info(f"📤 전체 응답: {final_text}")
+            
+        except Exception as e:
+            logger.error(f"❌ LLM 스트리밍 실패: {e}")
+            yield "죄송합니다. 응답 생성 중 오류가 발생했습니다."
+    
     def summarize_conversation_to_diary(self, conversation_text: str):
         """
         통화 내용을 1인칭 일기로 변환
@@ -163,6 +227,52 @@ JSON 형식으로 응답:
         except Exception as e:
             logger.error(f"Failed to generate diary: {e}")
             raise
+    
+    def summarize_call_conversation(self, conversation_history: list):
+        """
+        통화 대화 내용 요약 (보호자용)
+        
+        Args:
+            conversation_history: 대화 기록 [{"role": "user", "content": "..."}, ...]
+        
+        Returns:
+            str: 요약된 대화 내용
+        """
+        try:
+            # 대화 기록을 텍스트로 변환
+            conversation_text = "\n".join([
+                f"{'어르신' if msg['role'] == 'user' else 'AI'}: {msg['content']}"
+                for msg in conversation_history
+            ])
+            
+            prompt = f"""
+다음은 어르신과 AI 비서의 통화 내용입니다. 
+보호자가 이해하기 쉽게 핵심 내용을 3-5줄로 요약해주세요.
+
+요약에 포함할 내용:
+- 어르신의 건강 상태 (식사, 약 복용, 통증 등)
+- 감정 상태 (기분, 우울감 등)
+- 특별한 일정이나 요청사항
+- 주의가 필요한 사항
+
+통화 내용:
+{conversation_text}
+
+요약:
+"""
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=300,
+                temperature=0.7,
+            )
+            
+            summary = response.choices[0].message.content
+            logger.info(f"✅ 통화 요약 생성 완료")
+            return summary
+        except Exception as e:
+            logger.error(f"❌ 통화 요약 생성 실패: {e}")
+            return "요약 생성 실패"
     
     def extract_schedule_from_conversation(self, conversation_text: str):
         """

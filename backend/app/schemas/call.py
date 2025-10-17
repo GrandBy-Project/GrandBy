@@ -17,6 +17,7 @@ class CallLogResponse(BaseModel):
     call_end_time: Optional[datetime]
     call_duration: Optional[int]
     audio_file_url: Optional[str]
+    conversation_summary: Optional[str]
     created_at: datetime
     
     class Config:
