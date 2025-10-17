@@ -12,6 +12,7 @@ import {
   Image,
   ActivityIndicator,
 } from 'react-native';
+import { Ionicons, MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuthStore } from '../store/authStore';
 import { useRouter } from 'expo-router';
@@ -186,7 +187,7 @@ export const MyPageScreen = () => {
                   {
                     text: '삭제',
                     style: 'destructive',
-                    onPress: async (password) => {
+                    onPress: async (password?: string) => {
                       if (!password) {
                         Alert.alert('오류', '비밀번호를 입력해주세요.');
                         return;
@@ -275,25 +276,29 @@ export const MyPageScreen = () => {
       id: 'name',
       label: '이름',
       value: user?.name || '사용자',
-      icon: '👤',
+      iconName: 'person-outline' as const,
+      iconLibrary: 'Ionicons' as const,
     },
     {
       id: 'email',
       label: '이메일',
       value: user?.email || '이메일 없음',
-      icon: '📧',
+      iconName: 'mail-outline' as const,
+      iconLibrary: 'Ionicons' as const,
     },
     {
       id: 'phone',
       label: '전화번호',
       value: user?.phone_number || '전화번호 없음',
-      icon: '📱',
+      iconName: 'call-outline' as const,
+      iconLibrary: 'Ionicons' as const,
     },
     {
       id: 'role',
       label: '계정 유형',
-      value: user?.role === UserRole.ELDERLY ? '👴 어르신' : '👨‍👩‍👧 보호자',
-      icon: user?.role === UserRole.ELDERLY ? '👴' : '👨‍👩‍👧',
+      value: user?.role === UserRole.ELDERLY ? '어르신' : '보호자',
+      iconName: user?.role === UserRole.ELDERLY ? 'person-circle-outline' : 'people-circle-outline' as const,
+      iconLibrary: 'Ionicons' as const,
     },
   ];
 
@@ -303,7 +308,8 @@ export const MyPageScreen = () => {
       id: 'profile-edit',
       title: '프로필 수정',
       description: '이름, 전화번호 등 수정',
-      icon: '✏️',
+      iconName: 'account-edit' as const,
+      iconLibrary: 'MaterialCommunityIcons' as const,
       color: '#007AFF',
       onPress: () => router.push('/profile-edit'),
     },
@@ -311,7 +317,8 @@ export const MyPageScreen = () => {
       id: 'password-change',
       title: '비밀번호 변경',
       description: '계정 보안을 위한 비밀번호 변경',
-      icon: '🔐',
+      iconName: 'lock-reset' as const,
+      iconLibrary: 'MaterialCommunityIcons' as const,
       color: '#FF9500',
       onPress: () => router.push('/change-password'),
     },
@@ -319,7 +326,8 @@ export const MyPageScreen = () => {
       id: 'account-delete',
       title: '계정 삭제',
       description: '계정을 완전히 삭제하기',
-      icon: '🗑️',
+      iconName: 'delete-forever' as const,
+      iconLibrary: 'MaterialIcons' as const,
       color: '#FF3B30',
       onPress: handleDeleteAccount,
     },
@@ -331,7 +339,8 @@ export const MyPageScreen = () => {
       id: 'privacy-policy',
       title: '개인정보 처리방침',
       description: '개인정보 수집 및 이용 방침',
-      icon: '🛡️',
+      iconName: 'shield-checkmark' as const,
+      iconLibrary: 'Ionicons' as const,
       color: '#34C759',
       onPress: () => Alert.alert('개인정보 처리방침', '개인정보 처리방침을 확인할 수 있습니다.'),
     },
@@ -339,7 +348,8 @@ export const MyPageScreen = () => {
       id: 'terms',
       title: '이용약관',
       description: '서비스 이용약관',
-      icon: '📋',
+      iconName: 'document-text' as const,
+      iconLibrary: 'Ionicons' as const,
       color: '#5856D6',
       onPress: () => Alert.alert('이용약관', '서비스 이용약관을 확인할 수 있습니다.'),
     }
@@ -370,9 +380,13 @@ export const MyPageScreen = () => {
                   resizeMode="cover"
                 />
               ) : (
-                <Text style={styles.profileImage}>
-                  {user?.role === UserRole.ELDERLY ? '👴' : '👨‍👩‍👧'}
-                </Text>
+                <View style={styles.profileImagePlaceholder}>
+                  <Ionicons 
+                    name={user?.role === UserRole.ELDERLY ? 'person' : 'people'} 
+                    size={40} 
+                    color="#FFFFFF" 
+                  />
+                </View>
               )}
               {isUploading && (
                 <View style={styles.uploadingOverlay}>
@@ -380,14 +394,21 @@ export const MyPageScreen = () => {
                 </View>
               )}
               <View style={styles.editIconContainer}>
-                <Text style={styles.editIcon}>✏️</Text>
+                <MaterialCommunityIcons name="camera" size={14} color="#34B79F" />
               </View>
             </TouchableOpacity>
             <View style={styles.profileInfo}>
               <Text style={styles.userName}>{user?.name || '사용자'}</Text>
-              <Text style={styles.userRole}>
-                {user?.role === UserRole.ELDERLY ? '👴 어르신 계정' : '👨‍👩‍👧 보호자 계정'}
-              </Text>
+              <View style={styles.roleContainer}>
+                <Ionicons 
+                  name={user?.role === UserRole.ELDERLY ? 'person-circle' : 'people-circle'} 
+                  size={16} 
+                  color="#34B79F" 
+                />
+                <Text style={styles.userRole}>
+                  {user?.role === UserRole.ELDERLY ? '어르신 계정' : '보호자 계정'}
+                </Text>
+              </View>
             </View>
           </View>
 
@@ -396,7 +417,9 @@ export const MyPageScreen = () => {
             {userInfoItems.map((item, index) => (
               <View key={item.id} style={styles.userInfoItem}>
                 <View style={styles.userInfoLeft}>
-                  <Text style={styles.userInfoIcon}>{item.icon}</Text>
+                  <View style={styles.userInfoIconContainer}>
+                    <Ionicons name={item.iconName as any} size={20} color="#34B79F" />
+                  </View>
                   <Text style={styles.userInfoLabel}>{item.label}</Text>
                 </View>
                 <Text style={styles.userInfoValue}>{item.value}</Text>
@@ -409,25 +432,28 @@ export const MyPageScreen = () => {
         <View style={styles.settingsSection}>
           <Text style={styles.sectionTitle}>개인정보 관리</Text>
           <View style={styles.settingsList}>
-            {personalItems.map((item) => (
-              <TouchableOpacity
-                key={item.id}
-                style={styles.settingItem}
-                onPress={item.onPress}
-                activeOpacity={0.7}
-              >
-                <View style={styles.settingLeft}>
-                  <View style={[styles.settingIconContainer, { backgroundColor: item.color }]}>
-                    <Text style={styles.settingIcon}>{item.icon}</Text>
+            {personalItems.map((item) => {
+              const IconComponent = item.iconLibrary === 'MaterialCommunityIcons' ? MaterialCommunityIcons : MaterialIcons;
+              return (
+                <TouchableOpacity
+                  key={item.id}
+                  style={styles.settingItem}
+                  onPress={item.onPress}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.settingLeft}>
+                    <View style={[styles.settingIconContainer, { backgroundColor: item.color }]}>
+                      <IconComponent name={item.iconName as any} size={20} color="#FFFFFF" />
+                    </View>
+                    <View style={styles.settingTextContainer}>
+                      <Text style={styles.settingTitle}>{item.title}</Text>
+                      <Text style={styles.settingDescription}>{item.description}</Text>
+                    </View>
                   </View>
-                  <View style={styles.settingTextContainer}>
-                    <Text style={styles.settingTitle}>{item.title}</Text>
-                    <Text style={styles.settingDescription}>{item.description}</Text>
-                  </View>
-                </View>
-                <Text style={styles.settingArrow}>›</Text>
-              </TouchableOpacity>
-            ))}
+                  <Ionicons name="chevron-forward" size={24} color="#C7C7CC" />
+                </TouchableOpacity>
+              );
+            })}
           </View>
         </View>
 
@@ -444,14 +470,14 @@ export const MyPageScreen = () => {
               >
                 <View style={styles.settingLeft}>
                   <View style={[styles.settingIconContainer, { backgroundColor: item.color }]}>
-                    <Text style={styles.settingIcon}>{item.icon}</Text>
+                    <Ionicons name={item.iconName as any} size={20} color="#FFFFFF" />
                   </View>
                   <View style={styles.settingTextContainer}>
                     <Text style={styles.settingTitle}>{item.title}</Text>
                     <Text style={styles.settingDescription}>{item.description}</Text>
                   </View>
                 </View>
-                <Text style={styles.settingArrow}>›</Text>
+                <Ionicons name="chevron-forward" size={24} color="#C7C7CC" />
               </TouchableOpacity>
             ))}
           </View>
@@ -516,12 +542,24 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     position: 'relative',
   },
-  profileImage: {
-    fontSize: 40,
+  profileImagePlaceholder: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   profileImageReal: {
     width: '100%',
     height: '100%',
+  },
+  roleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0F0F0',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    alignSelf: 'flex-start',
   },
   uploadingOverlay: {
     position: 'absolute',
@@ -539,8 +577,8 @@ const styles = StyleSheet.create({
     right: 0,
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
-    width: 24,
-    height: 24,
+    width: 28,
+    height: 28,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000',
@@ -548,9 +586,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 2,
     elevation: 2,
-  },
-  editIcon: {
-    fontSize: 12,
+    borderWidth: 2,
+    borderColor: '#F0F9F7',
   },
   profileInfo: {
     flex: 1,
@@ -562,13 +599,10 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   userRole: {
-    fontSize: 16,
+    fontSize: 14,
     color: '#666666',
-    backgroundColor: '#F0F0F0',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-    alignSelf: 'flex-start',
+    marginLeft: 6,
+    fontWeight: '500',
   },
 
   // 사용자 정보 리스트
@@ -588,8 +622,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  userInfoIcon: {
-    fontSize: 20,
+  userInfoIconContainer: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F0F9F7',
+    alignItems: 'center',
+    justifyContent: 'center',
     marginRight: 12,
   },
   userInfoLabel: {
@@ -637,16 +676,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   settingIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 16,
-  },
-  settingIcon: {
-    fontSize: 20,
-    color: '#FFFFFF',
   },
   settingTextContainer: {
     flex: 1,
@@ -660,10 +695,6 @@ const styles = StyleSheet.create({
   settingDescription: {
     fontSize: 14,
     color: '#666666',
-  },
-  settingArrow: {
-    fontSize: 24,
-    color: '#C7C7CC',
   },
 
   // 로그아웃 섹션

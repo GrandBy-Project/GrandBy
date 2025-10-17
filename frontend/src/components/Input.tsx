@@ -1,11 +1,11 @@
 /**
  * 공통 입력 필드 컴포넌트
  */
-import React, { useState } from 'react';
+import React, { useState, forwardRef } from 'react';
 import { View, TextInput, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Colors } from '../constants/Colors';
 
-interface InputProps {
+export interface InputProps {
   label?: string;
   value: string;
   onChangeText: (text: string) => void;
@@ -19,10 +19,9 @@ interface InputProps {
   maxLength?: number;
   returnKeyType?: 'done' | 'next' | 'go' | 'search' | 'send';
   onSubmitEditing?: () => void;
-  inputRef?: React.RefObject<any>;
 }
 
-export const Input: React.FC<InputProps> = ({
+export const Input = forwardRef<TextInput, InputProps>(({
   label,
   value,
   onChangeText,
@@ -36,8 +35,7 @@ export const Input: React.FC<InputProps> = ({
   maxLength,
   returnKeyType = 'next',
   onSubmitEditing,
-  inputRef,
-}) => {
+}, ref) => {
   const [isFocused, setIsFocused] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
@@ -46,7 +44,7 @@ export const Input: React.FC<InputProps> = ({
       {label && <Text style={styles.label}>{label}</Text>}
       <View style={styles.inputContainer}>
         <TextInput
-          ref={inputRef}
+          ref={ref}
           style={[
             styles.input,
             isFocused && styles.inputFocused,
@@ -80,7 +78,9 @@ export const Input: React.FC<InputProps> = ({
       {error && <Text style={styles.errorText}>{error}</Text>}
     </View>
   );
-};
+});
+
+Input.displayName = 'Input';
 
 const styles = StyleSheet.create({
   container: {

@@ -11,6 +11,7 @@ import {
   TextInput,
   TouchableOpacity,
 } from 'react-native';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { Header, Button, Input } from '../components';
 import { validateName, validatePhoneNumber, validateBirthDate, formatBirthDate } from '../utils/validation';
@@ -110,7 +111,7 @@ export const ProfileEditScreen = () => {
       
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.infoBox}>
-          <Text style={styles.infoIcon}>✏️</Text>
+          <MaterialCommunityIcons name="account-edit-outline" size={24} color="#2E7D32" />
           <Text style={styles.infoText}>
             개인정보를 수정할 수 있습니다.{'\n'}
             이메일과 계정 유형은 변경할 수 없습니다.
@@ -120,16 +121,22 @@ export const ProfileEditScreen = () => {
         <View style={styles.form}>
           {/* 이메일 (수정 불가) */}
           <View style={styles.readOnlyField}>
-            <Text style={styles.readOnlyLabel}>이메일</Text>
+            <View style={styles.readOnlyHeader}>
+              <Ionicons name="mail-outline" size={20} color="#666666" />
+              <Text style={styles.readOnlyLabel}>이메일</Text>
+            </View>
             <Text style={styles.readOnlyValue}>{user?.email || '이메일 없음'}</Text>
             <Text style={styles.readOnlyNote}>이메일은 변경할 수 없습니다</Text>
           </View>
 
           {/* 계정 유형 (수정 불가) */}
           <View style={styles.readOnlyField}>
-            <Text style={styles.readOnlyLabel}>계정 유형</Text>
+            <View style={styles.readOnlyHeader}>
+              <Ionicons name="person-outline" size={20} color="#666666" />
+              <Text style={styles.readOnlyLabel}>계정 유형</Text>
+            </View>
             <Text style={styles.readOnlyValue}>
-              {user?.role === 'elderly' ? '👴 어르신' : '👨‍👩‍👧 보호자'}
+              {user?.role === 'elderly' ? '어르신' : '보호자'}
             </Text>
             <Text style={styles.readOnlyNote}>계정 유형은 변경할 수 없습니다</Text>
           </View>
@@ -240,16 +247,15 @@ const styles = StyleSheet.create({
     marginBottom: 24,
     flexDirection: 'row',
     alignItems: 'center',
-  },
-  infoIcon: {
-    fontSize: 24,
-    marginRight: 12,
+    borderLeftWidth: 4,
+    borderLeftColor: '#2E7D32',
   },
   infoText: {
     flex: 1,
     fontSize: 14,
     color: '#2E7D32',
     lineHeight: 20,
+    marginLeft: 12,
   },
   form: {
     gap: 8,
@@ -259,12 +265,19 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+  },
+  readOnlyHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
   },
   readOnlyLabel: {
     fontSize: 14,
     fontWeight: '600',
     color: '#666666',
-    marginBottom: 8,
+    marginLeft: 8,
   },
   readOnlyValue: {
     fontSize: 16,

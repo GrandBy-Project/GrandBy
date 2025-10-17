@@ -11,7 +11,10 @@ import {
   TextInput,
   Alert,
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { Header, Button, Input } from '../components';
 import { validatePhoneNumber, validateName, validateVerificationCode, validatePassword } from '../utils/validation';
@@ -24,7 +27,11 @@ export const FindAccountScreen = () => {
   const [activeTab, setActiveTab] = useState<TabType>('email');
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView 
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={0}
+    >
       <Header title="계정 찾기" showBackButton={true} />
       
       <View style={styles.tabContainer}>
@@ -46,10 +53,15 @@ export const FindAccountScreen = () => {
         </TouchableOpacity>
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.content} 
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={styles.scrollContent}
+      >
         {activeTab === 'email' ? <FindEmailTab /> : <ResetPasswordTab />}
       </ScrollView>
-    </View>
+    </KeyboardAvoidingView>
   );
 };
 
@@ -103,9 +115,12 @@ const FindEmailTab = () => {
 
   return (
     <View style={styles.tabContent}>
-      <Text style={styles.description}>
-        가입 시 입력한 이름과 전화번호를 입력해주세요.
-      </Text>
+      <View style={styles.infoBox}>
+        <Ionicons name="information-circle" size={24} color="#34B79F" />
+        <Text style={styles.infoBoxText}>
+          가입 시 입력한 이름과 전화번호를 입력해주세요.
+        </Text>
+      </View>
 
       <Input
         label="이름"
@@ -237,10 +252,13 @@ const ResetPasswordTab = () => {
     <View style={styles.tabContent}>
       {step === 'email' && (
         <>
-          <Text style={styles.description}>
-            가입하신 이메일 주소를 입력하시면{'\n'}
-            비밀번호 재설정 인증 코드를 보내드립니다.
-          </Text>
+          <View style={styles.infoBox}>
+            <Ionicons name="mail-outline" size={24} color="#34B79F" />
+            <Text style={styles.infoBoxText}>
+              가입하신 이메일 주소를 입력하시면{'\n'}
+              비밀번호 재설정 인증 코드를 보내드립니다.
+            </Text>
+          </View>
 
           <Input
             label="이메일"
@@ -263,10 +281,13 @@ const ResetPasswordTab = () => {
 
       {step === 'code' && (
         <>
-          <Text style={styles.description}>
-            {email}로 발송된 6자리 인증 코드를 입력하고{'\n'}
-            새로운 비밀번호를 설정해주세요.
-          </Text>
+          <View style={styles.infoBox}>
+            <Ionicons name="shield-checkmark-outline" size={24} color="#34B79F" />
+            <Text style={styles.infoBoxText}>
+              {email}로 발송된 6자리 인증 코드를 입력하고{'\n'}
+              새로운 비밀번호를 설정해주세요.
+            </Text>
+          </View>
 
           <View style={styles.codeSection}>
             <Input
@@ -275,7 +296,7 @@ const ResetPasswordTab = () => {
               value={code}
               onChangeText={setCode}
               placeholder="123456"
-              keyboardType="number-pad"
+              keyboardType="numeric"
               maxLength={6}
               returnKeyType="next"
               onSubmitEditing={() => passwordRef.current?.focus()}
@@ -285,6 +306,7 @@ const ResetPasswordTab = () => {
               onPress={handleResendCode}
               disabled={isLoading}
             >
+              <Ionicons name="refresh-outline" size={16} color="#34B79F" style={{ marginRight: 4 }} />
               <Text style={styles.resendButtonText}>코드 재발송</Text>
             </TouchableOpacity>
           </View>
@@ -321,7 +343,8 @@ const ResetPasswordTab = () => {
             style={styles.backButton}
             onPress={() => setStep('email')}
           >
-            <Text style={styles.backButtonText}>← 이메일 변경</Text>
+            <Ionicons name="arrow-back-outline" size={18} color="#666666" style={{ marginRight: 6 }} />
+            <Text style={styles.backButtonText}>이메일 변경</Text>
           </TouchableOpacity>
         </>
       )}
@@ -361,25 +384,43 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
   },
+  scrollContent: {
+    flexGrow: 1,
+    paddingBottom: 40,
+  },
   tabContent: {
     padding: 24,
   },
-  description: {
-    fontSize: 15,
-    color: '#666666',
-    textAlign: 'center',
-    marginBottom: 32,
-    lineHeight: 22,
+  infoBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0F9F7',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 24,
+    borderLeftWidth: 4,
+    borderLeftColor: '#34B79F',
+  },
+  infoBoxText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#2C7A6B',
+    lineHeight: 20,
+    marginLeft: 12,
   },
   codeSection: {
     marginBottom: 8,
   },
   resendButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
     alignSelf: 'flex-end',
     paddingVertical: 8,
     paddingHorizontal: 12,
     marginTop: -8,
     marginBottom: 8,
+    backgroundColor: '#F0F9F7',
+    borderRadius: 8,
   },
   resendButtonText: {
     fontSize: 14,
@@ -387,8 +428,10 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   backButton: {
-    marginTop: 16,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 16,
     paddingVertical: 12,
   },
   backButtonText: {

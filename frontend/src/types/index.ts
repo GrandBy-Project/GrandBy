@@ -25,6 +25,7 @@ export interface User {
   birth_date?: string;  // 생년월일 (YYYY-MM-DD)
   gender?: Gender;  // 성별
   profile_image_url?: string;  // 프로필 이미지 URL
+  auth_provider?: string;  // 인증 제공자 (email, kakao 등)
   is_active: boolean;
   created_at: string;
 }
