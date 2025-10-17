@@ -473,7 +473,6 @@ async def verify_email(request: VerifyEmailRequest):
         "message": "이메일 인증이 완료되었습니다."
     }
 
-
 # ==================== 계정 찾기 ====================
 # 이메일 찾기
 class FindEmailRequest(BaseModel):
@@ -685,4 +684,5 @@ async def reset_password_verify(
         "success": True,
         "message": "비밀번호가 성공적으로 변경되었습니다"
     }
+
 
