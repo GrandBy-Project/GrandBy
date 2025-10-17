@@ -8,7 +8,13 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import date, timedelta
 from app.database import get_db
-from app.schemas.todo import TodoCreate, TodoUpdate, TodoResponse, TodoStatsResponse
+from app.schemas.todo import (
+    TodoCreate, 
+    TodoUpdate, 
+    TodoResponse, 
+    TodoStatsResponse,
+    TodoDetailedStatsResponse
+)
 from app.services.todo.todo_service import TodoService
 from app.models.user import User, UserRole
 from app.models.todo import TodoStatus
@@ -105,6 +111,47 @@ async def get_todos_by_range(
     )
     
     return todos
+
+
+@router.get("/stats/detailed", response_model=TodoDetailedStatsResponse)
+async def get_detailed_todo_stats(
+    elderly_id: Optional[str] = Query(None, description="어르신 ID (보호자용)"),
+    period: str = Query("week", description="week, month"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    TODO 상세 통계 조회 (카테고리별 포함)
+    
+    - **period**: week (7일), month (30일)
+    """
+    # 어르신인 경우 본인 ID 사용
+    if current_user.role == UserRole.ELDERLY:
+        target_elderly_id = current_user.user_id
+    else:
+        if not elderly_id:
+            from fastapi import HTTPException, status
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="보호자는 elderly_id를 지정해야 합니다."
+            )
+        target_elderly_id = elderly_id
+    
+    # 기간 계산
+    today = date.today()
+    if period == "week":
+        start_date = today - timedelta(days=7)
+    else:  # month
+        start_date = today - timedelta(days=30)
+    
+    stats = TodoService.get_detailed_stats(
+        db=db,
+        elderly_id=target_elderly_id,
+        start_date=start_date,
+        end_date=today
+    )
+    
+    return stats
 
 
 @router.get("/stats", response_model=TodoStatsResponse)

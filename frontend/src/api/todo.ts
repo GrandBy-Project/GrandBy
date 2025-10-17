@@ -68,6 +68,24 @@ export interface TodoStats {
   completion_rate: number; // 0.0 ~ 1.0
 }
 
+export interface CategoryStats {
+  category: string;
+  total: number;
+  completed: number;
+  pending: number;
+  cancelled: number;
+  completion_rate: number;
+}
+
+export interface TodoDetailedStats {
+  total: number;
+  completed: number;
+  pending: number;
+  cancelled: number;
+  completion_rate: number;
+  by_category: CategoryStats[];
+}
+
 /**
  * TODO 목록 조회 (날짜별)
  * 
@@ -124,6 +142,23 @@ export const getTodoStats = async (
   if (elderly_id) params.elderly_id = elderly_id;
 
   const response = await apiClient.get<TodoStats>('/api/todos/stats/', { params });
+  return response.data;
+};
+
+/**
+ * TODO 상세 통계 조회 (카테고리별)
+ * 
+ * @param period - 'week' | 'month'
+ * @param elderly_id - 어르신 ID (보호자용, optional)
+ */
+export const getDetailedStats = async (
+  period: 'week' | 'month' = 'week',
+  elderly_id?: string
+): Promise<TodoDetailedStats> => {
+  const params: any = { period };
+  if (elderly_id) params.elderly_id = elderly_id;
+
+  const response = await apiClient.get<TodoDetailedStats>('/api/todos/stats/detailed', { params });
   return response.data;
 };
 
