@@ -55,9 +55,9 @@ async def create_diary(
         user_id=current_user.user_id,
         author_id=current_user.user_id,
         date=diary_data.date,
-        title=diary_data.title,
+        # title=diary_data.title,
         content=diary_data.content,
-        mood=diary_data.mood,
+        # mood=diary_data.mood,
         author_type=AuthorType.ELDERLY if current_user.role == "elderly" else AuthorType.CAREGIVER,
         is_auto_generated=False,
         status=diary_data.status
@@ -111,12 +111,12 @@ async def update_diary(
         raise HTTPException(status_code=404, detail="일기를 찾을 수 없습니다.")
     
     # 수정 가능한 필드만 업데이트
-    if diary_data.title is not None:
-        diary.title = diary_data.title
+    # if diary_data.title is not None:
+        # diary.title = diary_data.title
     if diary_data.content is not None:
         diary.content = diary_data.content
-    if diary_data.mood is not None:
-        diary.mood = diary_data.mood
+    # if diary_data.mood is not None:
+        # diary.mood = diary_data.mood
     if diary_data.status is not None:
         diary.status = diary_data.status
     
