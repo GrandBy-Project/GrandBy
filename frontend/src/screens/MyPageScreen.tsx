@@ -1,7 +1,7 @@
 /**
  * 마이페이지 화면 (어르신/보호자 공통)
  */
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -9,17 +9,248 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
+  Image,
+  ActivityIndicator,
 } from 'react-native';
+import { Ionicons, MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { useAuthStore } from '../store/authStore';
 import { useRouter } from 'expo-router';
 import { BottomNavigationBar, Header } from '../components';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { UserRole } from '../types';
+import apiClient, { API_BASE_URL } from '../api/client';
 
 export const MyPageScreen = () => {
   const router = useRouter();
-  const { user, logout } = useAuthStore();
+  const { user, logout, setUser } = useAuthStore();
   const insets = useSafeAreaInsets();
+  const [isUploading, setIsUploading] = useState(false);
+
+  // 프로필 이미지 URL 가져오기
+  const getProfileImageUrl = () => {
+    if (!user?.profile_image_url) return null;
+    // 이미 전체 URL인 경우
+    if (user.profile_image_url.startsWith('http')) {
+      return user.profile_image_url;
+    }
+    // 상대 경로인 경우
+    return `${API_BASE_URL}/${user.profile_image_url}`;
+  };
+
+  // 프로필 이미지 선택 및 업로드
+  const handleImagePick = async () => {
+    try {
+      // 권한 요청
+      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      
+      if (!permissionResult.granted) {
+        Alert.alert('권한 필요', '사진 라이브러리 접근 권한이 필요합니다.');
+        return;
+      }
+
+      // 이미지 선택
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: 'images',
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (result.canceled) {
+        return;
+      }
+
+      const imageUri = result.assets[0].uri;
+      await uploadProfileImage(imageUri);
+    } catch (error) {
+      console.error('이미지 선택 오류:', error);
+      Alert.alert('오류', '이미지를 선택하는 중 오류가 발생했습니다.');
+    }
+  };
+
+  // 프로필 이미지 업로드
+  const uploadProfileImage = async (imageUri: string) => {
+    try {
+      setIsUploading(true);
+
+      // FormData 생성
+      const formData = new FormData();
+      const filename = imageUri.split('/').pop() || 'profile.jpg';
+      const match = /\.(\w+)$/.exec(filename);
+      const type = match ? `image/${match[1]}` : 'image/jpeg';
+
+      formData.append('file', {
+        uri: imageUri,
+        name: filename,
+        type,
+      } as any);
+
+      // API 호출
+      const response = await apiClient.post('/api/users/profile-image', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      // 사용자 정보 업데이트
+      if (response.data) {
+        setUser(response.data);
+        Alert.alert('성공', '프로필 사진이 업데이트되었습니다.');
+      }
+    } catch (error: any) {
+      console.error('이미지 업로드 오류:', error);
+      const errorMessage = error.response?.data?.detail || '이미지 업로드 중 오류가 발생했습니다.';
+      Alert.alert('오류', errorMessage);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  // 프로필 이미지 삭제
+  const handleImageDelete = async () => {
+    Alert.alert(
+      '프로필 사진 삭제',
+      '프로필 사진을 삭제하시겠습니까?',
+      [
+        { text: '취소', style: 'cancel' },
+        {
+          text: '삭제',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setIsUploading(true);
+              const response = await apiClient.delete('/api/users/profile-image');
+              
+              // 사용자 정보 업데이트
+              if (response.data) {
+                setUser(response.data);
+                Alert.alert('성공', '프로필 사진이 삭제되었습니다.');
+              }
+            } catch (error: any) {
+              console.error('이미지 삭제 오류:', error);
+              const errorMessage = error.response?.data?.detail || '이미지 삭제 중 오류가 발생했습니다.';
+              Alert.alert('오류', errorMessage);
+            } finally {
+              setIsUploading(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // 프로필 이미지 편집 옵션 표시
+  const showImageOptions = () => {
+    const options = user?.profile_image_url
+      ? ['사진 선택', '사진 삭제', '취소']
+      : ['사진 선택', '취소'];
+    
+    const cancelButtonIndex = options.length - 1;
+    const destructiveButtonIndex = user?.profile_image_url ? 1 : undefined;
+
+    Alert.alert(
+      '프로필 사진',
+      '프로필 사진을 변경하거나 삭제할 수 있습니다.',
+      options.map((option, index) => ({
+        text: option,
+        style: index === cancelButtonIndex ? 'cancel' : 
+               index === destructiveButtonIndex ? 'destructive' : 'default',
+        onPress: () => {
+          if (option === '사진 선택') {
+            handleImagePick();
+          } else if (option === '사진 삭제') {
+            handleImageDelete();
+          }
+        },
+      }))
+    );
+  };
+
+  const handleDeleteAccount = async () => {
+    Alert.alert(
+      '계정 삭제',
+      '계정을 삭제하시겠습니까?\n\n⚠️ 중요:\n• 30일 이내에는 복구 가능합니다\n• 30일 후에는 모든 데이터가 영구 삭제됩니다\n• 관련된 할일, 일기 등이 익명화됩니다',
+      [
+        { text: '취소', style: 'cancel' },
+        {
+          text: '삭제',
+          style: 'destructive',
+          onPress: () => {
+            // 비밀번호 확인 (소셜 로그인이 아닌 경우)
+            if (user?.auth_provider === 'email') {
+              Alert.prompt(
+                '본인 확인',
+                '계정 삭제를 위해 비밀번호를 입력해주세요.',
+                [
+                  { text: '취소', style: 'cancel' },
+                  {
+                    text: '삭제',
+                    style: 'destructive',
+                    onPress: async (password?: string) => {
+                      if (!password) {
+                        Alert.alert('오류', '비밀번호를 입력해주세요.');
+                        return;
+                      }
+                      await deleteAccount(password);
+                    },
+                  },
+                ],
+                'secure-text'
+              );
+            } else {
+              // 소셜 로그인 사용자
+              Alert.alert(
+                '계정 삭제 확인',
+                '정말로 계정을 삭제하시겠습니까?',
+                [
+                  { text: '취소', style: 'cancel' },
+                  {
+                    text: '삭제',
+                    style: 'destructive',
+                    onPress: async () => await deleteAccount(''),
+                  },
+                ]
+              );
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const deleteAccount = async (password: string) => {
+    try {
+      setIsUploading(true); // 로딩 상태 표시
+      
+      await apiClient.delete('/api/users/account', {
+        data: {
+          password: user?.auth_provider === 'email' ? password : undefined,
+          reason: '사용자 요청',
+        },
+      });
+
+      Alert.alert(
+        '계정 삭제 완료',
+        '계정이 삭제되었습니다.\n30일 이내에 다시 로그인하시면 계정을 복구할 수 있습니다.',
+        [
+          {
+            text: '확인',
+            onPress: async () => {
+              await logout();
+              router.replace('/');
+            },
+          },
+        ]
+      );
+    } catch (error: any) {
+      console.error('계정 삭제 오류:', error);
+      const errorMessage = error.response?.data?.detail || '계정 삭제에 실패했습니다.';
+      Alert.alert('오류', errorMessage);
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
   const handleLogout = async () => {
     Alert.alert(
@@ -45,25 +276,29 @@ export const MyPageScreen = () => {
       id: 'name',
       label: '이름',
       value: user?.name || '사용자',
-      icon: '👤',
+      iconName: 'person-outline' as const,
+      iconLibrary: 'Ionicons' as const,
     },
     {
       id: 'email',
       label: '이메일',
       value: user?.email || '이메일 없음',
-      icon: '📧',
+      iconName: 'mail-outline' as const,
+      iconLibrary: 'Ionicons' as const,
     },
     {
       id: 'phone',
       label: '전화번호',
       value: user?.phone_number || '전화번호 없음',
-      icon: '📱',
+      iconName: 'call-outline' as const,
+      iconLibrary: 'Ionicons' as const,
     },
     {
       id: 'role',
       label: '계정 유형',
-      value: user?.role === UserRole.ELDERLY ? '👴 어르신' : '👨‍👩‍👧 보호자',
-      icon: user?.role === UserRole.ELDERLY ? '👴' : '👨‍👩‍👧',
+      value: user?.role === UserRole.ELDERLY ? '어르신' : '보호자',
+      iconName: user?.role === UserRole.ELDERLY ? 'person-circle-outline' : 'people-circle-outline' as const,
+      iconLibrary: 'Ionicons' as const,
     },
   ];
 
@@ -73,25 +308,28 @@ export const MyPageScreen = () => {
       id: 'profile-edit',
       title: '프로필 수정',
       description: '이름, 전화번호 등 수정',
-      icon: '✏️',
+      iconName: 'account-edit' as const,
+      iconLibrary: 'MaterialCommunityIcons' as const,
       color: '#007AFF',
-      onPress: () => Alert.alert('준비중', '프로필 수정 기능은 개발 중입니다.'),
+      onPress: () => router.push('/profile-edit'),
     },
     {
       id: 'password-change',
       title: '비밀번호 변경',
       description: '계정 보안을 위한 비밀번호 변경',
-      icon: '🔐',
+      iconName: 'lock-reset' as const,
+      iconLibrary: 'MaterialCommunityIcons' as const,
       color: '#FF9500',
-      onPress: () => Alert.alert('준비중', '비밀번호 변경 기능은 개발 중입니다.'),
+      onPress: () => router.push('/change-password'),
     },
     {
       id: 'account-delete',
       title: '계정 삭제',
       description: '계정을 완전히 삭제하기',
-      icon: '🗑️',
+      iconName: 'delete-forever' as const,
+      iconLibrary: 'MaterialIcons' as const,
       color: '#FF3B30',
-      onPress: () => Alert.alert('계정 삭제', '계정을 삭제하면 모든 데이터가 영구적으로 삭제됩니다. 정말 삭제하시겠습니까?'),
+      onPress: handleDeleteAccount,
     },
   ];
 
@@ -101,7 +339,8 @@ export const MyPageScreen = () => {
       id: 'privacy-policy',
       title: '개인정보 처리방침',
       description: '개인정보 수집 및 이용 방침',
-      icon: '🛡️',
+      iconName: 'shield-checkmark' as const,
+      iconLibrary: 'Ionicons' as const,
       color: '#34C759',
       onPress: () => Alert.alert('개인정보 처리방침', '개인정보 처리방침을 확인할 수 있습니다.'),
     },
@@ -109,7 +348,8 @@ export const MyPageScreen = () => {
       id: 'terms',
       title: '이용약관',
       description: '서비스 이용약관',
-      icon: '📋',
+      iconName: 'document-text' as const,
+      iconLibrary: 'Ionicons' as const,
       color: '#5856D6',
       onPress: () => Alert.alert('이용약관', '서비스 이용약관을 확인할 수 있습니다.'),
     }
@@ -127,16 +367,48 @@ export const MyPageScreen = () => {
         {/* 사용자 정보 카드 */}
         <View style={styles.userCard}>
           <View style={styles.profileSection}>
-            <View style={styles.profileImageContainer}>
-              <Text style={styles.profileImage}>
-                {user?.role === UserRole.ELDERLY ? '👴' : '👨‍👩‍👧'}
-              </Text>
-            </View>
+            <TouchableOpacity 
+              style={styles.profileImageContainer}
+              onPress={showImageOptions}
+              disabled={isUploading}
+              activeOpacity={0.7}
+            >
+              {getProfileImageUrl() ? (
+                <Image
+                  source={{ uri: getProfileImageUrl()! }}
+                  style={styles.profileImageReal}
+                  resizeMode="cover"
+                />
+              ) : (
+                <View style={styles.profileImagePlaceholder}>
+                  <Ionicons 
+                    name={user?.role === UserRole.ELDERLY ? 'person' : 'people'} 
+                    size={40} 
+                    color="#FFFFFF" 
+                  />
+                </View>
+              )}
+              {isUploading && (
+                <View style={styles.uploadingOverlay}>
+                  <ActivityIndicator size="large" color="#FFFFFF" />
+                </View>
+              )}
+              <View style={styles.editIconContainer}>
+                <MaterialCommunityIcons name="camera" size={14} color="#34B79F" />
+              </View>
+            </TouchableOpacity>
             <View style={styles.profileInfo}>
               <Text style={styles.userName}>{user?.name || '사용자'}</Text>
-              <Text style={styles.userRole}>
-                {user?.role === UserRole.ELDERLY ? '👴 어르신 계정' : '👨‍👩‍👧 보호자 계정'}
-              </Text>
+              <View style={styles.roleContainer}>
+                <Ionicons 
+                  name={user?.role === UserRole.ELDERLY ? 'person-circle' : 'people-circle'} 
+                  size={16} 
+                  color="#34B79F" 
+                />
+                <Text style={styles.userRole}>
+                  {user?.role === UserRole.ELDERLY ? '어르신 계정' : '보호자 계정'}
+                </Text>
+              </View>
             </View>
           </View>
 
@@ -145,7 +417,9 @@ export const MyPageScreen = () => {
             {userInfoItems.map((item, index) => (
               <View key={item.id} style={styles.userInfoItem}>
                 <View style={styles.userInfoLeft}>
-                  <Text style={styles.userInfoIcon}>{item.icon}</Text>
+                  <View style={styles.userInfoIconContainer}>
+                    <Ionicons name={item.iconName as any} size={20} color="#34B79F" />
+                  </View>
                   <Text style={styles.userInfoLabel}>{item.label}</Text>
                 </View>
                 <Text style={styles.userInfoValue}>{item.value}</Text>
@@ -158,25 +432,28 @@ export const MyPageScreen = () => {
         <View style={styles.settingsSection}>
           <Text style={styles.sectionTitle}>개인정보 관리</Text>
           <View style={styles.settingsList}>
-            {personalItems.map((item) => (
-              <TouchableOpacity
-                key={item.id}
-                style={styles.settingItem}
-                onPress={item.onPress}
-                activeOpacity={0.7}
-              >
-                <View style={styles.settingLeft}>
-                  <View style={[styles.settingIconContainer, { backgroundColor: item.color }]}>
-                    <Text style={styles.settingIcon}>{item.icon}</Text>
+            {personalItems.map((item) => {
+              const IconComponent = item.iconLibrary === 'MaterialCommunityIcons' ? MaterialCommunityIcons : MaterialIcons;
+              return (
+                <TouchableOpacity
+                  key={item.id}
+                  style={styles.settingItem}
+                  onPress={item.onPress}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.settingLeft}>
+                    <View style={[styles.settingIconContainer, { backgroundColor: item.color }]}>
+                      <IconComponent name={item.iconName as any} size={20} color="#FFFFFF" />
+                    </View>
+                    <View style={styles.settingTextContainer}>
+                      <Text style={styles.settingTitle}>{item.title}</Text>
+                      <Text style={styles.settingDescription}>{item.description}</Text>
+                    </View>
                   </View>
-                  <View style={styles.settingTextContainer}>
-                    <Text style={styles.settingTitle}>{item.title}</Text>
-                    <Text style={styles.settingDescription}>{item.description}</Text>
-                  </View>
-                </View>
-                <Text style={styles.settingArrow}>›</Text>
-              </TouchableOpacity>
-            ))}
+                  <Ionicons name="chevron-forward" size={24} color="#C7C7CC" />
+                </TouchableOpacity>
+              );
+            })}
           </View>
         </View>
 
@@ -193,14 +470,14 @@ export const MyPageScreen = () => {
               >
                 <View style={styles.settingLeft}>
                   <View style={[styles.settingIconContainer, { backgroundColor: item.color }]}>
-                    <Text style={styles.settingIcon}>{item.icon}</Text>
+                    <Ionicons name={item.iconName as any} size={20} color="#FFFFFF" />
                   </View>
                   <View style={styles.settingTextContainer}>
                     <Text style={styles.settingTitle}>{item.title}</Text>
                     <Text style={styles.settingDescription}>{item.description}</Text>
                   </View>
                 </View>
-                <Text style={styles.settingArrow}>›</Text>
+                <Ionicons name="chevron-forward" size={24} color="#C7C7CC" />
               </TouchableOpacity>
             ))}
           </View>
@@ -262,9 +539,55 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 20,
+    overflow: 'hidden',
+    position: 'relative',
   },
-  profileImage: {
-    fontSize: 40,
+  profileImagePlaceholder: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  profileImageReal: {
+    width: '100%',
+    height: '100%',
+  },
+  roleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0F0F0',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    alignSelf: 'flex-start',
+  },
+  uploadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  editIconContainer: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
+    borderWidth: 2,
+    borderColor: '#F0F9F7',
   },
   profileInfo: {
     flex: 1,
@@ -276,13 +599,10 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   userRole: {
-    fontSize: 16,
+    fontSize: 14,
     color: '#666666',
-    backgroundColor: '#F0F0F0',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-    alignSelf: 'flex-start',
+    marginLeft: 6,
+    fontWeight: '500',
   },
 
   // 사용자 정보 리스트
@@ -302,8 +622,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  userInfoIcon: {
-    fontSize: 20,
+  userInfoIconContainer: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F0F9F7',
+    alignItems: 'center',
+    justifyContent: 'center',
     marginRight: 12,
   },
   userInfoLabel: {
@@ -351,16 +676,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   settingIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 16,
-  },
-  settingIcon: {
-    fontSize: 20,
-    color: '#FFFFFF',
   },
   settingTextContainer: {
     flex: 1,
@@ -374,10 +695,6 @@ const styles = StyleSheet.create({
   settingDescription: {
     fontSize: 14,
     color: '#666666',
-  },
-  settingArrow: {
-    fontSize: 24,
-    color: '#C7C7CC',
   },
 
   // 로그아웃 섹션

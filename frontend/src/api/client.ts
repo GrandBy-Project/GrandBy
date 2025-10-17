@@ -33,12 +33,12 @@ const getApiBaseUrl = () => {
   }
   
   // 3. 개발 환경: Expo 개발 서버의 호스트 자동 감지
-  // 같은 네트워크의 다른 기기에서 접근 가능
-  const debuggerHost = Constants.expoConfig?.hostUri?.split(':').shift();
-  if (debuggerHost && debuggerHost !== 'localhost') {
-    console.log('🔗 자동 감지된 API URL:', `http://${debuggerHost}:8000`);
-    return `http://${debuggerHost}:8000`;
-  }
+  // exp.direct는 Expo 터널이므로 백엔드 주소로 사용 불가
+const debuggerHost = Constants.expoConfig?.hostUri?.split(':').shift();
+if (debuggerHost && debuggerHost !== 'localhost' && !debuggerHost.includes('exp.direct')) {
+  console.log('🔗 자동 감지된 API URL:', `http://${debuggerHost}:8000`);
+  return `http://${debuggerHost}:8000`;
+}
   
   // 4. Fallback: 로컬 개발 (백엔드를 직접 실행한 경우)
   console.log('🔗 Fallback 로컬 API URL 사용');
