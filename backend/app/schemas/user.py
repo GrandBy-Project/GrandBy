@@ -124,3 +124,17 @@ class ConnectionCancelRequest(BaseModel):
     """연결 취소 요청"""
     reason: Optional[str] = None  # 취소 사유 (선택)
 
+
+# ==================== 자동 통화 스케줄 ====================
+class CallScheduleUpdate(BaseModel):
+    """자동 통화 스케줄 업데이트 요청"""
+    auto_call_enabled: bool
+    # HH:MM 형식, 비활성화 시 None 허용
+    scheduled_call_time: Optional[str] = None
+
+
+class CallScheduleResponse(BaseModel):
+    """자동 통화 스케줄 응답"""
+    auto_call_enabled: bool
+    scheduled_call_time: Optional[str] = None
+
