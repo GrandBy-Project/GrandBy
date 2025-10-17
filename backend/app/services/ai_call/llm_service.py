@@ -228,6 +228,52 @@ JSON 형식으로 응답:
             logger.error(f"Failed to generate diary: {e}")
             raise
     
+    def summarize_call_conversation(self, conversation_history: list):
+        """
+        통화 대화 내용 요약 (보호자용)
+        
+        Args:
+            conversation_history: 대화 기록 [{"role": "user", "content": "..."}, ...]
+        
+        Returns:
+            str: 요약된 대화 내용
+        """
+        try:
+            # 대화 기록을 텍스트로 변환
+            conversation_text = "\n".join([
+                f"{'어르신' if msg['role'] == 'user' else 'AI'}: {msg['content']}"
+                for msg in conversation_history
+            ])
+            
+            prompt = f"""
+다음은 어르신과 AI 비서의 통화 내용입니다. 
+보호자가 이해하기 쉽게 핵심 내용을 3-5줄로 요약해주세요.
+
+요약에 포함할 내용:
+- 어르신의 건강 상태 (식사, 약 복용, 통증 등)
+- 감정 상태 (기분, 우울감 등)
+- 특별한 일정이나 요청사항
+- 주의가 필요한 사항
+
+통화 내용:
+{conversation_text}
+
+요약:
+"""
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=300,
+                temperature=0.7,
+            )
+            
+            summary = response.choices[0].message.content
+            logger.info(f"✅ 통화 요약 생성 완료")
+            return summary
+        except Exception as e:
+            logger.error(f"❌ 통화 요약 생성 실패: {e}")
+            return "요약 생성 실패"
+    
     def extract_schedule_from_conversation(self, conversation_text: str):
         """
         통화 내용에서 일정 정보 추출

@@ -1160,6 +1160,8 @@ async def media_stream_handler(
     call_sid = None
     stream_sid = None
     audio_processor = None
+    call_log = None  # DB에 저장할 CallLog 객체
+    elderly_id = None  # 통화 대상 어르신 ID
     
     try:
         async for message in websocket.iter_text():
@@ -1170,6 +1172,11 @@ async def media_stream_handler(
             if event_type == 'start':
                 call_sid = data['start']['callSid']
                 stream_sid = data['start']['streamSid']
+                
+                # customParameters에서 elderly_id 추출 (Twilio 통화 시작 시 전달)
+                custom_params = data['start'].get('customParameters', {})
+                elderly_id = custom_params.get('elderly_id', 'unknown')
+                
                 audio_processor = AudioProcessor(call_sid)
                 active_connections[call_sid] = websocket
                 
@@ -1177,10 +1184,31 @@ async def media_stream_handler(
                 if call_sid not in conversation_sessions:
                     conversation_sessions[call_sid] = []
                 
+                # DB에 통화 시작 기록 저장
+                try:
+                    from app.models.call import CallLog, CallStatus
+                    db = next(get_db())
+                    
+                    call_log = CallLog(
+                        call_id=call_sid,
+                        elderly_id=elderly_id,
+                        call_status=CallStatus.ANSWERED,
+                        call_start_time=datetime.utcnow(),
+                        twilio_call_sid=call_sid
+                    )
+                    db.add(call_log)
+                    db.commit()
+                    db.refresh(call_log)
+                    db.close()
+                    logger.info(f"✅ DB에 통화 시작 기록 저장: {call_sid}")
+                except Exception as e:
+                    logger.error(f"❌ 통화 시작 기록 저장 실패: {e}")
+                
                 logger.info(f"┌{'─'*58}┐")
                 logger.info(f"│ 🎙️  Twilio 통화 시작                                   │")
                 logger.info(f"│ Call SID: {call_sid:43} │")
                 logger.info(f"│ Stream SID: {stream_sid:41} │")
+                logger.info(f"│ Elderly ID: {elderly_id:41} │")
                 logger.info(f"└{'─'*58}┘")
                 
                 # 시작 안내 메시지 (TTS 서비스 사용)
@@ -1262,17 +1290,65 @@ async def media_stream_handler(
                         logger.info(f"{full_transcript}")
                         logger.info(f"─" * 60)
                 
-                # 대화 세션 정리
+                # 대화 세션을 DB에 저장
                 if call_sid in conversation_sessions:
                     conversation = conversation_sessions[call_sid]
-                    logger.info(f"💾 대화 기록: {len(conversation)}개 메시지 저장 가능")
+                    logger.info(f"💾 대화 기록: {len(conversation)}개 메시지")
                     
-                    # TODO: 일기 생성 로직 추가
-                    # diary = llm_service.summarize_conversation_to_diary(conversation)
+                    # DB에 대화 내용 및 요약 저장
+                    try:
+                        from app.models.call import CallLog, CallTranscript, CallStatus
+                        db = next(get_db())
+                        
+                        # 1. CallLog 업데이트 (통화 종료 시간, 요약)
+                        call_log_db = db.query(CallLog).filter(CallLog.call_id == call_sid).first()
+                        
+                        if call_log_db:
+                            call_log_db.call_end_time = datetime.utcnow()
+                            call_log_db.call_status = CallStatus.COMPLETED
+                            
+                            # 통화 시간 계산 (초)
+                            if call_log_db.call_start_time:
+                                duration = (call_log_db.call_end_time - call_log_db.call_start_time).total_seconds()
+                                call_log_db.call_duration = int(duration)
+                            
+                            # LLM 요약 생성 (대화가 있는 경우에만)
+                            if len(conversation) > 0:
+                                logger.info("🤖 LLM으로 통화 요약 생성 중...")
+                                summary = llm_service.summarize_call_conversation(conversation)
+                                call_log_db.conversation_summary = summary
+                                logger.info(f"✅ 요약 생성 완료: {summary[:100]}...")
+                            
+                            db.commit()
+                            logger.info(f"✅ CallLog 업데이트 완료")
+                        
+                        # 2. CallTranscript 저장 (화자별 대화 내용)
+                        for idx, message in enumerate(conversation):
+                            speaker = "ELDERLY" if message["role"] == "user" else "AI"
+                            
+                            transcript = CallTranscript(
+                                call_id=call_sid,
+                                speaker=speaker,
+                                text=message["content"],
+                                timestamp=idx * 10.0,  # 대략적인 타임스탬프 (10초 간격)
+                                created_at=datetime.utcnow()
+                            )
+                            db.add(transcript)
+                        
+                        db.commit()
+                        logger.info(f"✅ 대화 내용 {len(conversation)}개 저장 완료")
+                        
+                        db.close()
+                        
+                    except Exception as e:
+                        logger.error(f"❌ DB 저장 실패: {e}")
+                        import traceback
+                        logger.error(traceback.format_exc())
+                        if 'db' in locals():
+                            db.rollback()
+                            db.close()
                     
-                    # TODO: 일정 추출 로직 추가
-                    # schedules = llm_service.extract_schedule_from_conversation(conversation)
-                    
+                    # 메모리에서 제거
                     del conversation_sessions[call_sid]
                 
                 if call_sid in active_connections:
