@@ -10,6 +10,7 @@ import {
   Alert,
   TextInput,
 } from 'react-native';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { Header, Button, Input } from '../components';
 import { validatePassword } from '../utils/validation';
@@ -97,7 +98,7 @@ export const ChangePasswordScreen = () => {
       
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.infoBox}>
-          <Text style={styles.infoIcon}>🔐</Text>
+          <MaterialCommunityIcons name="shield-lock-outline" size={24} color="#1976D2" />
           <Text style={styles.infoText}>
             계정 보안을 위해 정기적으로 비밀번호를 변경해주세요.
           </Text>
@@ -105,7 +106,7 @@ export const ChangePasswordScreen = () => {
 
         {user?.auth_provider !== 'email' ? (
           <View style={styles.socialLoginNotice}>
-            <Text style={styles.socialLoginNoticeIcon}>ℹ️</Text>
+            <Ionicons name="information-circle" size={48} color="#E65100" />
             <Text style={styles.socialLoginNoticeText}>
               소셜 로그인 계정은 비밀번호를 변경할 수 없습니다.{'\n'}
               연동된 소셜 계정에서 비밀번호를 관리해주세요.
@@ -181,32 +182,30 @@ const styles = StyleSheet.create({
     marginBottom: 24,
     flexDirection: 'row',
     alignItems: 'center',
-  },
-  infoIcon: {
-    fontSize: 24,
-    marginRight: 12,
+    borderLeftWidth: 4,
+    borderLeftColor: '#1976D2',
   },
   infoText: {
     flex: 1,
     fontSize: 14,
     color: '#1976D2',
     lineHeight: 20,
+    marginLeft: 12,
   },
   socialLoginNotice: {
     backgroundColor: '#FFF3E0',
     borderRadius: 12,
     padding: 20,
     alignItems: 'center',
-  },
-  socialLoginNoticeIcon: {
-    fontSize: 48,
-    marginBottom: 12,
+    borderWidth: 2,
+    borderColor: '#FFE0B2',
   },
   socialLoginNoticeText: {
     fontSize: 15,
     color: '#E65100',
     textAlign: 'center',
     lineHeight: 22,
+    marginTop: 12,
   },
   form: {
     gap: 8,

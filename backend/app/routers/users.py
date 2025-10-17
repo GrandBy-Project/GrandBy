@@ -1,6 +1,6 @@
 """
 사용자 관리 API 라우터
-사용자 연결, 프로필, 자동 통화 스케줄 등
+사용자 연결, 프로필 등
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
@@ -16,7 +16,7 @@ from app.database import get_db
 from app.schemas.user import (
     ConnectionCreate, ConnectionResponse, UserResponse,
     ElderlySearchResult, ConnectionListResponse, ConnectionWithUserInfo,
-    ConnectionCancelRequest, CallScheduleUpdate, CallScheduleResponse
+    ConnectionCancelRequest
 )
 from app.models.user import User, UserSettings, UserConnection, UserRole, ConnectionStatus, Gender
 from app.routers.auth import get_current_user
@@ -28,7 +28,6 @@ from app.routers.auth import get_current_user, pwd_context
 from app.utils.image import save_profile_image, delete_profile_image
 
 router = APIRouter()
-logger = logging.getLogger(__name__)
 
 
 # ==================== 어르신 검색 ====================

@@ -148,10 +148,6 @@ class UserSettings(Base):
     auto_diary_enabled = Column(Boolean, default=True)
     push_notification_enabled = Column(Boolean, default=True)
     
-    # 자동 통화 스케줄 설정
-    auto_call_enabled = Column(Boolean, default=False)  # 자동 통화 활성화 여부
-    scheduled_call_time = Column(String(5), nullable=True)  # HH:MM 형식 (예: "14:30")
-    
     # 언어 설정
     language_preference = Column(String(10), default="ko")
     
