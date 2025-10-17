@@ -92,6 +92,8 @@ def upgrade() -> None:
     sa.Column('user_id', sa.String(length=36), nullable=False),
     sa.Column('auto_diary_enabled', sa.Boolean(), nullable=True),
     sa.Column('push_notification_enabled', sa.Boolean(), nullable=True),
+    sa.Column('auto_call_enabled', sa.Boolean(), nullable=True),
+    sa.Column('scheduled_call_time', sa.String(length=5), nullable=True),
     sa.Column('language_preference', sa.String(length=10), nullable=True),
     sa.Column('updated_at', sa.DateTime(), nullable=True),
     sa.ForeignKeyConstraint(['user_id'], ['users.user_id'], ),
