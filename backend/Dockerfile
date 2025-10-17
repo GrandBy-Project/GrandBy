@@ -57,9 +57,10 @@ COPY --chown=app:app ./scripts ./scripts
 COPY --chown=app:app ./alembic.ini ./alembic.ini
 COPY --chown=app:app ./requirements.txt .
 
-# Copy and set permissions for entrypoint script
+# Copy entrypoint script (handle potential CRLF by invoking via shell)
 COPY --chown=app:app ./scripts/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+# Normalize line endings in case of CRLF on Windows checkouts
+RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 
 # Switch to app user
 USER app
@@ -71,7 +72,7 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Set entrypoint
+# Set entrypoint (bash shebang will work after CRLF normalization)
 ENTRYPOINT ["/entrypoint.sh"]
 
 # Default command (can be overridden in docker-compose.yml)

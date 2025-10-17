@@ -1405,4 +1405,3 @@ if __name__ == "__main__":
         reload=is_development(),
         log_level=settings.LOG_LEVEL.lower(),
     )
-

@@ -87,6 +87,11 @@ class Settings(BaseSettings):
     ENABLE_EMOTION_ANALYSIS: bool = True
     ENABLE_NOTIFICATIONS: bool = True
     
+    # ==================== Image Upload Settings ====================
+    UPLOAD_DIR: str = "uploads/profiles"
+    MAX_IMAGE_SIZE: int = 5 * 1024 * 1024  # 5MB
+    PROFILE_IMAGE_SIZE: tuple = (512, 512)  # 리사이징 크기
+    
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

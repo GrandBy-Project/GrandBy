@@ -78,7 +78,7 @@ export const LoginScreen = () => {
   };
 
   const goToFindAccount = () => {
-    Alert.alert('준비 중', '계정 찾기 기능은 준비 중입니다.');
+    router.push('/find-account');
   };
 
   const handleKakaoLogin = () => {
