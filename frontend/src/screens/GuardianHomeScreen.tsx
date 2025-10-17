@@ -353,7 +353,7 @@ export const GuardianHomeScreen = () => {
           {/* 새 할일 추가 버튼 */}
           <TouchableOpacity
             style={styles.addTaskButton}
-            onPress={() => router.push('/guardian-todo-add')}
+            onPress={() => router.push(`/guardian-todo-add?elderlyId=${currentElderly.id}&elderlyName=${encodeURIComponent(currentElderly.name)}`)}
             activeOpacity={0.7}
           >
             <Text style={styles.addTaskText}>+ 새로운 할 일 추가하기</Text>
@@ -695,6 +695,12 @@ export const GuardianHomeScreen = () => {
 
   // 연결된 어르신 목록 불러오기
   const loadConnectedElderly = async () => {
+    // user가 없으면 API 호출 안함 (로그아웃 시)
+    if (!user) {
+      console.log('⚠️ 보호자: user 없음 - API 호출 스킵');
+      return;
+    }
+    
     setIsLoadingElderly(true);
     try {
       console.log('👥 보호자: 연결된 어르신 목록 로딩 시작');
@@ -812,13 +818,16 @@ export const GuardianHomeScreen = () => {
   // 화면 포커스 시 데이터 새로고침 (다른 화면 갔다가 돌아올 때만)
   useFocusEffect(
     useCallback(() => {
+      // user가 없으면 데이터 로딩 안함 (로그아웃 시)
+      if (!user) return;
+      
       loadConnectedElderly();
       if (currentElderly) {
         loadTodosForElderly(currentElderly.id);
         loadWeeklyStatsForElderly(currentElderly.id);
         loadMonthlyStatsForElderly(currentElderly.id);
       }
-    }, [currentElderly?.id]) // optional chaining으로 안전하게 접근
+    }, [user, currentElderly?.id]) // user 의존성 추가
   );
 
   // 카테고리 아이콘 매핑 (Ionicons 사용)
