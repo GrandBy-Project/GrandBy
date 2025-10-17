@@ -11,7 +11,14 @@ import uuid
 
 from app.models.todo import Todo, TodoStatus, CreatorType, RecurringType
 from app.models.user import User, UserRole
-from app.schemas.todo import TodoCreate, TodoUpdate, TodoResponse, TodoStatsResponse
+from app.schemas.todo import (
+    TodoCreate, 
+    TodoUpdate, 
+    TodoResponse, 
+    TodoStatsResponse,
+    TodoDetailedStatsResponse,
+    CategoryStatsResponse
+)
 from fastapi import HTTPException, status
 
 
@@ -152,7 +159,7 @@ class TodoService:
         if status_filter:
             query = query.filter(Todo.status == status_filter)
         
-        return query.order_by(Todo.due_time.asc()).all()
+        return query.order_by(Todo.status.asc(), Todo.due_time.asc()).all()
     
     @staticmethod
     def get_todos_by_date_range(
@@ -439,6 +446,73 @@ class TodoService:
             pending=pending,
             cancelled=cancelled,
             completion_rate=completion_rate
+        )
+    
+    @staticmethod
+    def get_detailed_stats(
+        db: Session,
+        elderly_id: str,
+        start_date: date,
+        end_date: date
+    ) -> TodoDetailedStatsResponse:
+        """
+        TODO 상세 통계 조회 (카테고리별 포함)
+        
+        Args:
+            db: DB 세션
+            elderly_id: 어르신 ID
+            start_date: 시작 날짜
+            end_date: 종료 날짜
+        
+        Returns:
+            TODO 상세 통계 (카테고리별 포함)
+        """
+        from app.models.todo import TodoCategory
+        
+        # 전체 TODO 조회
+        todos = db.query(Todo).filter(
+            and_(
+                Todo.elderly_id == elderly_id,
+                Todo.due_date >= start_date,
+                Todo.due_date <= end_date
+            )
+        ).all()
+        
+        # 전체 통계 계산
+        total = len(todos)
+        completed = sum(1 for t in todos if t.status == TodoStatus.COMPLETED)
+        pending = sum(1 for t in todos if t.status == TodoStatus.PENDING)
+        cancelled = sum(1 for t in todos if t.status == TodoStatus.CANCELLED)
+        completion_rate = completed / total if total > 0 else 0.0
+        
+        # 카테고리별 통계 계산
+        category_stats = []
+        for category in TodoCategory:
+            category_todos = [t for t in todos if t.category == category]
+            cat_total = len(category_todos)
+            
+            if cat_total > 0:
+                cat_completed = sum(1 for t in category_todos if t.status == TodoStatus.COMPLETED)
+                cat_pending = sum(1 for t in category_todos if t.status == TodoStatus.PENDING)
+                cat_cancelled = sum(1 for t in category_todos if t.status == TodoStatus.CANCELLED)
+                cat_completion_rate = cat_completed / cat_total if cat_total > 0 else 0.0
+                
+                category_stats.append(CategoryStatsResponse(
+                    category=category.value,
+                    total=cat_total,
+                    completed=cat_completed,
+                    pending=cat_pending,
+                    cancelled=cat_cancelled,
+                    completion_rate=cat_completion_rate
+                ))
+        
+        return TodoDetailedStatsResponse(
+            total=total,
+            completed=completed,
+            pending=pending,
+            cancelled=cancelled,
+            completion_rate=completion_rate,
+            by_category=category_stats
         )
     
     @staticmethod

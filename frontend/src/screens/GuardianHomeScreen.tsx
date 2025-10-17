@@ -1,7 +1,7 @@
 /**
- * 보호자 전용 홈 화면
+ * 보호자 전용 홈 화면 (대시보드)
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -14,9 +14,11 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
+  RefreshControl,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../store/authStore';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { BottomNavigationBar, Header } from '../components';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as todoApi from '../api/todo';
@@ -41,7 +43,7 @@ interface Task {
   completed: boolean;
 }
 
-type TabType = 'family' | 'health' | 'communication' | 'profile';
+type TabType = 'family' | 'stats' | 'health' | 'communication';
 
 export const GuardianHomeScreen = () => {
   const router = useRouter();
@@ -63,7 +65,7 @@ export const GuardianHomeScreen = () => {
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-
+  
   // 어르신 추가 모달 관련 state
   const [showAddElderlyModal, setShowAddElderlyModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -71,47 +73,25 @@ export const GuardianHomeScreen = () => {
   const [isSearching, setIsSearching] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
 
-  // 연결된 어르신 목업 데이터
-  const connectedElderly: ElderlyProfile[] = [
-    {
-      id: '1',
-      name: '김할머니',
-      age: 78,
-      profileImage: '👵',
-      healthStatus: 'good',
-      todayTasksCompleted: 3,
-      todayTasksTotal: 5,
-      lastActivity: '30분 전',
-      emergencyContact: '010-1234-5678',
-    },
-    {
-      id: '2',
-      name: '박할아버지',
-      age: 82,
-      profileImage: '👴',
-      healthStatus: 'attention',
-      todayTasksCompleted: 1,
-      todayTasksTotal: 4,
-      lastActivity: '2시간 전',
-      emergencyContact: '010-9876-5432',
-    },
-    {
-      id: '3',
-      name: '이할머니',
-      age: 75,
-      profileImage: '👵',
-      healthStatus: 'normal',
-      todayTasksCompleted: 4,
-      todayTasksTotal: 4,
-      lastActivity: '1시간 전',
-      emergencyContact: '010-5555-1234',
-    },
-  ];
+  // 통계 데이터 상태
+  const [weeklyStats, setWeeklyStats] = useState<todoApi.TodoDetailedStats | null>(null);
+  const [monthlyStats, setMonthlyStats] = useState<todoApi.TodoDetailedStats | null>(null);
+  const [isLoadingStats, setIsLoadingStats] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [showAllTodos, setShowAllTodos] = useState(false);
+  const [selectedPeriod, setSelectedPeriod] = useState<'week' | 'month'>('week');
 
-  // 어르신 추가 카드를 포함한 전체 데이터
-  const elderlyWithAddCard = [...connectedElderly, { id: 'add-new', type: 'add' }];
+  // 연결된 어르신 목록 (API에서 가져옴)
+  const [connectedElderly, setConnectedElderly] = useState<ElderlyProfile[]>([]);
+  const [isLoadingElderly, setIsLoadingElderly] = useState(false);
   
-  const currentElderly = connectedElderly[currentElderlyIndex];
+  // 현재 보여줄 어르신 (마지막 인덱스는 "추가하기" 카드)
+  const currentElderly = currentElderlyIndex < connectedElderly.length 
+    ? connectedElderly[currentElderlyIndex] 
+    : null;
+  
+  // 전체 카드 개수 (어르신 + 추가하기 카드)
+  const totalCards = connectedElderly.length > 0 ? connectedElderly.length + 1 : 1;
 
   const getHealthStatusColor = (status: 'good' | 'normal' | 'attention') => {
     switch (status) {
@@ -152,15 +132,14 @@ export const GuardianHomeScreen = () => {
   // 탭별 컨텐츠 렌더링
   const renderFamilyTab = () => (
     <>
-      {/* 연결된 어르신 프로필 */}
-      {connectedElderly.length > 0 ? (
+      {/* 어르신 카드 또는 추가하기 카드 */}
+      {currentElderly ? (
+        /* 어르신 프로필 카드 */
         <View style={styles.elderlyCard}>
           <View style={styles.elderlyCardHeader}>
             <View style={styles.elderlyProfileInfo}>
               <View style={styles.elderlyProfileImageContainer}>
-                <Text style={styles.elderlyProfileImage}>
-                  {currentElderly.profileImage}
-                </Text>
+                <Ionicons name={currentElderly.profileImage as any} size={35} color="#666666" />
                 <View style={[
                   styles.healthStatusDot,
                   { backgroundColor: getHealthStatusColor(currentElderly.healthStatus) }
@@ -175,7 +154,7 @@ export const GuardianHomeScreen = () => {
             <View style={styles.elderlyHealthStatus}>
               <Text style={[
                 styles.healthStatusText,
-                { color: getHealthStatusColor(currentElderly.healthStatus) }
+                { backgroundColor: getHealthStatusColor(currentElderly.healthStatus) }
               ]}>
                 {getHealthStatusText(currentElderly.healthStatus)}
               </Text>
@@ -185,31 +164,33 @@ export const GuardianHomeScreen = () => {
           <View style={styles.elderlyStatsContainer}>
             <View style={styles.elderlyStat}>
               <Text style={styles.elderlyStatNumber}>
-                {currentElderly.todayTasksCompleted}/{currentElderly.todayTasksTotal}
+                {todayTodos.filter(t => t.status === 'completed').length}/{todayTodos.length}
               </Text>
               <Text style={styles.elderlyStatLabel}>오늘 할일</Text>
             </View>
             <View style={styles.elderlyStatDivider} />
             <View style={styles.elderlyStat}>
               <Text style={styles.elderlyStatNumber}>
-                {Math.round((currentElderly.todayTasksCompleted / currentElderly.todayTasksTotal) * 100)}%
+                {todayTodos.length > 0 
+                  ? Math.round((todayTodos.filter(t => t.status === 'completed').length / todayTodos.length) * 100)
+                  : 0}%
               </Text>
               <Text style={styles.elderlyStatLabel}>완료율</Text>
             </View>
             <View style={styles.elderlyStatDivider} />
             <TouchableOpacity style={styles.elderlyStat}>
-              <Text style={styles.elderlyStatNumber}>📞</Text>
+              <Ionicons name="call" size={20} color="#FF3B30" />
               <Text style={styles.elderlyStatLabel}>긴급연락</Text>
             </TouchableOpacity>
           </View>
 
-          {/* 어르신 네비게이션 */}
-          {connectedElderly.length > 1 && (
+          {/* 네비게이션 */}
+          {totalCards > 1 && (
             <View style={styles.elderlyNavigation}>
               <TouchableOpacity 
                 style={styles.navButton}
                 onPress={() => {
-                  const newIndex = currentElderlyIndex > 0 ? currentElderlyIndex - 1 : connectedElderly.length - 1;
+                  const newIndex = currentElderlyIndex > 0 ? currentElderlyIndex - 1 : totalCards - 1;
                   setCurrentElderlyIndex(newIndex);
                 }}
               >
@@ -217,7 +198,7 @@ export const GuardianHomeScreen = () => {
               </TouchableOpacity>
               
               <View style={styles.pageIndicator}>
-                {connectedElderly.map((_, index) => (
+                {Array.from({ length: totalCards }).map((_, index) => (
                   <TouchableOpacity
                     key={index}
                     style={[
@@ -232,7 +213,7 @@ export const GuardianHomeScreen = () => {
               <TouchableOpacity 
                 style={styles.navButton}
                 onPress={() => {
-                  const newIndex = currentElderlyIndex < connectedElderly.length - 1 ? currentElderlyIndex + 1 : 0;
+                  const newIndex = currentElderlyIndex < totalCards - 1 ? currentElderlyIndex + 1 : 0;
                   setCurrentElderlyIndex(newIndex);
                 }}
               >
@@ -240,35 +221,66 @@ export const GuardianHomeScreen = () => {
               </TouchableOpacity>
             </View>
           )}
-
-          {/* 어르신 추가 버튼 */}
+        </View>
+      ) : (
+        /* 어르신 추가하기 카드 (마지막 카드 또는 어르신이 없을 때) */
+        <View style={styles.elderlyCard}>
           <TouchableOpacity 
-            style={styles.addElderlyButton}
+            style={[styles.elderlyCard, styles.addElderlyCard]}
             onPress={() => setShowAddElderlyModal(true)}
             activeOpacity={0.7}
           >
-            <Text style={styles.addElderlyButtonText}>+ 어르신 추가하기</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        /* 연결된 어르신이 없을 때 */
-        <TouchableOpacity 
-          style={[styles.elderlyCard, styles.addElderlyCard]}
-          onPress={() => setShowAddElderlyModal(true)}
-          activeOpacity={0.7}
-        >
-          <View style={styles.addElderlyContent}>
-            <View style={styles.addElderlyIconContainer}>
-              <Text style={styles.addElderlyIcon}>+</Text>
+            <View style={styles.addElderlyContent}>
+              <View style={styles.addElderlyIconContainer}>
+                <Text style={styles.addElderlyIcon}>+</Text>
+              </View>
+              <Text style={styles.addElderlyTitle}>어르신 추가하기</Text>
+              <Text style={styles.addElderlySubtitle}>새로운 어르신을 연결해보세요</Text>
             </View>
-            <Text style={styles.addElderlyTitle}>어르신 추가하기</Text>
-            <Text style={styles.addElderlySubtitle}>새로운 어르신을 연결해보세요</Text>
-          </View>
-        </TouchableOpacity>
+          </TouchableOpacity>
+
+          {/* 네비게이션 (어르신이 1명 이상 있을 때만) */}
+          {totalCards > 1 && (
+            <View style={styles.elderlyNavigation}>
+              <TouchableOpacity 
+                style={styles.navButton}
+                onPress={() => {
+                  const newIndex = currentElderlyIndex > 0 ? currentElderlyIndex - 1 : totalCards - 1;
+                  setCurrentElderlyIndex(newIndex);
+                }}
+              >
+                <Text style={styles.navButtonText}>◀</Text>
+              </TouchableOpacity>
+              
+              <View style={styles.pageIndicator}>
+                {Array.from({ length: totalCards }).map((_, index) => (
+                  <TouchableOpacity
+                    key={index}
+                    style={[
+                      styles.pageIndicatorDot,
+                      index === currentElderlyIndex && styles.pageIndicatorDotActive
+                    ]}
+                    onPress={() => setCurrentElderlyIndex(index)}
+                  />
+                ))}
+              </View>
+              
+              <TouchableOpacity 
+                style={styles.navButton}
+                onPress={() => {
+                  const newIndex = currentElderlyIndex < totalCards - 1 ? currentElderlyIndex + 1 : 0;
+                  setCurrentElderlyIndex(newIndex);
+                }}
+              >
+                <Text style={styles.navButtonText}>▶</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
       )}
 
       {/* 오늘 섹션 */}
-      {connectedElderly.length > 0 && (
+      {currentElderly && (
         <View style={styles.todaySection}>
           <View style={styles.todayHeader}>
             <Text style={styles.todayTitle}>오늘</Text>
@@ -286,7 +298,7 @@ export const GuardianHomeScreen = () => {
                 오늘 등록된 할 일이 없습니다
               </Text>
             ) : (
-              todayTodos.map((todo) => (
+              (showAllTodos ? todayTodos : todayTodos.slice(0, 5)).map((todo) => (
                 <TouchableOpacity
                   key={todo.todo_id}
                   style={[
@@ -299,18 +311,42 @@ export const GuardianHomeScreen = () => {
                     setShowEditModal(true);
                   }}
                 >
-                  <Text style={styles.taskIcon}>{getCategoryIcon(todo.category)}</Text>
-                  <Text style={[
-                    styles.taskTitle,
-                    todo.status === 'completed' && styles.taskTitleCompleted
-                  ]}>
-                    {todo.title}
-                  </Text>
-                  {todo.status === 'completed' && (
-                    <Text style={styles.taskCompletedIcon}>✓</Text>
-                  )}
+                  <View style={styles.taskIconContainer}>
+                    <Ionicons name={getCategoryIcon(todo.category)} size={20} color="#34B79F" />
+                  </View>
+                  <View style={styles.taskContent}>
+                    <Text style={[
+                      styles.taskTitle,
+                      todo.status === 'completed' && styles.taskTitleCompleted
+                    ]}>
+                      {todo.title}
+                    </Text>
+                    {todo.due_time && (
+                      <Text style={styles.taskTime}>
+                        {formatTime(todo.due_time)}
+                      </Text>
+                    )}
+                  </View>
+                  {todo.status === 'completed' ? (
+                    <Ionicons name="checkmark-circle" size={24} color="#34C759" />
+                  ) : todo.status === 'cancelled' ? (
+                    <Ionicons name="close-circle" size={24} color="#FF3B30" />
+                  ) : null}
                 </TouchableOpacity>
               ))
+            )}
+            {todayTodos.length > 5 && (
+              <TouchableOpacity 
+                style={styles.viewMoreButton}
+                onPress={() => setShowAllTodos(!showAllTodos)}
+              >
+                <Text style={styles.viewMoreText}>
+                  {showAllTodos 
+                    ? '접기' 
+                    : `+${todayTodos.length - 5}개 더보기`
+                  }
+                </Text>
+              </TouchableOpacity>
             )}
           </View>
 
@@ -324,6 +360,156 @@ export const GuardianHomeScreen = () => {
           </TouchableOpacity>
         </View>
       )}
+
+    </>
+  );
+
+  // 통계 탭 (새로 추가)
+  const renderStatsTab = () => (
+    <>
+      {connectedElderly.length > 0 && (selectedPeriod === 'week' ? weeklyStats : monthlyStats) ? (
+        <>
+          {/* 주간/월간 요약 선택 */}
+          <View style={styles.periodSelectorCard}>
+            <View style={styles.periodSelector}>
+              <TouchableOpacity 
+                style={[styles.periodButton, selectedPeriod === 'week' && styles.periodButtonActive]}
+                activeOpacity={0.7}
+                onPress={() => setSelectedPeriod('week')}
+              >
+                <Text style={[styles.periodButtonText, selectedPeriod === 'week' && styles.periodButtonTextActive]}>
+                  이번 주
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.periodButton, selectedPeriod === 'month' && styles.periodButtonActive]}
+                activeOpacity={0.7}
+                onPress={() => setSelectedPeriod('month')}
+              >
+                <Text style={[styles.periodButtonText, selectedPeriod === 'month' && styles.periodButtonTextActive]}>
+                  이번 달
+                </Text>
+              </TouchableOpacity>
+            </View>
+            
+            {/* 원형 차트 요약 */}
+            <View style={styles.summaryChartContainer}>
+              <View style={styles.chartSection}>
+                <View style={styles.completionChart}>
+                  <View style={styles.chartCircle}>
+                    <View style={[styles.chartProgress, { 
+                      transform: [{ rotate: `${((selectedPeriod === 'week' ? weeklyStats : monthlyStats)?.completion_rate || 0) * 360 - 90}deg` }]
+                    }]}>
+                    </View>
+                    <View style={styles.chartInnerCircle}>
+                      <Text style={styles.chartPercentage}>
+                        {Math.round(((selectedPeriod === 'week' ? weeklyStats : monthlyStats)?.completion_rate || 0) * 100)}%
+                      </Text>
+                      <Text style={styles.chartLabel}>완료율</Text>
+                    </View>
+                  </View>
+                </View>
+              </View>
+              
+              <View style={styles.summaryStats}>
+                <View style={styles.summaryStatItem}>
+                  <Ionicons name="checkmark-circle" size={20} color="#34B79F" />
+                  <Text style={styles.summaryStatNumber}>{(selectedPeriod === 'week' ? weeklyStats : monthlyStats)?.completed || 0}</Text>
+                  <Text style={styles.summaryStatLabel}>완료</Text>
+                </View>
+                <View style={styles.summaryStatItem}>
+                  <Ionicons name="time" size={20} color="#FF9500" />
+                  <Text style={styles.summaryStatNumber}>{(selectedPeriod === 'week' ? weeklyStats : monthlyStats)?.pending || 0}</Text>
+                  <Text style={styles.summaryStatLabel}>대기</Text>
+                </View>
+                <View style={styles.summaryStatItem}>
+                  <Ionicons name="close-circle" size={20} color="#FF6B6B" />
+                  <Text style={styles.summaryStatNumber}>{(selectedPeriod === 'week' ? weeklyStats : monthlyStats)?.cancelled || 0}</Text>
+                  <Text style={styles.summaryStatLabel}>취소</Text>
+                </View>
+              </View>
+            </View>
+          </View>
+
+          {/* 건강 상태 알림 */}
+          <View style={styles.healthStatusCard}>
+            <Text style={styles.healthStatusTitle}>건강 상태 체크</Text>
+            
+            {/* 주의 필요 */}
+            {generateHealthAlerts(selectedPeriod === 'week' ? weeklyStats : monthlyStats).length > 0 && (
+              <View style={styles.statusSection}>
+                <Text style={styles.statusSectionTitle}>확인이 필요한 부분</Text>
+                {generateHealthAlerts(selectedPeriod === 'week' ? weeklyStats : monthlyStats).map((alert, index) => (
+                  <View key={index} style={styles.statusItem}>
+                    <View style={styles.statusItemHeader}>
+                      <Ionicons name="alert-circle" size={16} color="#FF9500" />
+                      <Text style={styles.statusItemText}>{alert.message}</Text>
+                    </View>
+                    <Text style={styles.statusRecommendation}>{alert.recommendation}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {/* 잘하고 있는 부분 */}
+            {generateGoodStatus(selectedPeriod === 'week' ? weeklyStats : monthlyStats).length > 0 && (
+              <View style={styles.statusSection}>
+                <Text style={styles.statusSectionTitle}>잘하고 있어요</Text>
+                {generateGoodStatus(selectedPeriod === 'week' ? weeklyStats : monthlyStats).map((item, index) => (
+                  <View key={index} style={styles.statusGoodItem}>
+                    <Ionicons name="checkmark-circle" size={16} color="#4CAF50" />
+                    <Text style={styles.statusGoodText}>{item}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {/* 조언 */}
+            <View style={styles.statusSection}>
+              <Text style={styles.statusSectionTitle}>조언</Text>
+              {generateRecommendations(selectedPeriod === 'week' ? weeklyStats : monthlyStats).map((rec, index) => (
+                <View key={index} style={styles.statusAdviceItem}>
+                  <Ionicons name="bulb" size={16} color="#34B79F" />
+                  <Text style={styles.statusAdviceText}>{rec}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+
+          {/* 카테고리별 완료 현황 */}
+          <View style={styles.categoryStatsCard}>
+            <Text style={styles.categoryStatsTitle}>카테고리별 완료율</Text>
+            {(selectedPeriod === 'week' ? weeklyStats : monthlyStats)?.by_category.map((cat) => (
+              <View key={cat.category} style={styles.categoryStatRow}>
+                <View style={styles.categoryStatLabelContainer}>
+                  <Ionicons name={getCategoryIcon(cat.category)} size={16} color="#34B79F" />
+                  <Text style={styles.categoryStatLabel}>
+                    {getCategoryName(cat.category)}
+                  </Text>
+                </View>
+                <View style={styles.categoryProgressContainer}>
+                  <View style={styles.categoryProgressBg}>
+                    <View 
+                      style={[
+                        styles.categoryProgressBar, 
+                        { width: `${Math.round(cat.completion_rate * 100)}%` }
+                      ]} 
+                    />
+                  </View>
+                  <Text style={styles.categoryProgressText}>
+                    {cat.completed}/{cat.total} ({Math.round(cat.completion_rate * 100)}%)
+                  </Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        </>
+      ) : (
+        <View style={styles.emptyState}>
+          <ActivityIndicator size="large" color="#34B79F" />
+          <Text style={styles.emptyStateText}>통계 데이터를 불러오는 중...</Text>
+        </View>
+      )}
     </>
   );
 
@@ -331,7 +517,7 @@ export const GuardianHomeScreen = () => {
     <View style={styles.tabContent}>
       <View style={styles.healthSection}>
         <View style={styles.sectionTitleContainer}>
-          <Text style={styles.sectionIcon}>⚕️</Text>
+          <Ionicons name="fitness" size={24} color="#34B79F" />
           <Text style={styles.sectionTitle}>건강관리</Text>
         </View>
         
@@ -339,7 +525,7 @@ export const GuardianHomeScreen = () => {
         <View style={styles.healthCard}>
           <View style={styles.healthCardHeader}>
             <View style={styles.healthCardTitleContainer}>
-              <Text style={styles.healthCardIcon}>💊</Text>
+              <Ionicons name="medical" size={18} color="#FF6B6B" />
               <Text style={styles.healthCardTitle}>복약 관리</Text>
             </View>
             <Text style={styles.healthCardStatus}>오늘 2/3</Text>
@@ -351,7 +537,7 @@ export const GuardianHomeScreen = () => {
         <View style={styles.healthCard}>
           <View style={styles.healthCardHeader}>
             <View style={styles.healthCardTitleContainer}>
-              <Text style={styles.healthCardIcon}>🏥</Text>
+              <Ionicons name="medical-outline" size={18} color="#4ECDC4" />
               <Text style={styles.healthCardTitle}>병원 일정</Text>
             </View>
             <Text style={styles.healthCardStatus}>이번 주</Text>
@@ -363,7 +549,7 @@ export const GuardianHomeScreen = () => {
         <View style={styles.healthCard}>
           <View style={styles.healthCardHeader}>
             <View style={styles.healthCardTitleContainer}>
-              <Text style={styles.healthCardIcon}>🏃</Text>
+              <Ionicons name="fitness" size={18} color="#45B7D1" />
               <Text style={styles.healthCardTitle}>운동 기록</Text>
             </View>
             <Text style={styles.healthCardStatus}>주 3회</Text>
@@ -375,7 +561,7 @@ export const GuardianHomeScreen = () => {
         <View style={styles.healthCard}>
           <View style={styles.healthCardHeader}>
             <View style={styles.healthCardTitleContainer}>
-              <Text style={styles.healthCardIcon}>🍽️</Text>
+              <Ionicons name="restaurant" size={18} color="#96CEB4" />
               <Text style={styles.healthCardTitle}>식사 관리</Text>
             </View>
             <Text style={styles.healthCardStatus}>규칙적</Text>
@@ -390,7 +576,7 @@ export const GuardianHomeScreen = () => {
     <View style={styles.tabContent}>
       <View style={styles.communicationSection}>
         <View style={styles.sectionTitleContainer}>
-          <Text style={styles.sectionIcon}>💬</Text>
+          <Ionicons name="chatbubbles" size={24} color="#34B79F" />
           <Text style={styles.sectionTitle}>소통</Text>
         </View>
         
@@ -398,14 +584,14 @@ export const GuardianHomeScreen = () => {
         <View style={styles.commCard}>
           <View style={styles.commCardHeader}>
             <View style={styles.commCardTitleContainer}>
-              <Text style={styles.commCardIcon}>📞</Text>
+              <Ionicons name="call" size={18} color="#007AFF" />
               <Text style={styles.commCardTitle}>AI 통화 내역</Text>
             </View>
             <Text style={styles.commCardTime}>오늘 오후 7시</Text>
           </View>
           <Text style={styles.commCardContent}>안부 인사 및 오늘 하루 일과 확인</Text>
           <View style={styles.moodContainer}>
-            <Text style={styles.moodIcon}>😊</Text>
+            <Ionicons name="happy" size={16} color="#4CAF50" />
             <Text style={styles.commCardMood}>기분: 좋음</Text>
           </View>
         </View>
@@ -414,14 +600,14 @@ export const GuardianHomeScreen = () => {
         <View style={styles.commCard}>
           <View style={styles.commCardHeader}>
             <View style={styles.commCardTitleContainer}>
-              <Text style={styles.commCardIcon}>📖</Text>
+              <Ionicons name="book" size={18} color="#FF9500" />
               <Text style={styles.commCardTitle}>최근 일기</Text>
             </View>
             <Text style={styles.commCardTime}>10월 13일</Text>
           </View>
           <Text style={styles.commCardContent}>오늘은 날씨가 좋아서 산책을 했다. 기분이 상쾌했다.</Text>
           <View style={styles.moodContainer}>
-            <Text style={styles.moodIcon}>😌</Text>
+            <Ionicons name="happy-outline" size={16} color="#4CAF50" />
             <Text style={styles.commCardMood}>감정: 평온함</Text>
           </View>
         </View>
@@ -430,7 +616,7 @@ export const GuardianHomeScreen = () => {
         <View style={styles.commCard}>
           <View style={styles.commCardHeader}>
             <View style={styles.commCardTitleContainer}>
-              <Text style={styles.commCardIcon}>💭</Text>
+              <Ionicons name="analytics" size={18} color="#9C27B0" />
               <Text style={styles.commCardTitle}>감정 분석</Text>
             </View>
             <Text style={styles.commCardTime}>이번 주</Text>
@@ -438,15 +624,15 @@ export const GuardianHomeScreen = () => {
           <Text style={styles.commCardContent}>전반적으로 안정적인 감정 상태를 보이고 있습니다.</Text>
           <View style={styles.emotionTags}>
             <View style={styles.emotionTagWithIcon}>
-              <Text style={styles.emotionIcon}>😊</Text>
+              <Ionicons name="happy" size={12} color="#4CAF50" />
               <Text style={styles.emotionTag}>긍정 70%</Text>
             </View>
             <View style={styles.emotionTagWithIcon}>
-              <Text style={styles.emotionIcon}>😌</Text>
+              <Ionicons name="happy-outline" size={12} color="#66BB6A" />
               <Text style={styles.emotionTag}>평온 25%</Text>
             </View>
             <View style={styles.emotionTagWithIcon}>
-              <Text style={styles.emotionIcon}>😔</Text>
+              <Ionicons name="sad" size={12} color="#FF9800" />
               <Text style={styles.emotionTag}>우울 5%</Text>
             </View>
           </View>
@@ -455,73 +641,13 @@ export const GuardianHomeScreen = () => {
     </View>
   );
 
-  const renderProfileTab = () => (
-    <View style={styles.tabContent}>
-      <View style={styles.profileSection}>
-        <View style={styles.sectionTitleContainer}>
-          <Text style={styles.sectionIcon}>👤</Text>
-          <Text style={styles.sectionTitle}>내 정보</Text>
-        </View>
-        
-        {/* 보호자 프로필 */}
-        <View style={styles.profileCard}>
-          <View style={styles.profileHeader}>
-            <View style={styles.profileImageContainer}>
-              <Text style={styles.profileImageText}>👤</Text>
-            </View>
-            <View style={styles.profileInfo}>
-              <Text style={styles.profileName}>{user?.name || '사용자'}님</Text>
-              <Text style={styles.profileRole}>보호자</Text>
-              <Text style={styles.profileEmail}>{user?.email || 'user@example.com'}</Text>
-            </View>
-          </View>
-        </View>
-
-        {/* 설정 메뉴 */}
-        <View style={styles.settingsSection}>
-          <TouchableOpacity style={styles.settingItem}>
-            <Text style={styles.settingIcon}>🔔</Text>
-            <Text style={styles.settingText}>알림 설정</Text>
-            <Text style={styles.settingArrow}>{'>'}</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity style={styles.settingItem}>
-            <Text style={styles.settingIcon}>👥</Text>
-            <Text style={styles.settingText}>연결 관리</Text>
-            <Text style={styles.settingArrow}>{'>'}</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity style={styles.settingItem}>
-            <Text style={styles.settingIcon}>🔒</Text>
-            <Text style={styles.settingText}>개인정보 설정</Text>
-            <Text style={styles.settingArrow}>{'>'}</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity style={styles.settingItem}>
-            <Text style={styles.settingIcon}>❓</Text>
-            <Text style={styles.settingText}>도움말</Text>
-            <Text style={styles.settingArrow}>{'>'}</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* 로그아웃 버튼 */}
-        <TouchableOpacity
-          style={styles.logoutButton}
-          onPress={handleLogout}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.logoutButtonText}>로그아웃</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
-
+  // menuItems는 현재 사용되지 않음 (참고용으로만 유지)
   const menuItems = [
     {
       id: 'diaries',
       title: '일기 관리',
       description: '어르신의 일기 확인',
-      icon: '📖',
+      icon: 'book',
       color: '#FF9500',
       onPress: () => Alert.alert('준비중', '일기 관리 기능은 개발 중입니다.'),
     },
@@ -529,7 +655,7 @@ export const GuardianHomeScreen = () => {
       id: 'calls',
       title: 'AI 통화 내역',
       description: '통화 기록 확인',
-      icon: '📞',
+      icon: 'call',
       color: '#007AFF',
       onPress: () => Alert.alert('준비중', 'AI 통화 내역 기능은 개발 중입니다.'),
     },
@@ -537,7 +663,7 @@ export const GuardianHomeScreen = () => {
       id: 'todos',
       title: '할일 관리',
       description: '할일 등록 및 관리',
-      icon: '✅',
+      icon: 'checkmark-done',
       color: '#34C759',
       onPress: () => Alert.alert('준비중', '할일 관리 기능은 개발 중입니다.'),
     },
@@ -545,7 +671,7 @@ export const GuardianHomeScreen = () => {
       id: 'connections',
       title: '연결 관리',
       description: '어르신과의 연결',
-      icon: '👥',
+      icon: 'people',
       color: '#FF2D55',
       onPress: () => Alert.alert('준비중', '연결 관리 기능은 개발 중입니다.'),
     },
@@ -553,7 +679,7 @@ export const GuardianHomeScreen = () => {
       id: 'notifications',
       title: '알림 설정',
       description: '알림 스케줄 관리',
-      icon: '🔔',
+      icon: 'notifications',
       color: '#5856D6',
       onPress: () => Alert.alert('준비중', '알림 설정 기능은 개발 중입니다.'),
     },
@@ -561,53 +687,166 @@ export const GuardianHomeScreen = () => {
       id: 'dashboard',
       title: '대시보드',
       description: '감정 분석 및 통계',
-      icon: '📊',
+      icon: 'stats-chart',
       color: '#AF52DE',
       onPress: () => Alert.alert('준비중', '대시보드 기능은 개발 중입니다.'),
     },
   ];
 
+  // 연결된 어르신 목록 불러오기
+  const loadConnectedElderly = async () => {
+    setIsLoadingElderly(true);
+    try {
+      console.log('👥 보호자: 연결된 어르신 목록 로딩 시작');
+      const elderly = await connectionsApi.getConnectedElderly();
+      console.log('✅ 보호자: 연결된 어르신', elderly.length, '명');
+      
+      // API 응답을 ElderlyProfile 형태로 변환
+      const elderlyProfiles: ElderlyProfile[] = elderly.map((e: any) => ({
+        id: e.user_id,
+        name: e.name,
+        age: e.age || 0,
+        profileImage: 'person-circle',
+        healthStatus: 'good', // TODO: 실제 건강 상태 계산
+        todayTasksCompleted: 0, // TODO: API에서 계산
+        todayTasksTotal: 0, // TODO: API에서 계산
+        lastActivity: '방금', // TODO: API에서 계산
+        emergencyContact: e.phone_number || '010-0000-0000',
+      }));
+      
+      setConnectedElderly(elderlyProfiles);
+    } catch (error) {
+      console.error('❌ 연결된 어르신 로딩 실패:', error);
+      setConnectedElderly([]);
+    } finally {
+      setIsLoadingElderly(false);
+    }
+  };
+
   // 어르신의 오늘 TODO 불러오기
   const loadTodosForElderly = async (elderlyId: string) => {
     setIsLoadingTodos(true);
     try {
+      console.log('📥 보호자: 어르신 TODO 로딩 시작 -', elderlyId);
       const todos = await todoApi.getTodos('today', elderlyId);
+      console.log('✅ 보호자: TODO 로딩 성공 -', todos.length, '개');
+      console.log('📊 완료된 TODO:', todos.filter(t => t.status === 'completed').length);
       setTodayTodos(todos);
     } catch (error) {
-      console.error('TODO 로딩 실패:', error);
+      console.error('❌ TODO 로딩 실패:', error);
     } finally {
       setIsLoadingTodos(false);
     }
   };
 
-  // 현재 어르신 변경 시 TODO 다시 로딩
+  // 어르신의 주간 통계 불러오기
+  const loadWeeklyStatsForElderly = async (elderlyId: string) => {
+    setIsLoadingStats(true);
+    try {
+      console.log('📊 보호자: 주간 통계 로딩 시작 -', elderlyId);
+      const stats = await todoApi.getDetailedStats('week', elderlyId);
+      console.log('✅ 보호자: 주간 통계 로딩 성공');
+      console.log('📈 주간 완료율:', Math.round(stats.completion_rate * 100) + '%');
+      console.log('📋 카테고리별:', stats.by_category.length, '개');
+      setWeeklyStats(stats);
+    } catch (error) {
+      console.error('❌ 주간 통계 로딩 실패:', error);
+    } finally {
+      setIsLoadingStats(false);
+    }
+  };
+
+  // Load monthly stats for a specific elderly
+  const loadMonthlyStatsForElderly = async (elderlyId: string) => {
+    setIsLoadingStats(true);
+    try {
+      console.log('📊 보호자: 월간 통계 로딩 시작 -', elderlyId);
+      const stats = await todoApi.getDetailedStats('month', elderlyId);
+      console.log('✅ 보호자: 월간 통계 로딩 성공');
+      console.log('📈 월간 완료율:', Math.round(stats.completion_rate * 100) + '%');
+      console.log('📋 카테고리별:', stats.by_category.length, '개');
+      setMonthlyStats(stats);
+    } catch (error) {
+      console.error('❌ 월간 통계 로딩 실패:', error);
+    } finally {
+      setIsLoadingStats(false);
+    }
+  };
+
+  // Pull-to-Refresh 핸들러
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      // 연결된 어르신 목록 새로고침
+      await loadConnectedElderly();
+      
+      // 현재 어르신이 있으면 데이터도 새로고침
+      if (currentElderly) {
+        await Promise.all([
+          loadTodosForElderly(currentElderly.id),
+          loadWeeklyStatsForElderly(currentElderly.id),
+          loadMonthlyStatsForElderly(currentElderly.id),
+        ]);
+      }
+    } catch (error) {
+      console.error('새로고침 실패:', error);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  // 화면 마운트 시 연결된 어르신 목록 로딩
+  useEffect(() => {
+    loadConnectedElderly();
+  }, []);
+
+  // 현재 어르신 변경 시 TODO 및 통계 다시 로딩
   useEffect(() => {
     if (currentElderly) {
-      // 실제 elderly_id로 변환 필요 (현재는 Mock ID '1', '2', '3')
-      // TODO: connectedElderly를 실제 API로 교체 후 real elderly_id 사용
-      const realElderlyId = '39aa74fd-80f7-434e-baf7-1d09357ee623'; // 테스트용 고정 ID
-      loadTodosForElderly(realElderlyId);
+      loadTodosForElderly(currentElderly.id);
+      loadWeeklyStatsForElderly(currentElderly.id);
+      loadMonthlyStatsForElderly(currentElderly.id);
     }
-  }, [currentElderlyIndex]);
+  }, [currentElderlyIndex, connectedElderly.length]);
 
-  // 카테고리 아이콘 매핑
-  const getCategoryIcon = (category: string | null): string => {
-    const iconMap: Record<string, string> = {
-      'medicine': '💊',
-      'MEDICINE': '💊',
-      'exercise': '🏃',
-      'EXERCISE': '🏃',
-      'meal': '🍽️',
-      'MEAL': '🍽️',
-      'hospital': '🏥',
-      'HOSPITAL': '🏥',
-      'other': '📝',
-      'OTHER': '📝',
+  // 화면 포커스 시 데이터 새로고침 (다른 화면 갔다가 돌아올 때만)
+  useFocusEffect(
+    useCallback(() => {
+      loadConnectedElderly();
+      if (currentElderly) {
+        loadTodosForElderly(currentElderly.id);
+        loadWeeklyStatsForElderly(currentElderly.id);
+        loadMonthlyStatsForElderly(currentElderly.id);
+      }
+    }, [currentElderly?.id]) // optional chaining으로 안전하게 접근
+  );
+
+  // 카테고리 아이콘 매핑 (Ionicons 사용)
+  const getCategoryIcon = (category: string | null) => {
+    const iconMap: Record<string, any> = {
+      'medicine': 'medical',
+      'MEDICINE': 'medical',
+      'exercise': 'fitness',
+      'EXERCISE': 'fitness',
+      'meal': 'restaurant',
+      'MEAL': 'restaurant',
+      'hospital': 'medical-outline',
+      'HOSPITAL': 'medical-outline',
+      'other': 'list',
+      'OTHER': 'list',
     };
-    return iconMap[category || 'other'] || '📝';
+    return iconMap[category || 'other'] || 'list';
   };
 
   // 카테고리 한국어 이름
+  // 시간 포맷 변환 (HH:MM -> 오전/오후)
+  const formatTime = (timeStr: string): string => {
+    const [hours, minutes] = timeStr.split(':').map(Number);
+    const period = hours < 12 ? '오전' : '오후';
+    const displayHours = hours % 12 || 12;
+    return `${period} ${displayHours}:${minutes.toString().padStart(2, '0')}`;
+  };
+
   const getCategoryName = (category: string | null): string => {
     const nameMap: Record<string, string> = {
       'medicine': '약 복용',
@@ -624,13 +863,111 @@ export const GuardianHomeScreen = () => {
     return nameMap[category || 'other'] || '기타';
   };
 
+  // 건강 알림 생성 (다정한 문구로 변경)
+  const generateHealthAlerts = (stats: todoApi.TodoDetailedStats | null) => {
+    if (!stats) return [];
+    const alerts = [];
+    
+    // 복약 완료율 체크
+    const medicineCategory = stats.by_category.find(cat => cat.category === 'MEDICINE');
+    if (medicineCategory && medicineCategory.completion_rate < 0.8) {
+      alerts.push({
+        message: `약 복용이 조금 부족해요 (${Math.round(medicineCategory.completion_rate * 100)}%)`,
+        recommendation: '복약 알림을 더 자주 해주시면 좋을 것 같아요'
+      });
+    }
+
+    // 운동 완료율 체크
+    const exerciseCategory = stats.by_category.find(cat => cat.category === 'EXERCISE');
+    if (exerciseCategory && exerciseCategory.completion_rate < 0.7) {
+      alerts.push({
+        message: `운동을 주 ${exerciseCategory.completed}회만 하셨어요`,
+        recommendation: '집에서도 할 수 있는 간단한 스트레칭을 함께 해보시면 어떨까요?'
+      });
+    }
+
+    // 식사 완료율 체크
+    const mealCategory = stats.by_category.find(cat => cat.category === 'MEAL');
+    if (mealCategory && mealCategory.completion_rate < 0.85) {
+      alerts.push({
+        message: `식사 시간이 조금 불규칙해요 (${Math.round(mealCategory.completion_rate * 100)}%)`,
+        recommendation: '규칙적인 식사 시간을 정해보시면 건강에 더 좋을 것 같아요'
+      });
+    }
+
+    return alerts;
+  };
+
+  // 양호한 상태 생성 (다정한 문구로 변경)
+  const generateGoodStatus = (stats: todoApi.TodoDetailedStats | null) => {
+    if (!stats) return [];
+    const goodItems = [];
+    
+    // 복약 완료율 체크
+    const medicineCategory = stats.by_category.find(cat => cat.category === 'MEDICINE');
+    if (medicineCategory && medicineCategory.completion_rate >= 0.9) {
+      goodItems.push(`약 복용을 정말 잘 하고 계세요! (${Math.round(medicineCategory.completion_rate * 100)}%)`);
+    }
+
+    // 식사 완료율 체크
+    const mealCategory = stats.by_category.find(cat => cat.category === 'MEAL');
+    if (mealCategory && mealCategory.completion_rate >= 0.85) {
+      goodItems.push(`식사 시간을 규칙적으로 잘 지키고 계세요 (${Math.round(mealCategory.completion_rate * 100)}%)`);
+    }
+
+    // 운동 완료율 체크
+    const exerciseCategory = stats.by_category.find(cat => cat.category === 'EXERCISE');
+    if (exerciseCategory && exerciseCategory.completion_rate >= 0.8) {
+      goodItems.push(`운동을 주 ${exerciseCategory.completed}회나 열심히 하셨어요!`);
+    }
+
+    // 전체 완료율 체크
+    if (stats.completion_rate >= 0.85) {
+      goodItems.push(`전반적으로 정말 잘 하고 계세요 (${Math.round(stats.completion_rate * 100)}%)`);
+    }
+
+    return goodItems;
+  };
+
+  // 개선 권장사항 생성 (다정한 문구로 변경)
+  const generateRecommendations = (stats: todoApi.TodoDetailedStats | null) => {
+    if (!stats) return ['데이터를 불러오는 중입니다...'];
+    const recommendations = [];
+    
+    // 복약 관련 권장사항
+    const medicineCategory = stats.by_category.find(cat => cat.category === 'MEDICINE');
+    if (medicineCategory && medicineCategory.completion_rate < 0.9) {
+      recommendations.push('복약 알림을 더 자주 해주시면 어르신께서 잊지 않으실 것 같아요');
+    }
+
+    // 운동 관련 권장사항
+    const exerciseCategory = stats.by_category.find(cat => cat.category === 'EXERCISE');
+    if (exerciseCategory && exerciseCategory.completion_rate < 0.8) {
+      recommendations.push('집에서 할 수 있는 간단한 스트레칭이나 산책을 함께 해보시는 건 어떨까요?');
+    }
+
+    // 식사 관련 권장사항
+    const mealCategory = stats.by_category.find(cat => cat.category === 'MEAL');
+    if (mealCategory && mealCategory.completion_rate < 0.9) {
+      recommendations.push('규칙적인 식사 시간을 정해서 건강한 생활을 유지해보세요');
+    }
+
+    // 기본 권장사항 (모든 상태가 좋을 때)
+    if (recommendations.length === 0) {
+      recommendations.push('현재 상태를 잘 유지하고 계세요!');
+      recommendations.push('새로운 취미나 독서 같은 활동을 추가해보시면 더욱 즐거울 것 같아요');
+    }
+
+    return recommendations;
+  };
+
   // 카테고리 옵션 (GuardianTodoAddScreen과 동일)
   const categories = [
-    { id: 'MEDICINE', name: '💊 약 복용', color: '#FF6B6B' },
-    { id: 'HOSPITAL', name: '🏥 병원 방문', color: '#4ECDC4' },
-    { id: 'EXERCISE', name: '🏃 운동', color: '#45B7D1' },
-    { id: 'MEAL', name: '🍽️ 식사', color: '#96CEB4' },
-    { id: 'OTHER', name: '📝 기타', color: '#95A5A6' },
+    { id: 'MEDICINE', name: '약 복용', icon: 'medical', color: '#FF6B6B' },
+    { id: 'HOSPITAL', name: '병원 방문', icon: 'medical-outline', color: '#4ECDC4' },
+    { id: 'EXERCISE', name: '운동', icon: 'fitness', color: '#45B7D1' },
+    { id: 'MEAL', name: '식사', icon: 'restaurant', color: '#96CEB4' },
+    { id: 'OTHER', name: '기타', icon: 'list', color: '#95A5A6' },
   ];
 
   // 시간 옵션
@@ -704,14 +1041,15 @@ export const GuardianHomeScreen = () => {
       Alert.alert('수정 완료', '할 일이 수정되었습니다.', [
         {
           text: '확인',
-          onPress: () => {
+          onPress: async () => {
             setShowEditModal(false);
             setSelectedTodo(null);
             setIsEditMode(false);
-            // TODO 목록 새로고침
+            // TODO 목록 및 통계 새로고침
             if (currentElderly) {
-              const realElderlyId = '39aa74fd-80f7-434e-baf7-1d09357ee623';
-              loadTodosForElderly(realElderlyId);
+              await loadTodosForElderly(currentElderly.id);
+              await loadWeeklyStatsForElderly(currentElderly.id);
+              await loadMonthlyStatsForElderly(currentElderly.id);
             }
           },
         },
@@ -744,10 +1082,11 @@ export const GuardianHomeScreen = () => {
                 Alert.alert('삭제 완료', '할 일이 삭제되었습니다.');
                 setShowEditModal(false);
                 setSelectedTodo(null);
-                // TODO 목록 새로고침
+                // TODO 목록 및 통계 새로고침
                 if (currentElderly) {
-                  const realElderlyId = '39aa74fd-80f7-434e-baf7-1d09357ee623';
-                  loadTodosForElderly(realElderlyId);
+                  await loadTodosForElderly(currentElderly.id);
+                  await loadWeeklyStatsForElderly(currentElderly.id);
+                  await loadMonthlyStatsForElderly(currentElderly.id);
                 }
               } catch (error) {
                 console.error('삭제 실패:', error);
@@ -764,10 +1103,11 @@ export const GuardianHomeScreen = () => {
                 Alert.alert('삭제 완료', '반복 일정이 모두 삭제되었습니다.');
                 setShowEditModal(false);
                 setSelectedTodo(null);
-                // TODO 목록 새로고침
+                // TODO 목록 및 통계 새로고침
                 if (currentElderly) {
-                  const realElderlyId = '39aa74fd-80f7-434e-baf7-1d09357ee623';
-                  loadTodosForElderly(realElderlyId);
+                  await loadTodosForElderly(currentElderly.id);
+                  await loadWeeklyStatsForElderly(currentElderly.id);
+                  await loadMonthlyStatsForElderly(currentElderly.id);
                 }
               } catch (error) {
                 console.error('삭제 실패:', error);
@@ -796,10 +1136,11 @@ export const GuardianHomeScreen = () => {
                 Alert.alert('삭제 완료', '할 일이 삭제되었습니다.');
                 setShowEditModal(false);
                 setSelectedTodo(null);
-                // TODO 목록 새로고침
+                // TODO 목록 및 통계 새로고침
                 if (currentElderly) {
-                  const realElderlyId = '39aa74fd-80f7-434e-baf7-1d09357ee623';
-                  loadTodosForElderly(realElderlyId);
+                  await loadTodosForElderly(currentElderly.id);
+                  await loadWeeklyStatsForElderly(currentElderly.id);
+                  await loadMonthlyStatsForElderly(currentElderly.id);
                 }
               } catch (error) {
                 console.error('삭제 실패:', error);
@@ -860,20 +1201,22 @@ export const GuardianHomeScreen = () => {
             try {
               await connectionsApi.createConnection(elderly.email);
               
-              Alert.alert(
-                '성공',
-                `${elderly.name}님에게 연결 요청을 보냈습니다.\n어르신이 수락하면 연결됩니다.`,
-                [
-                  {
-                    text: '확인',
-                    onPress: () => {
-                      setShowAddElderlyModal(false);
-                      setSearchQuery('');
-                      setSearchResults([]);
-                    }
-                  }
-                ]
-              );
+               Alert.alert(
+                 '성공',
+                 `${elderly.name}님에게 연결 요청을 보냈습니다.\n어르신이 수락하면 연결됩니다.`,
+                 [
+                   {
+                     text: '확인',
+                     onPress: async () => {
+                       setShowAddElderlyModal(false);
+                       setSearchQuery('');
+                       setSearchResults([]);
+                       // 연결된 어르신 목록 새로고침
+                       await loadConnectedElderly();
+                     }
+                   }
+                 ]
+               );
             } catch (error: any) {
               console.error('연결 요청 실패:', error);
               Alert.alert('오류', error.message || '연결 요청에 실패했습니다.');
@@ -888,10 +1231,10 @@ export const GuardianHomeScreen = () => {
 
   // 탭 데이터
   const tabs = [
-    { id: 'family', label: '가족', icon: '👥' },
-    { id: 'health', label: '건강관리', icon: '⚕️' },
-    { id: 'communication', label: '소통', icon: '💬' },
-    { id: 'profile', label: '내정보', icon: '👤' },
+    { id: 'family', label: '홈', icon: 'home' },
+    { id: 'stats', label: '통계', icon: 'stats-chart' },
+    { id: 'health', label: '건강', icon: 'fitness' },
+    { id: 'communication', label: '소통', icon: 'chatbubbles' },
   ];
 
   // 현재 날짜 정보
@@ -917,12 +1260,11 @@ export const GuardianHomeScreen = () => {
             onPress={() => setActiveTab(tab.id as TabType)}
             activeOpacity={0.7}
           >
-            <Text style={[
-              styles.tabIcon,
-              { color: activeTab === tab.id ? '#34B79F' : '#999999' }
-            ]}>
-              {tab.icon}
-            </Text>
+            <Ionicons
+              name={tab.icon as any}
+              size={24}
+              color={activeTab === tab.id ? '#34B79F' : '#999999'}
+            />
             <Text style={[
               styles.tabLabel,
               activeTab === tab.id && styles.tabLabelActive
@@ -931,14 +1273,25 @@ export const GuardianHomeScreen = () => {
             </Text>
           </TouchableOpacity>
         ))}
-      </View>
+          </View>
 
       {/* 탭 컨텐츠 */}
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.content} 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={handleRefresh}
+            colors={['#34B79F']}
+            tintColor="#34B79F"
+          />
+        }
+      >
         {activeTab === 'family' && renderFamilyTab()}
+        {activeTab === 'stats' && renderStatsTab()}
         {activeTab === 'health' && renderHealthTab()}
         {activeTab === 'communication' && renderCommunicationTab()}
-        {activeTab === 'profile' && renderProfileTab()}
 
         {/* 하단 여백 (네비게이션 바 공간 확보) */}
         <View style={[styles.bottomSpacer, { height: 100 + Math.max(insets.bottom, 10) }]} />
@@ -987,22 +1340,23 @@ export const GuardianHomeScreen = () => {
                     <View style={styles.todoDetailSection}>
                       <Text style={styles.todoDetailLabel}>제목</Text>
                       <Text style={styles.todoDetailValue}>{selectedTodo.title}</Text>
-          </View>
+        </View>
 
                     {selectedTodo.description && (
                       <View style={styles.todoDetailSection}>
                         <Text style={styles.todoDetailLabel}>설명</Text>
                         <Text style={styles.todoDetailValue}>{selectedTodo.description}</Text>
-        </View>
+            </View>
                     )}
 
                     <View style={styles.todoDetailRow}>
                       <View style={[styles.todoDetailSection, { flex: 1 }]}>
                         <Text style={styles.todoDetailLabel}>카테고리</Text>
-                        <Text style={styles.todoDetailValue}>
-                          {getCategoryIcon(selectedTodo.category)} {getCategoryName(selectedTodo.category)}
-                        </Text>
-                      </View>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <Ionicons name={getCategoryIcon(selectedTodo.category)} size={16} color="#34B79F" style={{ marginRight: 4 }} />
+                          <Text style={styles.todoDetailValue}>{getCategoryName(selectedTodo.category)}</Text>
+            </View>
+          </View>
 
                       <View style={[styles.todoDetailSection, { flex: 1 }]}>
                         <Text style={styles.todoDetailLabel}>시간</Text>
@@ -1073,7 +1427,7 @@ export const GuardianHomeScreen = () => {
                           !editedTodo.category && styles.pickerPlaceholder
                         ]}>
                           {editedTodo.category 
-                            ? `${getCategoryIcon(editedTodo.category)} ${getCategoryName(editedTodo.category)}`
+                            ? `${getCategoryName(editedTodo.category)}`
                             : '카테고리를 선택하세요'}
                         </Text>
                         <Text style={styles.dropdownIcon}>{showCategoryPicker ? '▲' : '▼'}</Text>
@@ -1094,7 +1448,10 @@ export const GuardianHomeScreen = () => {
                               }}
                               activeOpacity={0.7}
                             >
-                              <Text style={styles.pickerOptionText}>{cat.name}</Text>
+                              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                <Ionicons name={cat.icon as any} size={16} color={cat.color} style={{ marginRight: 8 }} />
+                                <Text style={styles.pickerOptionText}>{cat.name}</Text>
+                              </View>
               </TouchableOpacity>
             ))}
                         </View>
@@ -1137,7 +1494,7 @@ export const GuardianHomeScreen = () => {
             </TouchableOpacity>
                             ))}
                           </ScrollView>
-          </View>
+        </View>
                       )}
           </View>
                   </>
@@ -1236,9 +1593,9 @@ export const GuardianHomeScreen = () => {
                   activeOpacity={0.7}
                 >
                   <Text style={styles.closeButton}>×</Text>
-                </TouchableOpacity>
-              </View>
-
+            </TouchableOpacity>
+          </View>
+          
               {/* 검색 입력 - ScrollView로 감싸기 */}
               <ScrollView 
                 style={styles.editModalBody}
@@ -1269,8 +1626,8 @@ export const GuardianHomeScreen = () => {
                       <Text style={styles.editButtonText}>검색</Text>
                     )}
                   </TouchableOpacity>
-                </View>
-              </View>
+          </View>
+        </View>
 
               {/* 검색 결과 */}
               {searchResults.length > 0 && (
@@ -1303,7 +1660,7 @@ export const GuardianHomeScreen = () => {
                         </View>
 
                         {/* 연결 버튼 */}
-                        <TouchableOpacity
+          <TouchableOpacity
                           style={[
                             styles.modalActionButton,
                             elderly.is_already_connected ? styles.cancelButton : styles.editButton,
@@ -1319,8 +1676,8 @@ export const GuardianHomeScreen = () => {
                                  elderly.connection_status === 'pending' ? '대기중' : '거절됨')
                               : '연결 요청'}
                           </Text>
-                        </TouchableOpacity>
-                      </View>
+          </TouchableOpacity>
+        </View>
                     </View>
                   ))}
                 </View>
@@ -1335,7 +1692,7 @@ export const GuardianHomeScreen = () => {
                   </Text>
                 </View>
               )}
-              </ScrollView>
+      </ScrollView>
             </View>
           </View>
         </KeyboardAvoidingView>
@@ -1363,7 +1720,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
     borderBottomColor: '#F0F0F0',
-    paddingHorizontal: 8,
+    paddingHorizontal: 16,
   },
   tabButton: {
     flex: 1,
@@ -1375,14 +1732,11 @@ const styles = StyleSheet.create({
     borderBottomWidth: 2,
     borderBottomColor: '#34B79F',
   },
-  tabIcon: {
-    fontSize: 18,
-    marginBottom: 4,
-  },
   tabLabel: {
     fontSize: 12,
     color: '#999999',
     fontWeight: '500',
+    marginTop: 4,
   },
   tabLabelActive: {
     color: '#34B79F',
@@ -1404,33 +1758,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 16,
   },
-  sectionIcon: {
-    fontSize: 24,
-    marginRight: 8,
-  },
   healthCardTitleContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-  },
-  healthCardIcon: {
-    fontSize: 18,
-    marginRight: 8,
   },
   commCardTitleContainer: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  commCardIcon: {
-    fontSize: 18,
-    marginRight: 8,
-  },
   moodContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-  },
-  moodIcon: {
-    fontSize: 16,
-    marginRight: 4,
   },
   emotionTagWithIcon: {
     flexDirection: 'row',
@@ -1441,10 +1779,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     marginRight: 8,
     marginBottom: 4,
-  },
-  emotionIcon: {
-    fontSize: 12,
-    marginRight: 4,
   },
   
   elderlyCard: {
@@ -1478,9 +1812,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginRight: 16,
     position: 'relative',
-  },
-  elderlyProfileImage: {
-    fontSize: 35,
   },
   healthStatusDot: {
     position: 'absolute',
@@ -1518,7 +1849,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     paddingHorizontal: 12,
     paddingVertical: 6,
-    backgroundColor: '#F8F9FA',
+    color: '#FFFFFF',
     borderRadius: 12,
   },
   elderlyStatsContainer: {
@@ -1694,87 +2025,6 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
 
-  // 프로필 탭
-  profileSection: {
-    flex: 1,
-  },
-  profileCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 20,
-    marginBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  profileHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  profileImageContainer: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: '#F0F0F0',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 16,
-  },
-  profileImageText: {
-    fontSize: 32,
-  },
-  profileInfo: {
-    flex: 1,
-  },
-  profileName: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#333333',
-    marginBottom: 4,
-  },
-  profileRole: {
-    fontSize: 14,
-    color: '#34B79F',
-    fontWeight: '500',
-    marginBottom: 4,
-  },
-  profileEmail: {
-    fontSize: 14,
-    color: '#666666',
-  },
-  settingsSection: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    marginBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  settingItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
-  },
-  settingIcon: {
-    fontSize: 18,
-    marginRight: 12,
-  },
-  settingArrow: {
-    fontSize: 16,
-    color: '#999999',
-  },
-  settingText: {
-    flex: 1,
-    fontSize: 16,
-    color: '#333333',
-  },
-
   // 어르신 추가 카드
   addElderlyCard: {
     backgroundColor: '#34B79F',
@@ -1859,9 +2109,16 @@ const styles = StyleSheet.create({
     backgroundColor: '#F0F0F0',
     opacity: 0.7,
   },
-  taskIcon: {
-    fontSize: 20,
+  taskIconContainer: {
     marginRight: 12,
+  },
+  taskContent: {
+    flex: 1,
+  },
+  taskTime: {
+    fontSize: 12,
+    color: '#999999',
+    marginTop: 4,
   },
   taskTitle: {
     fontSize: 16,
@@ -1873,10 +2130,15 @@ const styles = StyleSheet.create({
     textDecorationLine: 'line-through',
     color: '#999999',
   },
-  taskCompletedIcon: {
-    fontSize: 18,
-    color: '#34C759',
-    fontWeight: '700',
+  viewMoreButton: {
+    alignItems: 'center',
+    paddingVertical: 12,
+    marginTop: 8,
+  },
+  viewMoreText: {
+    fontSize: 14,
+    color: '#34B79F',
+    fontWeight: '500',
   },
   addTaskButton: {
     borderWidth: 2,
@@ -1892,60 +2154,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
 
-  // 다이어리 섹션
-  diarySection: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  diaryHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  diaryTitleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  diaryIcon: {
-    fontSize: 18,
-    marginRight: 8,
-  },
-  diaryTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333333',
-  },
-  viewAllText: {
-    fontSize: 14,
-    color: '#999999',
-  },
-  diaryPlaceholder: {
-    backgroundColor: '#34B79F',
-    borderRadius: 12,
-    padding: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 120,
-  },
-  diaryPlaceholderText: {
-    fontSize: 16,
-    color: '#FFFFFF',
-    fontWeight: '500',
-  },
-
   // 로그아웃 버튼
-  footer: {
-    marginTop: 24,
-    marginBottom: 32,
-  },
   logoutButton: {
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
@@ -2077,6 +2286,268 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 
+  // 통계 탭 스타일
+  emptyState: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 100,
+  },
+  emptyStateText: {
+    fontSize: 14,
+    color: '#999999',
+    marginTop: 12,
+  },
+
+  // 기간 선택 카드
+  periodSelectorCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  periodSelector: {
+    flexDirection: 'row',
+    backgroundColor: '#F5F5F5',
+    borderRadius: 12,
+    padding: 4,
+    marginBottom: 20,
+  },
+  periodButton: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  periodButtonActive: {
+    backgroundColor: '#34B79F',
+  },
+  periodButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#999999',
+  },
+  periodButtonTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+  summaryChartContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  chartSection: {
+    flex: 1,
+    alignItems: 'center',
+    paddingRight: 30,
+  },
+  completionChart: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  chartCircle: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    borderWidth: 6,
+    borderColor: '#F0F0F0',
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  chartProgress: {
+    position: 'absolute',
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    borderWidth: 6,
+    borderColor: 'transparent',
+    borderTopColor: '#34B79F',
+    borderRightColor: '#34B79F',
+  },
+  chartInnerCircle: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  chartPercentage: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#34B79F',
+  },
+  chartLabel: {
+    fontSize: 11,
+    color: '#666666',
+    marginTop: 2,
+  },
+  summaryStats: {
+    flex: 1,
+  },
+  summaryStatItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  summaryStatNumber: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333333',
+    marginLeft: 8,
+    marginRight: 8,
+    minWidth: 30,
+  },
+  summaryStatLabel: {
+    fontSize: 14,
+    color: '#666666',
+  },
+
+  // 건강 상태 카드
+  healthStatusCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  healthStatusTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333333',
+    marginBottom: 16,
+  },
+  statusSection: {
+    marginBottom: 16,
+  },
+  statusSectionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333333',
+    marginBottom: 12,
+  },
+  statusItem: {
+    backgroundColor: '#FFF8E1',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+  },
+  statusItemHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  statusItemText: {
+    fontSize: 13,
+    color: '#E65100',
+    fontWeight: '500',
+    marginLeft: 6,
+    flex: 1,
+  },
+  statusRecommendation: {
+    fontSize: 12,
+    color: '#666666',
+    lineHeight: 16,
+  },
+  statusGoodItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0F8F0',
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 6,
+  },
+  statusGoodText: {
+    fontSize: 13,
+    color: '#2E7D32',
+    fontWeight: '500',
+    marginLeft: 6,
+    flex: 1,
+  },
+  statusAdviceItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0F8FF',
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 6,
+  },
+  statusAdviceText: {
+    fontSize: 13,
+    color: '#34B79F',
+    fontWeight: '500',
+    marginLeft: 6,
+    flex: 1,
+  },
+  categoryStatsCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  categoryStatsTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333333',
+    marginBottom: 16,
+  },
+  categoryStatRow: {
+    marginBottom: 12,
+  },
+  categoryStatLabelContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  categoryStatLabel: {
+    fontSize: 14,
+    color: '#666666',
+    marginLeft: 6,
+  },
+  categoryProgressContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  categoryProgressBg: {
+    flex: 1,
+    height: 8,
+    backgroundColor: '#F0F0F0',
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  categoryProgressBar: {
+    height: '100%',
+    backgroundColor: '#34B79F',
+    borderRadius: 4,
+  },
+  categoryProgressText: {
+    fontSize: 12,
+    color: '#999999',
+    minWidth: 80,
+    textAlign: 'right',
+  },
+
   // 수정 모드 입력 필드
   inputSection: {
     marginBottom: 20,
@@ -2150,4 +2621,3 @@ const styles = StyleSheet.create({
     color: '#333333',
   },
 });
-

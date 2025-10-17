@@ -47,7 +47,7 @@ export const GuardianTodoAddScreen = () => {
     category: '',
     time: '',
     date: new Date().toISOString().split('T')[0], // YYYY-MM-DD
-    elderlyId: '39aa74fd-80f7-434e-baf7-1d09357ee623', // TODO: 연결된 어르신 목록에서 선택
+    elderlyId: 'e96b4366-b674-4b6a-91b3-158db6d15050', // TODO: 연결된 어르신 목록에서 선택 (test1@test.com)
     isRecurring: false,
     recurringType: 'daily' as 'daily' | 'weekly' | 'monthly',
     reminderEnabled: true,

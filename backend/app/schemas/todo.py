@@ -85,3 +85,23 @@ class TodoStatsResponse(BaseModel):
     cancelled: int
     completion_rate: float  # 0.0 ~ 1.0
 
+
+class CategoryStatsResponse(BaseModel):
+    """카테고리별 통계 응답"""
+    category: str
+    total: int
+    completed: int
+    pending: int
+    cancelled: int
+    completion_rate: float
+
+
+class TodoDetailedStatsResponse(BaseModel):
+    """TODO 상세 통계 응답 (카테고리별 포함)"""
+    total: int
+    completed: int
+    pending: int
+    cancelled: int
+    completion_rate: float
+    by_category: List[CategoryStatsResponse]
+
