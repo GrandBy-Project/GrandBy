@@ -81,25 +81,17 @@ export const GuardianHomeScreen = () => {
   const [showAllTodos, setShowAllTodos] = useState(false);
   const [selectedPeriod, setSelectedPeriod] = useState<'week' | 'month'>('week');
 
-  // 연결된 어르신 목업 데이터 (TODO: 연결 API 완성 후 실제 데이터로 교체)
-  const connectedElderly: ElderlyProfile[] = [
-    {
-      id: 'e96b4366-b674-4b6a-91b3-158db6d15050', // 실제 테스트 어르신 ID (test1@test.com)
-      name: '테르신',
-      age: 78,
-      profileImage: 'person-circle', // Ionicons으로 변경
-      healthStatus: 'good',
-      todayTasksCompleted: 0, // API로 계산
-      todayTasksTotal: 0, // API로 계산
-      lastActivity: '방금', // API로 계산
-      emergencyContact: '010-0000-0000',
-    },
-  ];
-
-  // 어르신 추가 카드를 포함한 전체 데이터
-  const elderlyWithAddCard = [...connectedElderly, { id: 'add-new', type: 'add' }];
+  // 연결된 어르신 목록 (API에서 가져옴)
+  const [connectedElderly, setConnectedElderly] = useState<ElderlyProfile[]>([]);
+  const [isLoadingElderly, setIsLoadingElderly] = useState(false);
   
-  const currentElderly = connectedElderly[currentElderlyIndex];
+  // 현재 보여줄 어르신 (마지막 인덱스는 "추가하기" 카드)
+  const currentElderly = currentElderlyIndex < connectedElderly.length 
+    ? connectedElderly[currentElderlyIndex] 
+    : null;
+  
+  // 전체 카드 개수 (어르신 + 추가하기 카드)
+  const totalCards = connectedElderly.length > 0 ? connectedElderly.length + 1 : 1;
 
   const getHealthStatusColor = (status: 'good' | 'normal' | 'attention') => {
     switch (status) {
@@ -140,8 +132,9 @@ export const GuardianHomeScreen = () => {
   // 탭별 컨텐츠 렌더링
   const renderFamilyTab = () => (
     <>
-      {/* 연결된 어르신 프로필 */}
-      {connectedElderly.length > 0 ? (
+      {/* 어르신 카드 또는 추가하기 카드 */}
+      {currentElderly ? (
+        /* 어르신 프로필 카드 */
         <View style={styles.elderlyCard}>
           <View style={styles.elderlyCardHeader}>
             <View style={styles.elderlyProfileInfo}>
@@ -191,13 +184,13 @@ export const GuardianHomeScreen = () => {
             </TouchableOpacity>
           </View>
 
-          {/* 어르신 네비게이션 */}
-          {connectedElderly.length > 1 && (
+          {/* 네비게이션 */}
+          {totalCards > 1 && (
             <View style={styles.elderlyNavigation}>
               <TouchableOpacity 
                 style={styles.navButton}
                 onPress={() => {
-                  const newIndex = currentElderlyIndex > 0 ? currentElderlyIndex - 1 : connectedElderly.length - 1;
+                  const newIndex = currentElderlyIndex > 0 ? currentElderlyIndex - 1 : totalCards - 1;
                   setCurrentElderlyIndex(newIndex);
                 }}
               >
@@ -205,7 +198,7 @@ export const GuardianHomeScreen = () => {
               </TouchableOpacity>
               
               <View style={styles.pageIndicator}>
-                {connectedElderly.map((_, index) => (
+                {Array.from({ length: totalCards }).map((_, index) => (
                   <TouchableOpacity
                     key={index}
                     style={[
@@ -220,7 +213,7 @@ export const GuardianHomeScreen = () => {
               <TouchableOpacity 
                 style={styles.navButton}
                 onPress={() => {
-                  const newIndex = currentElderlyIndex < connectedElderly.length - 1 ? currentElderlyIndex + 1 : 0;
+                  const newIndex = currentElderlyIndex < totalCards - 1 ? currentElderlyIndex + 1 : 0;
                   setCurrentElderlyIndex(newIndex);
                 }}
               >
@@ -228,35 +221,66 @@ export const GuardianHomeScreen = () => {
               </TouchableOpacity>
             </View>
           )}
-
-          {/* 어르신 추가 버튼 */}
+        </View>
+      ) : (
+        /* 어르신 추가하기 카드 (마지막 카드 또는 어르신이 없을 때) */
+        <View style={styles.elderlyCard}>
           <TouchableOpacity 
-            style={styles.addElderlyButton}
+            style={[styles.elderlyCard, styles.addElderlyCard]}
             onPress={() => setShowAddElderlyModal(true)}
             activeOpacity={0.7}
           >
-            <Text style={styles.addElderlyButtonText}>+ 어르신 추가하기</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        /* 연결된 어르신이 없을 때 */
-        <TouchableOpacity 
-          style={[styles.elderlyCard, styles.addElderlyCard]}
-          onPress={() => setShowAddElderlyModal(true)}
-          activeOpacity={0.7}
-        >
-          <View style={styles.addElderlyContent}>
-            <View style={styles.addElderlyIconContainer}>
-              <Text style={styles.addElderlyIcon}>+</Text>
+            <View style={styles.addElderlyContent}>
+              <View style={styles.addElderlyIconContainer}>
+                <Text style={styles.addElderlyIcon}>+</Text>
+              </View>
+              <Text style={styles.addElderlyTitle}>어르신 추가하기</Text>
+              <Text style={styles.addElderlySubtitle}>새로운 어르신을 연결해보세요</Text>
             </View>
-            <Text style={styles.addElderlyTitle}>어르신 추가하기</Text>
-            <Text style={styles.addElderlySubtitle}>새로운 어르신을 연결해보세요</Text>
-          </View>
-        </TouchableOpacity>
+          </TouchableOpacity>
+
+          {/* 네비게이션 (어르신이 1명 이상 있을 때만) */}
+          {totalCards > 1 && (
+            <View style={styles.elderlyNavigation}>
+              <TouchableOpacity 
+                style={styles.navButton}
+                onPress={() => {
+                  const newIndex = currentElderlyIndex > 0 ? currentElderlyIndex - 1 : totalCards - 1;
+                  setCurrentElderlyIndex(newIndex);
+                }}
+              >
+                <Text style={styles.navButtonText}>◀</Text>
+              </TouchableOpacity>
+              
+              <View style={styles.pageIndicator}>
+                {Array.from({ length: totalCards }).map((_, index) => (
+                  <TouchableOpacity
+                    key={index}
+                    style={[
+                      styles.pageIndicatorDot,
+                      index === currentElderlyIndex && styles.pageIndicatorDotActive
+                    ]}
+                    onPress={() => setCurrentElderlyIndex(index)}
+                  />
+                ))}
+              </View>
+              
+              <TouchableOpacity 
+                style={styles.navButton}
+                onPress={() => {
+                  const newIndex = currentElderlyIndex < totalCards - 1 ? currentElderlyIndex + 1 : 0;
+                  setCurrentElderlyIndex(newIndex);
+                }}
+              >
+                <Text style={styles.navButtonText}>▶</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
       )}
 
       {/* 오늘 섹션 */}
-      {connectedElderly.length > 0 && (
+      {currentElderly && (
         <View style={styles.todaySection}>
           <View style={styles.todayHeader}>
             <Text style={styles.todayTitle}>오늘</Text>
@@ -669,6 +693,36 @@ export const GuardianHomeScreen = () => {
     },
   ];
 
+  // 연결된 어르신 목록 불러오기
+  const loadConnectedElderly = async () => {
+    setIsLoadingElderly(true);
+    try {
+      console.log('👥 보호자: 연결된 어르신 목록 로딩 시작');
+      const elderly = await connectionsApi.getConnectedElderly();
+      console.log('✅ 보호자: 연결된 어르신', elderly.length, '명');
+      
+      // API 응답을 ElderlyProfile 형태로 변환
+      const elderlyProfiles: ElderlyProfile[] = elderly.map((e: any) => ({
+        id: e.user_id,
+        name: e.name,
+        age: e.age || 0,
+        profileImage: 'person-circle',
+        healthStatus: 'good', // TODO: 실제 건강 상태 계산
+        todayTasksCompleted: 0, // TODO: API에서 계산
+        todayTasksTotal: 0, // TODO: API에서 계산
+        lastActivity: '방금', // TODO: API에서 계산
+        emergencyContact: e.phone_number || '010-0000-0000',
+      }));
+      
+      setConnectedElderly(elderlyProfiles);
+    } catch (error) {
+      console.error('❌ 연결된 어르신 로딩 실패:', error);
+      setConnectedElderly([]);
+    } finally {
+      setIsLoadingElderly(false);
+    }
+  };
+
   // 어르신의 오늘 TODO 불러오기
   const loadTodosForElderly = async (elderlyId: string) => {
     setIsLoadingTodos(true);
@@ -721,21 +775,30 @@ export const GuardianHomeScreen = () => {
 
   // Pull-to-Refresh 핸들러
   const handleRefresh = async () => {
-    if (!currentElderly) return;
-    
     setIsRefreshing(true);
     try {
-      await Promise.all([
-        loadTodosForElderly(currentElderly.id),
-        loadWeeklyStatsForElderly(currentElderly.id),
-        loadMonthlyStatsForElderly(currentElderly.id),
-      ]);
+      // 연결된 어르신 목록 새로고침
+      await loadConnectedElderly();
+      
+      // 현재 어르신이 있으면 데이터도 새로고침
+      if (currentElderly) {
+        await Promise.all([
+          loadTodosForElderly(currentElderly.id),
+          loadWeeklyStatsForElderly(currentElderly.id),
+          loadMonthlyStatsForElderly(currentElderly.id),
+        ]);
+      }
     } catch (error) {
       console.error('새로고침 실패:', error);
     } finally {
       setIsRefreshing(false);
     }
   };
+
+  // 화면 마운트 시 연결된 어르신 목록 로딩
+  useEffect(() => {
+    loadConnectedElderly();
+  }, []);
 
   // 현재 어르신 변경 시 TODO 및 통계 다시 로딩
   useEffect(() => {
@@ -744,17 +807,18 @@ export const GuardianHomeScreen = () => {
       loadWeeklyStatsForElderly(currentElderly.id);
       loadMonthlyStatsForElderly(currentElderly.id);
     }
-  }, [currentElderlyIndex]);
+  }, [currentElderlyIndex, connectedElderly.length]);
 
   // 화면 포커스 시 데이터 새로고침 (다른 화면 갔다가 돌아올 때만)
   useFocusEffect(
     useCallback(() => {
+      loadConnectedElderly();
       if (currentElderly) {
         loadTodosForElderly(currentElderly.id);
         loadWeeklyStatsForElderly(currentElderly.id);
         loadMonthlyStatsForElderly(currentElderly.id);
       }
-    }, [currentElderly.id]) // activeTab 제거
+    }, [currentElderly?.id]) // optional chaining으로 안전하게 접근
   );
 
   // 카테고리 아이콘 매핑 (Ionicons 사용)
@@ -1137,20 +1201,22 @@ export const GuardianHomeScreen = () => {
             try {
               await connectionsApi.createConnection(elderly.email);
               
-              Alert.alert(
-                '성공',
-                `${elderly.name}님에게 연결 요청을 보냈습니다.\n어르신이 수락하면 연결됩니다.`,
-                [
-                  {
-                    text: '확인',
-                    onPress: () => {
-                      setShowAddElderlyModal(false);
-                      setSearchQuery('');
-                      setSearchResults([]);
-                    }
-                  }
-                ]
-              );
+               Alert.alert(
+                 '성공',
+                 `${elderly.name}님에게 연결 요청을 보냈습니다.\n어르신이 수락하면 연결됩니다.`,
+                 [
+                   {
+                     text: '확인',
+                     onPress: async () => {
+                       setShowAddElderlyModal(false);
+                       setSearchQuery('');
+                       setSearchResults([]);
+                       // 연결된 어르신 목록 새로고침
+                       await loadConnectedElderly();
+                     }
+                   }
+                 ]
+               );
             } catch (error: any) {
               console.error('연결 요청 실패:', error);
               Alert.alert('오류', error.message || '연결 요청에 실패했습니다.');
@@ -1428,7 +1494,7 @@ export const GuardianHomeScreen = () => {
             </TouchableOpacity>
                             ))}
                           </ScrollView>
-          </View>
+        </View>
                       )}
           </View>
                   </>
@@ -1527,9 +1593,9 @@ export const GuardianHomeScreen = () => {
                   activeOpacity={0.7}
                 >
                   <Text style={styles.closeButton}>×</Text>
-                </TouchableOpacity>
-              </View>
-
+            </TouchableOpacity>
+          </View>
+          
               {/* 검색 입력 - ScrollView로 감싸기 */}
               <ScrollView 
                 style={styles.editModalBody}
@@ -1560,8 +1626,8 @@ export const GuardianHomeScreen = () => {
                       <Text style={styles.editButtonText}>검색</Text>
                     )}
                   </TouchableOpacity>
-                </View>
-              </View>
+          </View>
+        </View>
 
               {/* 검색 결과 */}
               {searchResults.length > 0 && (
@@ -1594,7 +1660,7 @@ export const GuardianHomeScreen = () => {
                         </View>
 
                         {/* 연결 버튼 */}
-                        <TouchableOpacity
+          <TouchableOpacity
                           style={[
                             styles.modalActionButton,
                             elderly.is_already_connected ? styles.cancelButton : styles.editButton,
@@ -1610,8 +1676,8 @@ export const GuardianHomeScreen = () => {
                                  elderly.connection_status === 'pending' ? '대기중' : '거절됨')
                               : '연결 요청'}
                           </Text>
-                        </TouchableOpacity>
-                      </View>
+          </TouchableOpacity>
+        </View>
                     </View>
                   ))}
                 </View>
@@ -1626,7 +1692,7 @@ export const GuardianHomeScreen = () => {
                   </Text>
                 </View>
               )}
-              </ScrollView>
+      </ScrollView>
             </View>
           </View>
         </KeyboardAvoidingView>
