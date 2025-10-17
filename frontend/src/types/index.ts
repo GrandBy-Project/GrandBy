@@ -9,6 +9,12 @@ export enum UserRole {
   ADMIN = 'admin',
 }
 
+// 성별
+export enum Gender {
+  MALE = 'male',
+  FEMALE = 'female',
+}
+
 // 사용자 정보
 export interface User {
   user_id: string;
@@ -16,6 +22,10 @@ export interface User {
   name: string;
   role: UserRole;
   phone_number?: string;
+  birth_date?: string;  // 생년월일 (YYYY-MM-DD)
+  gender?: Gender;  // 성별
+  profile_image_url?: string;  // 프로필 이미지 URL
+  auth_provider?: string;  // 인증 제공자 (email, kakao 등)
   is_active: boolean;
   created_at: string;
 }
@@ -32,7 +42,10 @@ export interface RegisterRequest {
   password: string;
   name: string;
   role: UserRole;
-  phone_number?: string;
+  phone_number: string;
+  birth_date: string;  // 필수: YYYY-MM-DD 형식
+  gender: Gender;  // 필수
+  auth_provider?: string;
 }
 
 // 인증 응답

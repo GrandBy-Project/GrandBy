@@ -330,3 +330,5 @@ SELECT email, name, role FROM users WHERE email LIKE 'test%';
 
 **결론: 대부분 자동화되어 있으니 `docker-compose up -d`만 하면 됩니다! 🚀**
 
+
+

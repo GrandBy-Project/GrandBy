@@ -135,3 +135,65 @@ export const validateVerificationCode = (code: string): { valid: boolean; messag
   return { valid: true, message: '' };
 };
 
+/**
+ * 생년월일 검증
+ */
+export const validateBirthDate = (birthDate: string): { valid: boolean; message: string } => {
+  if (!birthDate) {
+    return { valid: false, message: '생년월일을 입력해주세요' };
+  }
+  
+  // YYYY-MM-DD 형식 검증
+  const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+  if (!dateRegex.test(birthDate)) {
+    return { valid: false, message: 'YYYY-MM-DD 형식으로 입력해주세요' };
+  }
+  
+  // 유효한 날짜인지 확인
+  const date = new Date(birthDate);
+  const today = new Date();
+  
+  if (isNaN(date.getTime())) {
+    return { valid: false, message: '올바른 날짜를 입력해주세요' };
+  }
+  
+  // 미래 날짜 방지
+  if (date > today) {
+    return { valid: false, message: '미래 날짜는 입력할 수 없습니다' };
+  }
+  
+  // 만 14세 이상 확인
+  const age = today.getFullYear() - date.getFullYear();
+  const monthDiff = today.getMonth() - date.getMonth();
+  const dayDiff = today.getDate() - date.getDate();
+  
+  const actualAge = monthDiff < 0 || (monthDiff === 0 && dayDiff < 0) ? age - 1 : age;
+  
+  if (actualAge < 14) {
+    return { valid: false, message: '만 14세 이상만 가입 가능합니다' };
+  }
+  
+  if (actualAge > 120) {
+    return { valid: false, message: '올바른 생년월일을 입력해주세요' };
+  }
+  
+  return { valid: true, message: '' };
+};
+
+/**
+ * 생년월일 포맷팅 (자동 하이픈 추가)
+ */
+export const formatBirthDate = (text: string): string => {
+  // 숫자만 추출
+  const numbers = text.replace(/[^\d]/g, '');
+  
+  // YYYY-MM-DD 형식으로 변환
+  if (numbers.length <= 4) {
+    return numbers;
+  } else if (numbers.length <= 6) {
+    return `${numbers.slice(0, 4)}-${numbers.slice(4)}`;
+  } else {
+    return `${numbers.slice(0, 4)}-${numbers.slice(4, 6)}-${numbers.slice(6, 8)}`;
+  }
+};
+
