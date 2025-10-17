@@ -1137,6 +1137,32 @@ async def media_stream_handler(
                             if len(conversation_sessions[call_sid]) > 10:
                                 conversation_sessions[call_sid] = conversation_sessions[call_sid][-10:]
                             
+                            # 💾 실시간 DB 저장 (대화 즉시 저장)
+                            try:
+                                from app.models.call import CallTranscript
+                                
+                                # 사용자 메시지 저장
+                                user_transcript = CallTranscript(
+                                    call_id=call_sid,
+                                    speaker="ELDERLY",
+                                    text=user_text
+                                )
+                                db.add(user_transcript)
+                                
+                                # AI 응답 저장
+                                ai_transcript = CallTranscript(
+                                    call_id=call_sid,
+                                    speaker="AI",
+                                    text=ai_response
+                                )
+                                db.add(ai_transcript)
+                                
+                                db.commit()
+                                logger.info(f"💾 대화 내용 실시간 저장 완료")
+                            except Exception as e:
+                                logger.error(f"❌ 실시간 DB 저장 실패: {e}")
+                                db.rollback()
+                            
                             # 3️⃣ TTS: 텍스트 → 음성 → Twilio 전송
                             await send_audio_to_twilio_with_tts(websocket, stream_sid, ai_response)
                             
@@ -1148,10 +1174,10 @@ async def media_stream_handler(
                 # 스트림 종료
                 logger.info(f"📞 스트림 종료 - Call: {call_sid}")
                 
-                # 대화 내용 DB에 저장
+                # 대화 세션 정리 (실시간 저장으로 이미 DB에 저장됨)
                 if call_sid and call_sid in conversation_sessions:
                     conversation = conversation_sessions[call_sid]
-                    logger.info(f"대화 내용 저장 가능: {len(conversation)}개 메시지")
+                    logger.info(f"✅ 통화 종료 - 총 {len(conversation)}개 메시지 (실시간 저장 완료)")
                     del conversation_sessions[call_sid]
                 if call_sid in active_connections:
                     del active_connections[call_sid]

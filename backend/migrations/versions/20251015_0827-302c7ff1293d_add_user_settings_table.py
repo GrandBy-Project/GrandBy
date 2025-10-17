@@ -1,7 +1,7 @@
 """add user_settings table
 
 Revision ID: 302c7ff1293d
-Revises: aec47b8e33b6
+Revises:
 Create Date: 2025-10-15 08:27:55.955067
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = '302c7ff1293d'
-down_revision: Union[str, None] = 'aec47b8e33b6'
+down_revision: Union[str, None] = 'None'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

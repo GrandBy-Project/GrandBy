@@ -1,7 +1,7 @@
 """Initial tables with all columns
 
 Revision ID: aec47b8e33b6
-Revises: 
+Revises: 302c7ff1293d
 Create Date: 2025-10-16 02:17:59.783128
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'aec47b8e33b6'
-down_revision: Union[str, None] = None
+down_revision: Union[str, None] = '302c7ff1293d'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -92,8 +92,6 @@ def upgrade() -> None:
     sa.Column('user_id', sa.String(length=36), nullable=False),
     sa.Column('auto_diary_enabled', sa.Boolean(), nullable=True),
     sa.Column('push_notification_enabled', sa.Boolean(), nullable=True),
-    sa.Column('auto_call_enabled', sa.Boolean(), nullable=True),
-    sa.Column('scheduled_call_time', sa.String(length=5), nullable=True),
     sa.Column('language_preference', sa.String(length=10), nullable=True),
     sa.Column('updated_at', sa.DateTime(), nullable=True),
     sa.ForeignKeyConstraint(['user_id'], ['users.user_id'], ),

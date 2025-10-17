@@ -39,7 +39,9 @@ class Diary(Base):
     
     # 내용
     date = Column(Date, nullable=False)  # 일기 날짜
+    title = Column(String(200), nullable=True)  # 제목 추가
     content = Column(Text, nullable=False)
+    mood = Column(String(50), nullable=True)  # 기분 추가
     
     # 작성 정보
     author_type = Column(SQLEnum(AuthorType), nullable=False)
