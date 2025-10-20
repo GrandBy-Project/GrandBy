@@ -16,6 +16,7 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getDiary, deleteDiary, Diary } from '../api/diary';
+import SuggestedTodoList from '../components/SuggestedTodoList';
 
 export const DiaryDetailScreen = () => {
   const router = useRouter();
@@ -219,6 +220,29 @@ export const DiaryDetailScreen = () => {
 
         {/* 일기 내용 */}
         <Text style={styles.contentText}>{diary.content}</Text>
+
+        {/* 감지된 TODO 추천 (AI 생성 일기인 경우에만) */}
+        {diary.is_auto_generated && (
+          <SuggestedTodoList
+            diaryId={diaryId}
+            onTodosAccepted={() => {
+              // TODO 추가 완료 후 처리
+              Alert.alert(
+                '✅ 완료',
+                '할 일이 추가되었습니다!\n할 일 화면에서 확인하세요.',
+                [
+                  {
+                    text: '확인',
+                    onPress: () => {
+                      // 필요시 TODO 화면으로 이동
+                      // router.push('/todos');
+                    },
+                  },
+                ]
+              );
+            }}
+          />
+        )}
       </ScrollView>
     </View>
   );

@@ -92,6 +92,9 @@ class User(Base):
     # 통화 기록
     call_logs = relationship("CallLog", back_populates="elderly")
     
+    # 다이어리 (소유자로서)
+    owned_diaries = relationship("Diary", foreign_keys="Diary.user_id", back_populates="user")
+    
     # 다이어리 (작성자로서)
     diaries = relationship("Diary", foreign_keys="Diary.author_id", back_populates="author")
     

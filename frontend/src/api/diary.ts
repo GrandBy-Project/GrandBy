@@ -96,3 +96,56 @@ export const deleteDiary = async (diaryId: string): Promise<{ message: string }>
   return response.data;
 };
 
+/**
+ * 일기에서 감지된 TODO 추천 조회
+ * 
+ * @param diaryId - 다이어리 ID
+ * @returns TODO 추천 목록
+ */
+export const getSuggestedTodos = async (diaryId: string): Promise<{
+  diary_id: string;
+  diary_date: string;
+  suggested_todos: Array<{
+    title: string;
+    description: string;
+    due_date: string | null;
+    due_time: string | null;
+    priority: 'high' | 'medium' | 'low';
+    category: string;
+    elderly_id: string;
+    elderly_name?: string;
+    creator_id: string;
+    source: 'todo' | 'future_plan';
+  }>;
+}> => {
+  const response = await apiClient.get(`/api/diaries/${diaryId}/suggested-todos`);
+  return response.data;
+};
+
+/**
+ * 감지된 TODO를 실제로 등록
+ * 
+ * @param diaryId - 다이어리 ID
+ * @param selectedIndices - 선택된 TODO 인덱스 배열
+ * @returns 생성된 TODO 정보
+ */
+export const acceptSuggestedTodos = async (
+  diaryId: string,
+  selectedIndices: number[]
+): Promise<{
+  success: boolean;
+  created_todos_count: number;
+  created_todos: Array<{
+    todo_id: string;
+    title: string;
+    due_date: string | null;
+    priority: string;
+  }>;
+}> => {
+  const response = await apiClient.post(
+    `/api/diaries/${diaryId}/accept-todos`,
+    selectedIndices
+  );
+  return response.data;
+};
+

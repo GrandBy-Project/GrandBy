@@ -27,6 +27,7 @@ interface TodoItem {
   isCompleted: boolean;
   priority: 'high' | 'medium' | 'low';
   category: 'medicine' | 'hospital' | 'daily' | 'other' | 'exercise' | 'meal';
+  creatorType?: 'caregiver' | 'ai' | 'elderly'; // AI 자동 생성 여부
 }
 
 type DateFilter = 'yesterday' | 'today' | 'tomorrow';
@@ -65,6 +66,7 @@ export const TodoListScreen = () => {
         isCompleted: todo.status === 'completed',
         priority: getPriority(todo.category),
         category: mapCategory(todo.category),
+        creatorType: todo.creator_type, // AI 자동 생성 여부
       }));
       
       setTodos(mappedTodos);
@@ -314,16 +316,25 @@ export const TodoListScreen = () => {
 
   const TodoCard = ({ todo }: { todo: TodoItem }) => {
     const isExpanded = expandedTodoId === todo.id;
+    const isAiGenerated = todo.creatorType === 'ai';
     
     return (
       <TouchableOpacity
         style={[
         styles.todoCard,
         todo.isCompleted && styles.completedCard,
+        isAiGenerated && styles.aiGeneratedCard, // AI 생성 TODO 스타일
         ]}
           onPress={() => handleCardPress(todo.id)}
         activeOpacity={0.95}
         >
+        {/* AI 생성 배지 */}
+        {isAiGenerated && (
+          <View style={styles.aiGeneratedBadge}>
+            <Text style={styles.aiGeneratedBadgeText}>🤖 AI 자동 생성</Text>
+          </View>
+        )}
+
         {/* 기본 카드 내용 */}
         <View style={styles.cardContent}>
             <View style={styles.todoLeft}>
@@ -851,6 +862,31 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.04,
     shadowRadius: 6,
     elevation: 3,
+  },
+  // AI 자동 생성 TODO 스타일
+  aiGeneratedCard: {
+    backgroundColor: '#F0FFF8', // 연한 민트색 배경
+    borderColor: '#34B79F', // 민트색 테두리
+    borderWidth: 2,
+  },
+  aiGeneratedBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: '#34B79F',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 12,
+    shadowColor: '#34B79F',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  aiGeneratedBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
   },
   todoHeader: {
     flexDirection: 'row',

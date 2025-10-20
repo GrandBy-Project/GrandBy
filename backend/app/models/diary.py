@@ -55,6 +55,7 @@ class Diary(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
+    user = relationship("User", foreign_keys=[user_id], back_populates="owned_diaries")
     author = relationship("User", foreign_keys=[author_id], back_populates="diaries")
     photos = relationship("DiaryPhoto", back_populates="diary", cascade="all, delete-orphan")
     comments = relationship("DiaryComment", back_populates="diary", cascade="all, delete-orphan")

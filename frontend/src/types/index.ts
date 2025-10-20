@@ -118,3 +118,36 @@ export interface Notification {
   read_at?: string;
 }
 
+// 감지된 TODO (일기에서 추천)
+export interface SuggestedTodo {
+  title: string;
+  description: string;
+  due_date: string | null;
+  due_time: string | null;
+  priority: 'high' | 'medium' | 'low';
+  category: string;
+  elderly_id: string;
+  elderly_name?: string;
+  creator_id: string;
+  source: 'todo' | 'future_plan';
+}
+
+// TODO 추천 응답
+export interface SuggestedTodosResponse {
+  diary_id: string;
+  diary_date: string;
+  suggested_todos: SuggestedTodo[];
+}
+
+// TODO 수락 응답
+export interface AcceptTodosResponse {
+  success: boolean;
+  created_todos_count: number;
+  created_todos: {
+    todo_id: string;
+    title: string;
+    due_date: string | null;
+    priority: string;
+  }[];
+}
+

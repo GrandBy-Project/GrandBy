@@ -163,3 +163,144 @@ async def create_comment(
     """
     # TODO: DiaryComment 모델 임포트 및 구현
     return {"message": "Not Implemented Yet"}
+
+
+@router.get("/{diary_id}/suggested-todos")
+async def get_suggested_todos(
+    diary_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    일기에서 감지된 TODO 추천 목록 조회
+    
+    일기가 AI로 생성되었고 통화 기록이 있는 경우,
+    통화 내용에서 감지된 할 일 목록을 반환합니다.
+    
+    Returns:
+        {
+            "diary_id": "...",
+            "suggested_todos": [
+                {
+                    "title": "병원 가기",
+                    "description": "내과 진료",
+                    "due_date": "2025-10-21",
+                    "priority": "high",
+                    ...
+                }
+            ]
+        }
+    """
+    from app.models.call import CallLog, CallTranscript
+    from app.services.diary.conversation_analyzer import ConversationAnalyzer
+    from app.services.diary.todo_extractor import TodoExtractor
+    
+    # 1. 일기 조회
+    diary = db.query(Diary).filter(
+        Diary.diary_id == diary_id,
+        Diary.user_id == current_user.user_id
+    ).first()
+    
+    if not diary:
+        raise HTTPException(status_code=404, detail="일기를 찾을 수 없습니다.")
+    
+    # 2. AI 생성 일기가 아니거나 통화 기록이 없으면 빈 리스트 반환
+    if not diary.is_auto_generated or not diary.call_id:
+        return {
+            "diary_id": diary_id,
+            "suggested_todos": []
+        }
+    
+    # 3. 통화 내용 분석
+    analyzer = ConversationAnalyzer()
+    structured_data = analyzer.analyze_conversation(diary.call_id, db)
+    
+    # 4. TODO 추출
+    todo_extractor = TodoExtractor()
+    suggested_todos = todo_extractor.extract_and_create_todos(
+        structured_data=structured_data,
+        elderly=current_user,
+        creator=current_user,
+        db=db
+    )
+    
+    return {
+        "diary_id": diary_id,
+        "diary_date": diary.date.isoformat(),
+        "suggested_todos": suggested_todos
+    }
+
+
+@router.post("/{diary_id}/accept-todos")
+async def accept_suggested_todos(
+    diary_id: str,
+    selected_todos: List[int],  # 선택된 TODO 인덱스 리스트
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    감지된 TODO를 실제로 등록
+    
+    사용자가 추천된 TODO 중 일부를 선택하면,
+    해당 TODO를 실제 TODO 테이블에 등록합니다.
+    
+    Request Body:
+        [0, 2, 3]  # 0번, 2번, 3번 TODO 선택
+    
+    Returns:
+        {
+            "success": true,
+            "created_todos_count": 3,
+            "created_todos": [...]
+        }
+    """
+    from app.models.call import CallLog
+    from app.services.diary.conversation_analyzer import ConversationAnalyzer
+    from app.services.diary.todo_extractor import TodoExtractor
+    from app.models.todo import Todo
+    
+    # 1. 일기 조회
+    diary = db.query(Diary).filter(
+        Diary.diary_id == diary_id,
+        Diary.user_id == current_user.user_id
+    ).first()
+    
+    if not diary:
+        raise HTTPException(status_code=404, detail="일기를 찾을 수 없습니다.")
+    
+    if not diary.is_auto_generated or not diary.call_id:
+        raise HTTPException(status_code=400, detail="AI 생성 일기가 아닙니다.")
+    
+    # 2. 통화 내용 재분석
+    analyzer = ConversationAnalyzer()
+    structured_data = analyzer.analyze_conversation(diary.call_id, db)
+    
+    # 3. TODO 추출
+    todo_extractor = TodoExtractor()
+    suggestions = todo_extractor.extract_and_create_todos(
+        structured_data=structured_data,
+        elderly=current_user,
+        creator=current_user,
+        db=db
+    )
+    
+    # 4. 선택된 TODO만 실제로 생성
+    created_todos = todo_extractor.create_todos_from_suggestions(
+        suggestions=suggestions,
+        selected_indices=selected_todos,
+        db=db
+    )
+    
+    return {
+        "success": True,
+        "created_todos_count": len(created_todos),
+        "created_todos": [
+            {
+                "todo_id": todo.todo_id,
+                "title": todo.title,
+                "due_date": todo.due_date.isoformat() if todo.due_date else None,
+                "priority": todo.priority.value
+            }
+            for todo in created_todos
+        ]
+    }

@@ -34,6 +34,13 @@ class TodoCategory(str, enum.Enum):
     OTHER = "OTHER"  # 기타
 
 
+class TodoPriority(str, enum.Enum):
+    """TODO 우선순위"""
+    HIGH = "high"  # 높음
+    MEDIUM = "medium"  # 중간
+    LOW = "low"  # 낮음
+
+
 class RecurringType(str, enum.Enum):
     """반복 유형"""
     DAILY = "DAILY"  # 매일
@@ -57,6 +64,7 @@ class Todo(Base):
     title = Column(String(200), nullable=False)
     description = Column(Text, nullable=True)
     category = Column(SQLEnum(TodoCategory), nullable=True)  # 카테고리
+    priority = Column(SQLEnum(TodoPriority), default=TodoPriority.MEDIUM)  # 우선순위
     
     # 일정
     due_date = Column(Date, nullable=False)
