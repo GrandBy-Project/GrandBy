@@ -4,8 +4,8 @@ AI 자동 전화 스케줄링 작업 (Celery Beat)
 
 from app.tasks.celery_app import celery_app
 from app.database import SessionLocal
-from app.models.call import CallLog, CallStatus
-from app.models.user import User, UserSettings
+from app.models.call import CallLog, CallStatus , CallSettings
+from app.models.user import User
 from app.services.ai_call.twilio_service import TwilioService
 from app.config import settings
 from app.utils.phone import normalize_phone_number
@@ -32,9 +32,9 @@ def check_and_make_calls():
         logger.info(f"⏰ Current time: {current_hour:02d}:{current_minute:02d}")
         
         # 자동 통화가 활성화된 설정 조회
-        settings_list = db.query(UserSettings).filter(
-            UserSettings.auto_call_enabled == True,
-            UserSettings.scheduled_call_time != None
+        settings_list = db.query(CallSettings).filter(
+            CallSettings.is_active == True,
+            CallSettings.call_time != None
         ).all()
         
         if not settings_list:
@@ -48,32 +48,31 @@ def check_and_make_calls():
         
         for setting in settings_list:
             try:
-                time_parts = setting.scheduled_call_time.split(":")
-                call_hour = int(time_parts[0])
-                call_minute = int(time_parts[1])
+                call_hour = setting.call_time.hour
+                call_minute = setting.call_time.minute
             except (ValueError, AttributeError, IndexError) as e:
-                logger.warning(f"Invalid time format for user {setting.user_id}: {setting.scheduled_call_time}")
+                logger.warning(f"Invalid time format for user {setting.elderly_id}: {setting.call_time}")
                 continue
             
             # 시간 차이 계산 (분 단위)
             time_diff = abs((call_hour * 60 + call_minute) - (current_hour * 60 + current_minute))
             
-            # ±5분 이내인지 확인
+            # ±1분 이내인지 확인
             if time_diff <= 1:
                 # 오늘 이미 전화했는지 확인 (중복 방지)
                 today_start = current_datetime.replace(hour=0, minute=0, second=0, microsecond=0)
                 existing_call = db.query(CallLog).filter(
-                    CallLog.elderly_id == setting.user_id,
+                    CallLog.elderly_id == setting.elderly_id,
                     CallLog.created_at >= today_start,
                     CallLog.call_status.in_([CallStatus.INITIATED, CallStatus.ANSWERED, CallStatus.COMPLETED])
                 ).first()
                 
                 if existing_call:
-                    logger.info(f"⏭️  Already called today: {setting.user_id}")
+                    logger.info(f"⏭️  Already called today: {setting.elderly_id}")
                     continue
                 
                 settings_to_call.append(setting)
-                logger.info(f"📞 Scheduled call: {setting.user_id} at {call_hour:02d}:{call_minute:02d}")
+                logger.info(f"📞 Scheduled call: {setting.elderly_id} at {call_hour:02d}:{call_minute:02d}")
         
         if not settings_to_call:
             logger.info("No calls to make at this time")
@@ -87,10 +86,10 @@ def check_and_make_calls():
         for setting in settings_to_call:
             try:
                 # 사용자 정보 조회
-                elderly = db.query(User).filter(User.user_id == setting.user_id).first()
+                elderly = db.query(User).filter(User.user_id == setting.elderly_id).first()
                 
                 if not elderly or not elderly.phone_number:
-                    logger.warning(f"⚠️  No phone number for user {setting.user_id}")
+                    logger.warning(f"⚠️  No phone number for user {setting.elderly_id}")
                     continue
 
                 # 전화번호 국제 형식으로 변환
@@ -130,7 +129,7 @@ def check_and_make_calls():
                 logger.info(f"✅ Call initiated for {elderly.name}: {call_sid}")
                 
             except Exception as e:
-                logger.error(f"❌ Failed to make call for {setting.user_id}: {e}")
+                logger.error(f"❌ Failed to make call for {setting.elderly_id}: {e}")
                 db.rollback()
                 continue
         

@@ -17,6 +17,7 @@ import { Header, BottomNavigationBar } from '../components';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../constants/Colors';
 import * as todoApi from '../api/todo';
+import { TokenManager } from '../api/client';
 
 interface TodoItem {
   id: string;
@@ -49,7 +50,7 @@ export const TodoListScreen = () => {
       setIsRefreshing(true);
       
       // 디버깅: 토큰 확인
-      const { TokenManager } = await import('../api/client');
+      // const { TokenManager } = await import('../api/client');
       const tokens = await TokenManager.getTokens();
       console.log('🔑 토큰 상태:', tokens ? '있음' : '없음');
       

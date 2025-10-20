@@ -415,3 +415,6 @@ docs/.doctrees/
 
 # 음성 파일
 backend/audio_files/*
+
+# google-cloud-speech api key
+backend/credentials/*

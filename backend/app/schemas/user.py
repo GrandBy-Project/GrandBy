@@ -128,13 +128,13 @@ class ConnectionCancelRequest(BaseModel):
 # ==================== 자동 통화 스케줄 ====================
 class CallScheduleUpdate(BaseModel):
     """자동 통화 스케줄 업데이트 요청"""
-    auto_call_enabled: bool
+    is_active: bool
     # HH:MM 형식, 비활성화 시 None 허용
-    scheduled_call_time: Optional[str] = None
+    call_time: Optional[str] = None
 
 
 class CallScheduleResponse(BaseModel):
     """자동 통화 스케줄 응답"""
-    auto_call_enabled: bool
-    scheduled_call_time: Optional[str] = None
+    is_active: bool
+    call_time: Optional[str] = None  # HH:MM 형식 (예: "14:30")
 

@@ -27,6 +27,9 @@ aiohttp==3.10.5
 openai==1.51.0
 tiktoken==0.7.0
 
+# ==================== Google Cloud STT ====================
+google-cloud-speech==2.26.0
+
 # ==================== Twilio (Voice Calls) ====================
 twilio==9.3.0
 

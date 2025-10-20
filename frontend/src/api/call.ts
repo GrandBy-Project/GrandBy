@@ -44,8 +44,8 @@ export const makeRealtimeAICall = async (
 // ==================== 자동 통화 스케줄 ====================
 
 export interface CallSchedule {
-  auto_call_enabled: boolean;
-  scheduled_call_time: string | null;  // HH:MM 형식 (예: "14:30")
+  is_active: boolean;
+  call_time: string | null;  // HH:MM 형식 (예: "14:30")
 }
 
 /**
@@ -59,7 +59,8 @@ export const getCallSchedule = async (): Promise<CallSchedule> => {
 /**
  * 자동 통화 스케줄 설정 업데이트
  * 
- * @param schedule - 자동 통화 활성화 여부 및 예약 시간
+ * @param schedule - 자동 통화 설정 (is_active, call_time)
+ * @returns 업데이트된 설정
  */
 export const updateCallSchedule = async (schedule: CallSchedule): Promise<CallSchedule> => {
   const response = await apiClient.put<CallSchedule>('/api/users/me/call-schedule', schedule);
