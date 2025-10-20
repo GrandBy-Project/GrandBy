@@ -66,3 +66,47 @@ export const updateCallSchedule = async (schedule: CallSchedule): Promise<CallSc
   return response.data;
 };
 
+// ==================== 통화 상태 조회 ====================
+
+export interface CallStatus {
+  call_sid: string;
+  call_status: string;
+  call_duration: number | null;
+}
+
+/**
+ * 통화 상태 조회
+ * 
+ * @param callSid - 통화 ID
+ * @returns 통화 상태 정보
+ */
+export const getCallStatus = async (callSid: string): Promise<CallStatus> => {
+  const response = await apiClient.get<CallStatus>(`/api/calls/${callSid}`);
+  return response.data;
+};
+
+// ==================== 통화 기록 상세 정보 ====================
+
+export interface CallLog {
+  call_id: string;
+  elderly_id: string;
+  call_status: string;
+  call_start_time: string | null;
+  call_end_time: string | null;
+  call_duration: number | null;
+  audio_file_url: string | null;
+  conversation_summary: string | null;  // ⭐ 핵심: 통화 요약
+  created_at: string;
+}
+
+/**
+ * 통화 기록 상세 정보 조회 (요약 포함)
+ * 
+ * @param callId - 통화 ID (Call SID)
+ * @returns 통화 기록 정보 (conversation_summary 포함)
+ */
+export const getCallLog = async (callId: string): Promise<CallLog> => {
+  const response = await apiClient.get<CallLog>(`/api/calls/${callId}`);
+  return response.data;
+};
+

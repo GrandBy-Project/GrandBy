@@ -3,7 +3,7 @@
  * 제목, 내용, 기분 입력
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -14,9 +14,10 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { createDiary } from '../api/diary';
+import { getCallLog } from '../api/call';
 
 // 기분 옵션
 const MOOD_OPTIONS = [
@@ -31,12 +32,18 @@ const MOOD_OPTIONS = [
 export const DiaryWriteScreen = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  
+  // URL 파라미터에서 통화 정보 가져오기
+  const searchParams = useLocalSearchParams();
+  const fromCall = searchParams.fromCall === 'true';
+  const callSid = searchParams.callSid as string | undefined;
 
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]); // YYYY-MM-DD
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [selectedMood, setSelectedMood] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLoadingSummary, setIsLoadingSummary] = useState(false);
 
   /**
    * 날짜 포맷팅
@@ -50,6 +57,56 @@ export const DiaryWriteScreen = () => {
     const dayOfWeek = days[d.getDay()];
     return `${year}년 ${month}월 ${day}일 (${dayOfWeek})`;
   };
+
+  /**
+   * 통화 요약 불러오기 (컴포넌트 마운트 시)
+   */
+  useEffect(() => {
+    const loadCallSummary = async () => {
+      // 통화에서 온 경우이고 callSid가 있을 때만 실행
+      if (fromCall && callSid) {
+        try {
+          setIsLoadingSummary(true);
+          console.log('📞 통화 요약 불러오기 시작:', callSid);
+          
+          // 통화 기록 가져오기
+          const callLog = await getCallLog(callSid);
+          console.log('✅ 통화 기록 조회 완료:', callLog);
+          
+          // conversation_summary가 있으면 content에 자동 입력
+          if (callLog.conversation_summary) {
+            setContent(callLog.conversation_summary);
+            setTitle('AI와의 대화 기록'); // 기본 제목도 설정
+            console.log('✅ 통화 요약 자동 입력 완료');
+            
+            // 사용자에게 피드백 제공
+            Alert.alert(
+              '✅ 자동 완성',
+              'AI와의 대화 내용이 자동으로 입력되었습니다.\n수정 후 저장해주세요!',
+              [{ text: '확인' }]
+            );
+          } else {
+            console.log('⚠️ 통화 요약이 없습니다');
+            Alert.alert(
+              '알림',
+              '통화 요약이 아직 생성되지 않았습니다.\n직접 작성해주세요.'
+            );
+          }
+        } catch (error) {
+          console.error('❌ 통화 요약 불러오기 실패:', error);
+          // 에러가 발생해도 사용자는 계속 일기를 작성할 수 있음
+          Alert.alert(
+            '알림',
+            '통화 내용을 불러오지 못했습니다.\n직접 작성해주세요.'
+          );
+        } finally {
+          setIsLoadingSummary(false);
+        }
+      }
+    };
+
+    loadCallSummary();
+  }, [fromCall, callSid]);
 
   /**
    * 일기 저장
@@ -82,7 +139,27 @@ export const DiaryWriteScreen = () => {
         status: 'published',
       });
 
-      router.back();
+      // 성공 메시지 표시
+      Alert.alert(
+        '완료',
+        '일기가 저장되었습니다! 📝',
+        [
+          {
+            text: '확인',
+            onPress: () => {
+              // 통화에서 온 경우 메인 페이지로, 아니면 다이어리 목록으로 이동
+              if (fromCall) {
+                // 통화 → 다이어리 작성 → 메인 (뒤로가기 스택 초기화)
+                router.replace('/home');
+              } else {
+                // 일반 다이어리 작성 → 다이어리 목록
+                router.replace('/diaries');
+              }
+            },
+          },
+        ]
+      );
+
     } catch (error: any) {
       console.error('일기 저장 실패:', error);
       Alert.alert(
@@ -99,7 +176,14 @@ export const DiaryWriteScreen = () => {
       {/* 헤더 */}
       <View style={styles.header}>
         <TouchableOpacity
-          onPress={() => router.back()}
+          onPress={() => {
+            // 통화에서 온 경우 메인으로, 아니면 뒤로가기
+            if (fromCall) {
+              router.replace('/home');
+            } else {
+              router.back();
+            }
+          }}
           style={styles.backButton}
           disabled={isSubmitting}
         >
@@ -114,6 +198,14 @@ export const DiaryWriteScreen = () => {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
+        {/* 통화 요약 로딩 인디케이터 */}
+        {isLoadingSummary && (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="small" color="#4A90E2" />
+            <Text style={styles.loadingText}>통화 내용을 불러오는 중...</Text>
+          </View>
+        )}
+
         {/* 날짜 (숨김 - 자동으로 오늘 날짜) */}
         <View style={styles.section}>
           <Text style={styles.dateText}>{formatDateDisplay(date)}</Text>
@@ -330,6 +422,23 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     color: '#FFFFFF',
+  },
+  loadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+    backgroundColor: '#F0F8FF',
+    borderRadius: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#D0E8FF',
+  },
+  loadingText: {
+    marginLeft: 8,
+    fontSize: 14,
+    color: '#4A90E2',
+    fontWeight: '500',
   },
 });
 

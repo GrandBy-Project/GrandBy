@@ -16,11 +16,11 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { makeRealtimeAICall, getCallSchedule, updateCallSchedule, CallSchedule } from '../api/call';
+import { makeRealtimeAICall, getCallSchedule, updateCallSchedule, CallSchedule, getCallStatus } from '../api/call';
 import { useAuthStore } from '../store/authStore';
 
 // 통화 상태 타입
-type CallStatus = 'idle' | 'calling' | 'ringing' | 'completed' | 'error';
+type CallStatus = 'idle' | 'calling' | 'in_progress' | 'completed' | 'error';
 
 // 시간 선택 옵션
 const HOURS = Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, '0'));
@@ -57,6 +57,59 @@ export const AICallScreen = () => {
     loadCallSchedule();
   }, []);
   
+  /**
+   * 통화 상태 폴링 (통화 완료 감지)
+   */
+  useEffect(() => {
+    if (callStatus === 'in_progress' && callSid) {
+      let checkCount = 0;
+      const maxChecks = 60; // 최대 5분 (5초 * 60)
+      
+      // 5초마다 통화 상태 확인
+      const intervalId = setInterval(async () => {
+        try {
+          checkCount++;
+          
+          // 최대 체크 횟수 초과 시 중단
+          if (checkCount > maxChecks) {
+            clearInterval(intervalId);
+            console.warn('통화 상태 폴링 타임아웃');
+            return;
+          }
+          
+          // 백엔드에서 통화 상태 확인
+          const statusData = await getCallStatus(callSid);
+          console.log(`통화 상태 확인 (${checkCount}회):`, statusData);
+          console.log(`call_status 값: "${statusData.call_status}" (타입: ${typeof statusData.call_status})`);
+          
+          // 통화가 완료되었으면 바로 다이어리 작성 페이지로 이동
+          // 소문자와 대문자 모두 체크
+          const status = String(statusData.call_status).toLowerCase();
+          console.log(`변환된 status: "${status}"`);
+          
+          if (status === 'completed') {
+            clearInterval(intervalId);
+            console.log('✅ 통화 완료 감지 - 다이어리 작성 페이지로 이동');
+            
+            // 다이어리 작성 페이지로 바로 이동
+            router.push({
+              pathname: '/diary-write',
+              params: {
+                fromCall: 'true',
+                callSid: callSid,
+              },
+            });
+          }
+          
+        } catch (error) {
+          console.error('통화 상태 확인 실패:', error);
+          // 에러가 발생해도 계속 시도
+        }
+      }, 5000); // 5초마다 체크
+      
+      return () => clearInterval(intervalId);
+    }
+  }, [callStatus, callSid, router]);
   /**
    * 자동 통화 스케줄 설정 로드
    */
@@ -189,34 +242,20 @@ export const AICallScreen = () => {
       formattedNumber = '+82' + formattedNumber;
     }
     
-     try {
-       setIsLoading(true);
-       setCallStatus('calling');
-       setErrorMessage('');
-       // 백엔드 API 호출 (실시간 AI 대화)
-       const userId = user?.user_id?.toString() || 'anonymous';
-       const response = await makeRealtimeAICall(formattedNumber, userId);
-
+    try {
+      setIsLoading(true);
+      setCallStatus('calling');
+      setErrorMessage('');
+      // 백엔드 API 호출 (실시간 AI 대화)
+      const userId = user?.user_id?.toString() || 'anonymous';
+      const response = await makeRealtimeAICall(formattedNumber, userId);
+  
       setCallSid(response.call_sid);
-      setCallStatus('ringing');
       
-       // 성공 알림
-       Alert.alert(
-         '🤖 실시간 AI 대화 전화',
-         response.message || '곧 전화가 걸려올 예정입니다. 전화를 받으시면 AI와 자유롭게 대화하실 수 있습니다!',
-         [
-           {
-             text: '확인',
-             onPress: () => {
-               setCallStatus('completed');
-               // 3초 후 자동으로 홈으로 돌아가기
-               setTimeout(() => {
-                 router.back();
-               }, 3000);
-             },
-           },
-         ]
-       );
+      // ✅ 통화 진행중 상태로 변경
+      setCallStatus('in_progress');
+      
+      // ✅ 통화 진행중 화면으로 자동 전환 (Alert 제거)
       
     } catch (error: any) {
       console.error('❌ 전화 발신 실패:', error);
@@ -246,7 +285,7 @@ export const AICallScreen = () => {
         return 'AI 비서와 통화하기';
       case 'calling':
         return '전화 연결 중...';
-      case 'ringing':
+      case 'in_progress':
         return '전화가 걸려갑니다!\n전화를 받아주세요 📞';
       case 'completed':
         return '통화가 완료되었습니다';
@@ -262,15 +301,16 @@ export const AICallScreen = () => {
    */
   const getStatusIcon = () => {
     switch (callStatus) {
-      case 'calling':
-      case 'ringing':
-        return '📞';
-      case 'completed':
-        return '✅';
-      case 'error':
-        return '❌';
-      default:
-        return '🤖';
+    case 'calling':
+      return '📞';
+    case 'in_progress':
+      return '🎙️';
+    case 'completed':
+      return '✅';
+    case 'error':
+      return '❌';
+    default:
+      return '🤖';
     }
   };
   
@@ -311,12 +351,15 @@ export const AICallScreen = () => {
            </Text>
          )}
         
-         {callStatus === 'ringing' && (
-           <Text style={styles.description}>
-             곧 {phoneNumber}로 전화가 걸려갈 예정입니다.{'\n'}
-             전화를 받으시면 AI와 실시간 대화를 시작합니다!
-           </Text>
-         )}
+        {callStatus === 'in_progress' && (
+          <View style={styles.inProgressContainer}>
+            <Text style={styles.description}>
+              지금 그랜비와 대화 중입니다.{'\n'}
+              통화가 끝나면 자동으로 다이어리 작성 화면으로 이동합니다.
+            </Text>
+            <ActivityIndicator size="large" color="#34B79F" style={{ marginTop: 20 }} />
+          </View>
+        )}
         
         {/* 에러 메시지 */}
         {errorMessage && (
@@ -383,13 +426,21 @@ export const AICallScreen = () => {
           </TouchableOpacity>
         )}
         
-        {/* 완료 후 돌아가기 버튼 */}
+        {/* 완료 후 다이어리 작성 버튼 */}
         {callStatus === 'completed' && (
           <TouchableOpacity
             style={styles.doneButton}
-            onPress={() => router.back()}
+            onPress={() => {
+              router.push({
+                pathname: '/diary-write',
+                params: {
+                  fromCall: 'true',
+                  callSid: callSid,
+                },
+              });
+            }}
           >
-            <Text style={styles.doneButtonText}>홈으로 돌아가기</Text>
+            <Text style={styles.doneButtonText}>📝 다이어리 작성하기</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -863,5 +914,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#FFFFFF',
+  },
+  inProgressContainer: {
+    alignItems: 'center',
+    marginVertical: 24,
   },
 });
