@@ -276,7 +276,7 @@ export const TodoListScreen = () => {
             "{completedTodoTitle}"
           </Text>
             <Text style={styles.successSubtitle}>
-              오늘 {completedTodos.length + 1}개 완료
+              오늘 {completedTodos.length}개 완료
           </Text>
           </View>
         </View>
