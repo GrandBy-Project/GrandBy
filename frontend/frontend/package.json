@@ -1,8 +1,0 @@
-{
-  "dependencies": {
-    "frontend": "file:.."
-  },
-  "devDependencies": {
-    "@types/react-native-tab-view": "^1.0.6"
-  }
-}

@@ -22,6 +22,7 @@ import { Colors } from '../constants/Colors';
 import * as connectionsApi from '../api/connections';
 import * as notificationsApi from '../api/notifications';
 import { Modal } from 'react-native';
+import * as weatherApi from '../api/weather';
 
 // 커스텀 아이콘 컴포넌트들
 const CheckIcon = ({ size = 24, color = '#34B79F' }: { size?: number; color?: string }) => (
@@ -237,20 +238,87 @@ export const ElderlyHomeScreen = () => {
   const [showConnectionModal, setShowConnectionModal] = useState(false);
   const [selectedConnection, setSelectedConnection] = useState<connectionsApi.ConnectionWithUserInfo | null>(null);
 
+  // 날씨 정보 state
+  const [weather, setWeather] = useState<{
+    temperature?: number;
+    description?: string;
+    icon?: string;
+    location?: string; // 위치 정보 (시/구 수준)
+  }>({});
+  const [isLoadingWeather, setIsLoadingWeather] = useState(false);
+
+  // 가장 가까운 일정 state
+  const [upcomingTodo, setUpcomingTodo] = useState<any | null>(null);
+
   // 오늘의 할 일 및 연결 요청 불러오기
   useEffect(() => {
     loadTodayTodos();
     loadPendingConnections();
+    loadWeather();
+
+    // 날씨 정보 30분마다 자동 갱신
+    const weatherInterval = setInterval(() => {
+      console.log('🔄 날씨 정보 자동 갱신 (30분)');
+      loadWeather();
+    }, 30 * 60 * 1000); // 30분 = 1800초 = 1800000ms
+
+    // Cleanup: 컴포넌트 unmount 시 interval 정리
+    return () => {
+      clearInterval(weatherInterval);
+    };
   }, []);
 
   const loadTodayTodos = async () => {
     try {
       const todos = await todoApi.getTodos('today');
       setTodayTodos(todos);
+      
+      // 가장 가까운 미완료 일정 찾기
+      const now = new Date();
+      const pendingTodos = todos.filter(
+        (todo: any) => todo.status !== 'COMPLETED' && todo.status !== 'completed'
+      );
+      
+      // 시간 순으로 정렬하여 가장 가까운 일정 선택
+      const sortedTodos = [...pendingTodos].sort((a: any, b: any) => {
+        if (!a.due_time && !b.due_time) return 0;
+        if (!a.due_time) return 1;
+        if (!b.due_time) return -1;
+        return a.due_time.localeCompare(b.due_time);
+      });
+      
+      setUpcomingTodo(sortedTodos[0] || null);
     } catch (error) {
       console.error('오늘 할 일 불러오기 실패:', error);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // 날씨 정보 불러오기 (실제 기기 + Emulator 지원)
+  const loadWeather = async () => {
+    console.log('🌤️ loadWeather 시작...');
+    setIsLoadingWeather(true);
+    try {
+      // GPS 위치 기반 날씨 정보 가져오기
+      console.log('🌤️ getLocationBasedWeather 호출 중...');
+      const weatherData = await weatherApi.getLocationBasedWeather();
+      
+      if (weatherData) {
+        setWeather(weatherData);
+        console.log('✅ 날씨 로딩 성공:', weatherData);
+      } else {
+        console.log('⚠️ 날씨 정보를 가져올 수 없습니다 (위치 권한 또는 GPS 오류)');
+        // 에러 상태에서도 로딩 종료
+        setWeather({ description: '위치 정보를 가져올 수 없습니다' });
+      }
+    } catch (error) {
+      console.error('❌ 날씨 정보 불러오기 실패:', error);
+      // 에러 발생 시에도 UI 업데이트
+      setWeather({ description: '날씨 정보를 불러올 수 없습니다' });
+    } finally {
+      console.log('🌤️ loadWeather 완료 (로딩 종료)');
+      setIsLoadingWeather(false);
     }
   };
 
@@ -473,21 +541,43 @@ export const ElderlyHomeScreen = () => {
           <View style={styles.divider} />
 
           <View style={styles.reminderSection}>
-            <View style={styles.reminderContent}>
-              <PillIcon size={isLargeView ? 20 : 16} color="#FFFFFF" />
-              <Text style={[styles.reminderText, isLargeView && styles.reminderTextLarge]}>
-                오후 4시에 정형외과 진료가 잡혀있어요!
-              </Text>
-            </View>
+            {upcomingTodo ? (
+              <View style={styles.reminderContent}>
+                <PillIcon size={isLargeView ? 20 : 16} color="#FFFFFF" />
+                <Text style={[styles.reminderText, isLargeView && styles.reminderTextLarge]}>
+                  {upcomingTodo.due_time ? upcomingTodo.due_time.substring(0, 5) : '시간미정'}에 {upcomingTodo.title}
+                  {upcomingTodo.category && ` (${getCategoryName(upcomingTodo.category)})`}
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.reminderContent}>
+                <PillIcon size={isLargeView ? 20 : 16} color="#FFFFFF" />
+                <Text style={[styles.reminderText, isLargeView && styles.reminderTextLarge]}>
+                  오늘 예정된 일정이 없습니다
+                </Text>
+              </View>
+            )}
           </View>
 
           <View style={styles.divider} />
 
           <View style={styles.weatherSection}>
             <SunIcon size={isLargeView ? 32 : 24} color="#FFB800" />
-            <Text style={[styles.weatherText, isLargeView && styles.weatherTextLarge]}>
-              오늘은 날씨가 좋으니 산책하기 좋은 날이에요.
-            </Text>
+            {isLoadingWeather ? (
+              <Text style={[styles.weatherText, isLargeView && styles.weatherTextLarge]}>
+                날씨 정보를 불러오는 중...
+              </Text>
+            ) : weather.temperature !== undefined ? (
+              <View style={{ flex: 1, marginLeft: 12 }}>
+                <Text style={[styles.weatherText, isLargeView && styles.weatherTextLarge]}>
+                  {weather.location && `${weather.location} `}현재 {weather.temperature}°C, {weather.description}
+                </Text>
+              </View>
+            ) : (
+              <Text style={[styles.weatherText, isLargeView && styles.weatherTextLarge]}>
+                날씨 정보를 불러올 수 없습니다
+              </Text>
+            )}
           </View>
         </View>
 
