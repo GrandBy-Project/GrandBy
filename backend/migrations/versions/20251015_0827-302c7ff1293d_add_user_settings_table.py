@@ -30,4 +30,3 @@ def downgrade() -> None:
     op.drop_column('user_settings', 'scheduled_call_time')
     op.drop_column('user_settings', 'auto_call_enabled')
     # ### end Alembic commands ###
-

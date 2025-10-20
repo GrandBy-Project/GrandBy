@@ -29,7 +29,7 @@ def seed_users():
         # 테스트 사용자 1: 어르신
         user1 = User(
             email="test1@test.com",
-            password_hash=pwd_context.hash("12341234"),
+            password_hash=pwd_context.hash("1234"),
             name="테르신",
             role=UserRole.ELDERLY,
             phone_number="01012345678",
@@ -41,7 +41,7 @@ def seed_users():
         # 테스트 사용자 2: 보호자
         user2 = User(
             email="test2@test.com",
-            password_hash=pwd_context.hash("12341234"),
+            password_hash=pwd_context.hash("1234"),
             name="테호자",
             role=UserRole.CAREGIVER,
             phone_number="01087654321",
@@ -55,13 +55,13 @@ def seed_users():
         print("✅ 테스트 사용자 생성 완료!")
         print("\n계정 1 (어르신):")
         print("  - 이메일: test1@test.com")
-        print("  - 비밀번호: 12341234")
+        print("  - 비밀번호: 1234")
         print("  - 이름: 테르신")
         print("  - 역할: 어르신")
         
         print("\n계정 2 (보호자):")
         print("  - 이메일: test2@test.com")
-        print("  - 비밀번호: 12341234")
+        print("  - 비밀번호: 1234")
         print("  - 이름: 테호자")
         print("  - 역할: 보호자")
         
