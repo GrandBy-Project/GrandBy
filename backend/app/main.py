@@ -135,10 +135,12 @@ async def save_conversation_to_db(call_sid: str, conversation: list):
 
 class AudioProcessor:
     """
-    오디오 처리 클래스 - 실시간 오디오 버퍼링 및 침묵 감지
+    오디오 처리 클래스 - 실시간 오디오 버퍼링 및 침묵 감지 (동적 임계값)
     
     Twilio에서 수신한 mulaw 오디오를 버퍼링하고,
     침묵을 감지하여 STT 처리 시점을 결정합니다.
+    
+    배경 소음 레벨을 자동으로 측정하여 임계값을 동적으로 조정합니다.
     """
     
     def __init__(self, call_sid: str):
@@ -146,8 +148,23 @@ class AudioProcessor:
         self.audio_buffer = []  # 오디오 청크 버퍼
         self.transcript_buffer = []  # 실시간 STT 결과 버퍼
         self.is_speaking = False  # 사용자가 말하고 있는지 여부
-        # mulaw RMS 범위에 맞게 임계값 조정 (0~127)
-        self.silence_threshold = 20  # 침묵 감지 임계값 (RMS)
+        
+        # ========== 동적 임계값 설정 ==========
+        self.base_silence_threshold = 20  # 기본 임계값 (fallback)
+        self.silence_threshold = 20  # 현재 임계값 (동적으로 변경됨)
+        
+        # 배경 소음 측정
+        self.noise_samples = []  # 배경 소음 RMS 샘플
+        self.noise_calibration_chunks = 50  # 처음 1초(50*20ms) 동안 배경 소음 측정
+        self.is_calibrated = False  # 보정 완료 여부
+        self.background_noise_level = 0  # 측정된 배경 소음 레벨
+        
+        # 적응형 조정 설정
+        self.noise_margin = 5  # 배경 소음 + 마진 = 임계값
+        self.min_threshold = 10  # 최소 임계값
+        self.max_threshold = 50  # 최대 임계값
+        # ======================================
+        
         self.silence_duration = 0  # 현재 침묵 지속 시간
         self.max_silence = 1.0  # ⭐ 1초 침묵 후 STT 처리 (응답 속도 최적화)
 
@@ -163,29 +180,102 @@ class AudioProcessor:
         self.is_bot_speaking = False
         self.bot_silence_delay = 0
         
-    # def add_audio_chunk(self, audio_data: bytes):
-    #     """오디오 청크 추가"""
-    #     self.audio_buffer.append(audio_data)
+        # 통계 정보 (디버깅용)
+        self.rms_history = []  # 최근 RMS 기록
+        self.max_rms_history = 100  # 최근 100개만 유지
+    
+    def _calibrate_noise_level(self, rms: float):
+        """
+        배경 소음 레벨 자동 보정
         
-    #     # 음성 활동 감지 (RMS - Root Mean Square)
-    #     rms = audioop.rms(audio_data, 2)  # 16-bit audio
+        통화 시작 후 처음 1초 동안 수신한 RMS 값들의 평균을 
+        배경 소음 레벨로 설정합니다.
         
-    #     if rms > self.silence_threshold:
-    #         self.is_speaking = True
-    #         self.silence_duration = 0
-    #     else:
-    #         if self.is_speaking:
-    #             self.silence_duration += 0.02  # 20ms per chunk
+        Args:
+            rms: 현재 청크의 RMS 값
+        """
+        if not self.is_calibrated:
+            # 비정상적으로 큰 값은 제외 (연결음 등)
+            if rms < 100:
+                self.noise_samples.append(rms)
+            
+            # 충분한 샘플이 모이면 평균 계산
+            if len(self.noise_samples) >= self.noise_calibration_chunks:
+                self.background_noise_level = sum(self.noise_samples) / len(self.noise_samples)
+                
+                # 동적 임계값 설정: 배경 소음 + 마진
+                calculated_threshold = self.background_noise_level + self.noise_margin
+                
+                # 최소/최대 범위 내로 제한
+                self.silence_threshold = max(
+                    self.min_threshold,
+                    min(self.max_threshold, calculated_threshold)
+                )
+                
+                self.is_calibrated = True
+                
+                logger.info(f"🎚️  [배경 소음 보정 완료]")
+                logger.info(f"   📊 배경 소음 레벨: {self.background_noise_level:.1f}")
+                logger.info(f"   🎯 조정된 임계값: {self.silence_threshold:.1f} (기본: {self.base_silence_threshold})")
+                logger.info(f"   📈 샘플 수: {len(self.noise_samples)}개")
+    
+    def _update_threshold_adaptive(self, rms: float):
+        """
+        실시간 적응형 임계값 조정 (선택적 기능)
+        
+        대화 중에도 RMS 통계를 기반으로 임계값을 미세 조정합니다.
+        배경 소음이 변화하는 환경(예: 이동 중 통화)에 유용합니다.
+        
+        Args:
+            rms: 현재 청크의 RMS 값
+        """
+        # RMS 기록 저장
+        self.rms_history.append(rms)
+        if len(self.rms_history) > self.max_rms_history:
+            self.rms_history.pop(0)
+        
+        # 100개 샘플마다 재조정 (약 2초마다)
+        if len(self.rms_history) >= self.max_rms_history and len(self.rms_history) % 50 == 0:
+            # 하위 30% 값들의 평균 (배경 소음으로 추정)
+            sorted_rms = sorted(self.rms_history)
+            lower_30_percent = sorted_rms[:30]
+            estimated_noise = sum(lower_30_percent) / len(lower_30_percent)
+            
+            # 임계값 재조정 (서서히 적응)
+            new_threshold = estimated_noise + self.noise_margin
+            new_threshold = max(self.min_threshold, min(self.max_threshold, new_threshold))
+            
+            # 큰 변화가 있을 때만 업데이트 (±3 이상)
+            if abs(new_threshold - self.silence_threshold) > 3:
+                old_threshold = self.silence_threshold
+                self.silence_threshold = new_threshold
+                logger.info(f"🔄 임계값 적응: {old_threshold:.1f} → {new_threshold:.1f} (추정 소음: {estimated_noise:.1f})")
+    
+    def get_calibration_status(self) -> dict:
+        """
+        보정 상태 정보 반환 (디버깅/모니터링용)
+        
+        Returns:
+            dict: 보정 관련 통계 정보
+        """
+        return {
+            "is_calibrated": self.is_calibrated,
+            "background_noise_level": round(self.background_noise_level, 2),
+            "current_threshold": round(self.silence_threshold, 2),
+            "base_threshold": self.base_silence_threshold,
+            "samples_collected": len(self.noise_samples),
+            "rms_history_size": len(self.rms_history)
+        }
 
     def add_audio_chunk(self, audio_data: bytes):
-        """오디오 청크 추가 및 음성 활동 감지"""
+        """오디오 청크 추가 및 음성 활동 감지 (동적 임계값 적용)"""
         self.audio_buffer.append(audio_data)
         
         # 워밍업: 초기 청크 무시 (연결 노이즈 방지)
         self.warmup_chunks += 1
         if self.warmup_chunks <= self.warmup_threshold:
             if self.warmup_chunks == 1:
-                logger.info("⏳ 오디오 초기화 중...")
+                logger.info("⏳ 오디오 초기화 및 배경 소음 측정 중...")
             return
         
         # AI가 말하는 동안 + 종료 후 1초간 사용자 입력 무시 (에코 방지)
@@ -199,20 +289,30 @@ class AudioProcessor:
         # RMS 계산 (음량 측정)
         rms = audioop.rms(audio_data, 1)
         
+        # ========== 동적 임계값 기능 ==========
+        # 1. 배경 소음 보정 (처음 1초)
+        if not self.is_calibrated:
+            self._calibrate_noise_level(rms)
+            return  # 보정 완료 전까지는 음성 감지 안함
+        
+        # 2. 실시간 적응형 조정 (선택적, 주석 해제하여 활성화)
+        # self._update_threshold_adaptive(rms)
+        # ======================================
+        
         # 비정상적으로 큰 RMS 값 필터링 (연결음, 에러 등)
         if rms > 100:
             logger.warning(f"⚠️  비정상적인 RMS 무시: {rms}")
             self.voice_chunks = 0
             return
         
-        # 음성 활동 감지
+        # 음성 활동 감지 (동적 임계값 사용)
         if rms > self.silence_threshold:
             self.voice_chunks += 1
             
             # 연속으로 여러 번 감지되어야 음성으로 인정
             if self.voice_chunks >= self.voice_threshold:
                 if not self.is_speaking:
-                    logger.info(f"🎤 [음성 감지] 말하기 시작 (RMS: {rms})")
+                    logger.info(f"🎤 [음성 감지] 말하기 시작 (RMS: {rms:.1f}, 임계값: {self.silence_threshold:.1f})")
                 self.is_speaking = True
                 self.silence_duration = 0
         else:
@@ -222,7 +322,7 @@ class AudioProcessor:
             # 이전에 말하고 있었다면 침묵 카운터 증가
             if self.is_speaking:
                 if self.silence_duration == 0:
-                    logger.info(f"🔇 [침묵 감지] 말을 멈춤")
+                    logger.info(f"🔇 [침묵 감지] 말을 멈춤 (RMS: {rms:.1f})")
                 
                 self.silence_duration += 0.02  # 20ms per chunk
                 
@@ -280,14 +380,67 @@ class AudioProcessor:
     
     def stop_bot_speaking(self):
         """AI 응답 종료 - 1초 대기 후 사용자 입력 재개"""
-        self.is_bot_speaking = False
         self.bot_silence_delay = 50  # 50개 청크 = 1초 대기
+        self.is_bot_speaking = False
         logger.info("🤖 [에코 방지] AI 응답 종료 - 1초 후 사용자 입력 재개")
+    
+    def remove_silence(self, audio_data: bytes) -> bytes:
+        """
+        오디오 데이터에서 무음 구간 제거
+        
+        Args:
+            audio_data: mulaw 포맷 오디오 데이터
+        
+        Returns:
+            bytes: 무음이 제거된 오디오 데이터
+        """
+        try:
+            # 청크 크기 (20ms = 160 bytes at 8kHz mulaw)
+            chunk_size = 160
+            voice_chunks = []
+            
+            # 동적 임계값 사용 (calibration 완료 후)
+            threshold = self.silence_threshold if self.is_calibrated else self.base_silence_threshold
+            
+            # 청크 단위로 RMS 계산하여 음성 구간만 추출
+            for i in range(0, len(audio_data), chunk_size):
+                chunk = audio_data[i:i + chunk_size]
+                
+                # 마지막 청크가 작을 수 있으므로 체크
+                if len(chunk) < chunk_size:
+                    break
+                
+                # RMS 계산
+                try:
+                    rms = audioop.rms(chunk, 1)
+                    
+                    # 임계값보다 큰 경우에만 포함 (음성 구간)
+                    if rms > threshold:
+                        voice_chunks.append(chunk)
+                except Exception as e:
+                    logger.debug(f"RMS 계산 오류, 청크 건너뜀: {e}")
+                    continue
+            
+            if not voice_chunks:
+                logger.warning("⚠️  무음 제거 후 남은 오디오 없음")
+                return audio_data  # 원본 반환
+            
+            # 음성 청크들을 결합
+            cleaned_audio = b''.join(voice_chunks)
+            
+            reduction_percent = (1 - len(cleaned_audio) / len(audio_data)) * 100
+            logger.info(f"🎚️  무음 제거: {len(audio_data)} → {len(cleaned_audio)} bytes ({reduction_percent:.1f}% 감소)")
+            
+            return cleaned_audio
+            
+        except Exception as e:
+            logger.error(f"❌ 무음 제거 중 오류: {e}")
+            return audio_data  # 오류 시 원본 반환
 
 
 # ==================== Helper Functions ====================
 
-async def transcribe_audio_realtime(audio_data: bytes) -> tuple[str, float]:
+async def transcribe_audio_realtime(audio_data: bytes, audio_processor=None) -> tuple[str, float]:
     """
     실시간 오디오를 텍스트로 변환 (실시간 청크 기반 STT)
     
@@ -296,6 +449,7 @@ async def transcribe_audio_realtime(audio_data: bytes) -> tuple[str, float]:
     
     Args:
         audio_data: Twilio에서 받은 mulaw 오디오 데이터
+        audio_processor: AudioProcessor 인스턴스 (무음 제거용)
     
     Returns:
         tuple: (변환된 텍스트, 실행 시간)
@@ -303,6 +457,15 @@ async def transcribe_audio_realtime(audio_data: bytes) -> tuple[str, float]:
     try:
         import wave
         import io
+        
+        # ✅ 무음 제거 (AudioProcessor가 제공된 경우)
+        if audio_processor:
+            audio_data = audio_processor.remove_silence(audio_data)
+            
+            # 무음 제거 후 데이터가 너무 짧으면 스킵
+            if len(audio_data) < 1600:  # 최소 0.2초 (160 bytes * 10)
+                logger.debug("⏭️  오디오 데이터가 너무 짧음, STT 스킵")
+                return "", 0
         
         # mulaw를 16-bit PCM으로 변환
         try:
@@ -337,7 +500,7 @@ async def transcribe_audio_realtime(audio_data: bytes) -> tuple[str, float]:
         return "", 0
 
 
-async def convert_and_send_audio(websocket: WebSocket, stream_sid: str, text: str):
+async def convert_and_send_audio(websocket: WebSocket, stream_sid: str, text: str) -> float:
     """
     단일 문장을 TTS 변환하고 Twilio로 즉시 전송 (병렬 처리용)
     
@@ -354,6 +517,9 @@ async def convert_and_send_audio(websocket: WebSocket, stream_sid: str, text: st
         websocket: Twilio WebSocket 연결
         stream_sid: Twilio Stream SID
         text: 변환할 문장
+    
+    Returns:
+        float: 이 문장의 예상 재생 시간 (초)
     """
     try:
         import wave
@@ -364,7 +530,7 @@ async def convert_and_send_audio(websocket: WebSocket, stream_sid: str, text: st
         
         if not audio_data:
             logger.warning(f"⚠️ TTS 변환 실패, 건너뜀: {text[:30]}...")
-            return
+            return 0.0
         
         # 2. WAV → mulaw 변환 (Twilio 호환)
         wav_io = io.BytesIO(audio_data)
@@ -385,6 +551,9 @@ async def convert_and_send_audio(websocket: WebSocket, stream_sid: str, text: st
         # PCM → mulaw 변환
         mulaw_data = audioop.lin2ulaw(pcm_data, 2)
         
+        # ⭐ 재생 시간 계산 (mulaw 8kHz: 1초 = 8000 bytes)
+        playback_duration = len(mulaw_data) / 8000.0
+        
         # 3. Base64 인코딩
         audio_base64 = base64.b64encode(mulaw_data).decode('utf-8')
         
@@ -404,12 +573,15 @@ async def convert_and_send_audio(websocket: WebSocket, stream_sid: str, text: st
             await websocket.send_text(json.dumps(message))
             await asyncio.sleep(0.02)  # 부드러운 재생을 위한 작은 지연
         
-        logger.info(f"✅ 문장 전송 완료 ({tts_time:.2f}초): {text[:30]}...")
+        logger.info(f"✅ 문장 전송 완료 ({tts_time:.2f}초, 재생: {playback_duration:.2f}초): {text[:30]}...")
+        
+        return playback_duration  # 재생 시간 반환
         
     except Exception as e:
         logger.error(f"❌ 오디오 변환/전송 오류: {e}")
         import traceback
         logger.error(traceback.format_exc())
+        return 0.0
 
 
 async def process_streaming_response(
@@ -498,18 +670,34 @@ async def process_streaming_response(
             )
             sentence_tasks.append(task)
         
-        # 모든 TTS 변환/전송이 완료될 때까지 대기
+        # 모든 TTS 변환/전송이 완료될 때까지 대기 + 재생 시간 수집
+        total_playback_duration = 0.0
         if sentence_tasks:
-            await asyncio.gather(*sentence_tasks, return_exceptions=True)
+            playback_durations = await asyncio.gather(*sentence_tasks, return_exceptions=True)
+            # 예외를 제외하고 재생 시간 합산
+            for duration in playback_durations:
+                if isinstance(duration, (int, float)) and duration > 0:
+                    total_playback_duration += duration
         
         pipeline_time = time.time() - pipeline_start
         final_text = "".join(full_response)
         
+        # ⭐ 중요: 실제 음성 재생이 완료될 때까지 대기
+        # 네트워크 지연 + 버퍼링을 고려하여 약간 더 대기 (20% 여유)
+        actual_wait_time = total_playback_duration * 1.2
+        
         logger.info(f"\n{'='*60}")
         logger.info(f"✅ 스트리밍 파이프라인 완료")
         logger.info(f"⏱️  총 소요 시간: {pipeline_time:.2f}초")
+        logger.info(f"🔊 총 재생 시간: {total_playback_duration:.2f}초")
+        logger.info(f"⏳ 추가 대기: {actual_wait_time:.2f}초 (재생 완료 보장)")
         logger.info(f"📤 전체 응답: {final_text}")
         logger.info(f"{'='*60}\n")
+        
+        # 음성 재생이 완전히 끝날 때까지 대기
+        if actual_wait_time > 0:
+            await asyncio.sleep(actual_wait_time)
+            logger.info(f"✅ 음성 재생 완료 대기 끝")
         
         return final_text
         
@@ -633,6 +821,8 @@ async def send_audio_to_twilio_with_tts(websocket: WebSocket, stream_sid: str, t
             # TTS로 생성된 임시 MP3 파일 삭제
             if os.path.exists(audio_file_path):
                 os.unlink(audio_file_path)
+
+                
         
         # mulaw 데이터를 Base64로 인코딩
         audio_base64 = base64.b64encode(mulaw_data).decode('utf-8')
@@ -1310,9 +1500,9 @@ async def media_stream_handler(
                         logger.info(f"🎯 발화 종료 감지 → 즉시 스트리밍 응답")
                         logger.info(f"{'='*60}")
                         
-                        # 1️⃣ STT: 오디오 → 텍스트 변환 (실시간 청크 기반)
+                        # 1️⃣ STT: 오디오 → 텍스트 변환 (실시간 청크 기반 + 무음 제거)
                         audio_data = audio_processor.get_audio()
-                        user_text, stt_time = await transcribe_audio_realtime(audio_data)
+                        user_text, stt_time = await transcribe_audio_realtime(audio_data, audio_processor)
                         
                         if user_text and user_text.strip():
                             logger.info(f"✅ STT 완료 ({stt_time:.2f}초)")
