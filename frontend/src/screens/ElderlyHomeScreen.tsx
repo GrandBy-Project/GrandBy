@@ -230,6 +230,7 @@ export const ElderlyHomeScreen = () => {
   const [isLargeView, setIsLargeView] = useState(false);
   const [todayTodos, setTodayTodos] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [expandedTodoId, setExpandedTodoId] = useState<string | null>(null);
 
   // 연결 요청 알림 관련 state
   const [pendingConnections, setPendingConnections] = useState<connectionsApi.ConnectionWithUserInfo[]>([]);
@@ -343,6 +344,36 @@ export const ElderlyHomeScreen = () => {
       'other': '기타',
     };
     return categoryMap[category] || '기타';
+  };
+
+  // TODO 완료 처리
+  const handleCompleteTodo = async (todoId: string) => {
+    try {
+      await todoApi.completeTodo(todoId);
+      Alert.alert('완료!', '할 일을 완료했습니다.');
+      // TODO 목록 새로고침
+      loadTodayTodos();
+      // 확장된 항목 닫기
+      setExpandedTodoId(null);
+    } catch (error) {
+      console.error('할 일 완료 실패:', error);
+      Alert.alert('오류', '할 일 완료에 실패했습니다.');
+    }
+  };
+
+  // TODO 완료 취소
+  const handleCancelTodo = async (todoId: string) => {
+    try {
+      await todoApi.cancelTodo(todoId);
+      Alert.alert('취소됨', '할 일 완료를 취소했습니다.');
+      // TODO 목록 새로고침
+      loadTodayTodos();
+      // 확장된 항목 닫기
+      setExpandedTodoId(null);
+    } catch (error) {
+      console.error('할 일 취소 실패:', error);
+      Alert.alert('오류', '할 일 취소에 실패했습니다.');
+    }
   };
 
   const handleLogout = async () => {
@@ -488,7 +519,7 @@ export const ElderlyHomeScreen = () => {
           </TouchableOpacity>
         </View>
 
-        {/* 오늘의 일정 카드 */}
+        {/* 오늘의 일정 카드 - 미완료 */}
         <View style={styles.scheduleCard}>
           <View style={styles.cardHeader}>
             <Text style={[styles.cardTitle, isLargeView && styles.cardTitleLarge]}>오늘의 일정</Text>
@@ -501,38 +532,140 @@ export const ElderlyHomeScreen = () => {
             <View style={{ paddingVertical: 40, alignItems: 'center' }}>
               <ActivityIndicator size="large" color={Colors.primary} />
             </View>
-          ) : todayTodos.length === 0 ? (
-            <View style={{ paddingVertical: 40, alignItems: 'center' }}>
-              <Text style={{ fontSize: 16, color: '#999999' }}>오늘 할 일이 없습니다</Text>
-            </View>
-          ) : (
-            todayTodos.slice(0, 3).map((todo, index) => (
-              <View key={todo.todo_id} style={styles.scheduleItem}>
-                <View style={styles.scheduleTime}>
-                  <Text style={[styles.scheduleTimeText, isLargeView && styles.scheduleTimeTextLarge]}>
-                    {todo.due_time ? todo.due_time.substring(0, 5) : '시간미정'}
-                  </Text>
-                </View>
-                <View style={styles.scheduleContent}>
-                  <Text style={[styles.scheduleTitle, isLargeView && styles.scheduleTitleLarge]}>
-                    {todo.title}
-                  </Text>
-                  <Text style={[styles.scheduleLocation, isLargeView && styles.scheduleLocationLarge]}>
-                    {todo.description || ''}
-                  </Text>
-                  <Text style={[styles.scheduleDate, isLargeView && styles.scheduleDateLarge]}>
-                    {todo.category ? `[${getCategoryName(todo.category)}]` : ''}
-                  </Text>
-                </View>
-                <View style={styles.scheduleStatus}>
-                  <Text style={[styles.scheduleStatusText, isLargeView && styles.scheduleStatusTextLarge]}>
-                    {todo.status === 'COMPLETED' || todo.status === 'completed' ? '완료' : '예정'}
+          ) : (() => {
+            const pendingTodos = todayTodos.filter(todo => 
+              todo.status !== 'COMPLETED' && todo.status !== 'completed'
+            );
+            
+            return pendingTodos.length === 0 ? (
+              <View style={{ paddingVertical: 40, alignItems: 'center' }}>
+                <Text style={{ fontSize: 16, color: '#999999' }}>오늘 할 일이 없습니다</Text>
+              </View>
+            ) : (
+              pendingTodos.slice(0, 3).map((todo, index) => {
+                const isExpanded = expandedTodoId === todo.todo_id;
+                
+                return (
+                  <View key={todo.todo_id}>
+                    <TouchableOpacity
+                      style={styles.scheduleItem}
+                      onPress={() => setExpandedTodoId(isExpanded ? null : todo.todo_id)}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.scheduleTime}>
+                        <Text style={[styles.scheduleTimeText, isLargeView && styles.scheduleTimeTextLarge]}>
+                          {todo.due_time ? todo.due_time.substring(0, 5) : '시간미정'}
+                        </Text>
+                      </View>
+                      <View style={styles.scheduleContent}>
+                        <Text style={[styles.scheduleTitle, isLargeView && styles.scheduleTitleLarge]}>
+                          {todo.title}
+                        </Text>
+                        <Text style={[styles.scheduleLocation, isLargeView && styles.scheduleLocationLarge]}>
+                          {todo.description || ''}
+                        </Text>
+                        <Text style={[styles.scheduleDate, isLargeView && styles.scheduleDateLarge]}>
+                          {todo.category ? `[${getCategoryName(todo.category)}]` : ''}
+                        </Text>
+                      </View>
+                      <View style={styles.scheduleStatus}>
+                        <Text style={[styles.scheduleStatusText, isLargeView && styles.scheduleStatusTextLarge]}>
+                          예정
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                    
+                    {/* 확장된 영역 - 완료 버튼 */}
+                    {isExpanded && (
+                      <View style={styles.scheduleActionContainer}>
+                        <TouchableOpacity
+                          style={[styles.scheduleActionButton, styles.completeButton]}
+                          onPress={() => handleCompleteTodo(todo.todo_id)}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={[styles.scheduleActionButtonText, isLargeView && { fontSize: 18 }]}>
+                            완료하기
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </View>
+                );
+              })
+            );
+          })()}
+        </View>
+
+        {/* 완료한 일정 카드 */}
+        {!isLoading && (() => {
+          const completedTodos = todayTodos.filter(todo => 
+            todo.status === 'COMPLETED' || todo.status === 'completed'
+          );
+          
+          return completedTodos.length > 0 && (
+            <View style={styles.scheduleCard}>
+              <View style={styles.cardHeader}>
+                <Text style={[styles.cardTitle, isLargeView && styles.cardTitleLarge]}>완료한 일정</Text>
+                <View style={styles.completedBadge}>
+                  <Text style={[styles.completedBadgeText, isLargeView && { fontSize: 16 }]}>
+                    {completedTodos.length}
                   </Text>
                 </View>
               </View>
-            ))
-          )}
-        </View>
+              
+              {completedTodos.slice(0, 3).map((todo, index) => {
+                const isExpanded = expandedTodoId === todo.todo_id;
+                
+                return (
+                  <View key={todo.todo_id}>
+                    <TouchableOpacity
+                      style={[styles.scheduleItem, styles.completedScheduleItem]}
+                      onPress={() => setExpandedTodoId(isExpanded ? null : todo.todo_id)}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.scheduleTime}>
+                        <Text style={[styles.scheduleTimeText, styles.completedTimeText, isLargeView && styles.scheduleTimeTextLarge]}>
+                          {todo.due_time ? todo.due_time.substring(0, 5) : '시간미정'}
+                        </Text>
+                      </View>
+                      <View style={styles.scheduleContent}>
+                        <Text style={[styles.scheduleTitle, styles.completedTitleText, isLargeView && styles.scheduleTitleLarge]}>
+                          {todo.title}
+                        </Text>
+                        <Text style={[styles.scheduleLocation, styles.completedDescText, isLargeView && styles.scheduleLocationLarge]}>
+                          {todo.description || ''}
+                        </Text>
+                        <Text style={[styles.scheduleDate, styles.completedDescText, isLargeView && styles.scheduleDateLarge]}>
+                          {todo.category ? `[${getCategoryName(todo.category)}]` : ''}
+                        </Text>
+                      </View>
+                      <View style={[styles.scheduleStatus, styles.completedStatus]}>
+                        <Text style={[styles.scheduleStatusText, isLargeView && styles.scheduleStatusTextLarge]}>
+                          완료
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                    
+                    {/* 확장된 영역 - 취소 버튼 */}
+                    {isExpanded && (
+                      <View style={styles.scheduleActionContainer}>
+                        <TouchableOpacity
+                          style={[styles.scheduleActionButton, styles.cancelButton]}
+                          onPress={() => handleCancelTodo(todo.todo_id)}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={[styles.scheduleActionButtonText, isLargeView && { fontSize: 18 }]}>
+                            완료 취소
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </View>
+                );
+              })}
+            </View>
+          );
+        })()}
 
         {/* 건강 상태 요약 */}
         <View style={styles.healthSummaryCard}>
@@ -1199,6 +1332,63 @@ const styles = StyleSheet.create({
   },
   acceptButtonText: {
     fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  
+  // 일정 완료 버튼 스타일
+  scheduleActionContainer: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    backgroundColor: '#F8F9FA',
+    borderTopWidth: 1,
+    borderTopColor: '#E0E0E0',
+  },
+  scheduleActionButton: {
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  completeButton: {
+    backgroundColor: '#34B79F',
+  },
+  cancelButton: {
+    backgroundColor: '#FF6B6B',
+  },
+  scheduleActionButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  
+  // 완료된 일정 스타일
+  completedScheduleItem: {
+    backgroundColor: '#F8F9FA',
+    opacity: 0.8,
+  },
+  completedTimeText: {
+    color: '#999999',
+    textDecorationLine: 'line-through',
+  },
+  completedTitleText: {
+    color: '#999999',
+    textDecorationLine: 'line-through',
+  },
+  completedDescText: {
+    color: '#BBBBBB',
+  },
+  completedStatus: {
+    backgroundColor: '#E8F5F2',
+  },
+  completedBadge: {
+    backgroundColor: '#34B79F',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  completedBadgeText: {
+    fontSize: 14,
     fontWeight: '600',
     color: '#FFFFFF',
   },

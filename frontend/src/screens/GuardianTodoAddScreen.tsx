@@ -1,7 +1,7 @@
 /**
  * 보호자용 할일 추가 화면
  */
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -14,7 +14,7 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Header, BottomNavigationBar } from '../components';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as todoApi from '../api/todo';
@@ -39,6 +39,21 @@ export const GuardianTodoAddScreen = () => {
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
   const [isSaving, setIsSaving] = useState(false);
+  
+  // 쿼리 파라미터로 어르신 ID와 이름 받기
+  const { elderlyId, elderlyName } = useLocalSearchParams<{
+    elderlyId: string;
+    elderlyName: string;
+  }>();
+
+  // elderlyId가 없으면 뒤로가기
+  useEffect(() => {
+    if (!elderlyId) {
+      Alert.alert('오류', '어르신 정보가 없습니다.', [
+        { text: '확인', onPress: () => router.back() }
+      ]);
+    }
+  }, [elderlyId]);
 
   // 폼 상태
   const [newTodo, setNewTodo] = useState({
@@ -47,7 +62,7 @@ export const GuardianTodoAddScreen = () => {
     category: '',
     time: '',
     date: new Date().toISOString().split('T')[0], // YYYY-MM-DD
-    elderlyId: 'e96b4366-b674-4b6a-91b3-158db6d15050', // TODO: 연결된 어르신 목록에서 선택 (test1@test.com)
+    elderlyId: elderlyId || '', // 쿼리 파라미터에서 받은 어르신 ID 사용
     isRecurring: false,
     recurringType: 'daily' as 'daily' | 'weekly' | 'monthly',
     reminderEnabled: true,
@@ -160,7 +175,10 @@ export const GuardianTodoAddScreen = () => {
   return (
     <View style={styles.container}>
       {/* 헤더 */}
-      <Header title="할일 추가" showBackButton />
+      <Header 
+        title={elderlyName ? `${elderlyName}님의 할일 추가` : '할일 추가'} 
+        showBackButton 
+      />
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* 제목 입력 */}
