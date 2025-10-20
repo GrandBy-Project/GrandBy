@@ -243,6 +243,7 @@ export const ElderlyHomeScreen = () => {
     temperature?: number;
     description?: string;
     icon?: string;
+    location?: string; // 위치 정보 (시/구 수준)
   }>({});
   const [isLoadingWeather, setIsLoadingWeather] = useState(false);
 
@@ -254,6 +255,17 @@ export const ElderlyHomeScreen = () => {
     loadTodayTodos();
     loadPendingConnections();
     loadWeather();
+
+    // 날씨 정보 30분마다 자동 갱신
+    const weatherInterval = setInterval(() => {
+      console.log('🔄 날씨 정보 자동 갱신 (30분)');
+      loadWeather();
+    }, 30 * 60 * 1000); // 30분 = 1800초 = 1800000ms
+
+    // Cleanup: 컴포넌트 unmount 시 interval 정리
+    return () => {
+      clearInterval(weatherInterval);
+    };
   }, []);
 
   const loadTodayTodos = async () => {
@@ -556,12 +568,14 @@ export const ElderlyHomeScreen = () => {
                 날씨 정보를 불러오는 중...
               </Text>
             ) : weather.temperature !== undefined ? (
-              <Text style={[styles.weatherText, isLargeView && styles.weatherTextLarge]}>
-                현재 {weather.temperature}°C, {weather.description}
-              </Text>
+              <View style={{ flex: 1, marginLeft: 12 }}>
+                <Text style={[styles.weatherText, isLargeView && styles.weatherTextLarge]}>
+                  {weather.location && `${weather.location} `}현재 {weather.temperature}°C, {weather.description}
+                </Text>
+              </View>
             ) : (
               <Text style={[styles.weatherText, isLargeView && styles.weatherTextLarge]}>
-                날씨 API 연동 대기 중 (API 키 등록 필요)
+                날씨 정보를 불러올 수 없습니다
               </Text>
             )}
           </View>

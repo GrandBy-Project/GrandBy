@@ -15,12 +15,35 @@ console.log('🔑 Weather API Key:', OPENWEATHER_API_KEY ? `${OPENWEATHER_API_KE
 
 // 개발 환경 확인
 const isDevelopment = __DEV__;
-const USE_MOCK_LOCATION = isDevelopment && !Constants.isDevice; // Emulator에서만 Mock 사용
 
-console.log('🔍 위치 서비스 환경:');
-console.log(`   - isDevelopment: ${isDevelopment}`);
-console.log(`   - isDevice: ${Constants.isDevice}`);
-console.log(`   - USE_MOCK_LOCATION: ${USE_MOCK_LOCATION}`);
+// Emulator 감지: Android의 경우 여러 방법으로 체크
+const isDeviceValue = Constants.isDevice;
+const platformConstants = Platform.constants as any;
+const fingerprint = platformConstants?.Fingerprint || '';
+const brand = platformConstants?.Brand || '';
+const product = platformConstants?.Product || '';
+const model = platformConstants?.Model || '';
+
+// Constants.isDevice가 undefined면 다른 방법으로 판단
+let isRealDevice = false;
+
+if (isDeviceValue === undefined) {
+  // isDevice가 undefined인 경우, Fingerprint와 Brand로 판단
+  const isGenericEmulator = fingerprint.toLowerCase().includes('generic') || 
+                           brand.toLowerCase().includes('generic') ||
+                           product.toLowerCase().includes('sdk') ||
+                           model.toLowerCase().includes('sdk');
+  isRealDevice = !isGenericEmulator;
+} else {
+  // isDevice 값이 있으면 그대로 사용
+  isRealDevice = isDeviceValue === true;
+}
+
+const isEmulator = !isRealDevice;
+const USE_MOCK_LOCATION = isDevelopment && isEmulator;
+
+// 환경 정보 (간단)
+console.log(`🔍 환경: ${isRealDevice ? '실제 기기' : 'Emulator'} | GPS: ${USE_MOCK_LOCATION ? 'Mock' : '실제'}`);
 
 export interface WeatherData {
   temperature: number;
@@ -28,51 +51,34 @@ export interface WeatherData {
   icon: string;
   humidity: number;
   feelsLike: number;
+  location?: string; // 시/구 수준 위치
+  cityName?: string; // 도시 이름
+  countryCode?: string; // 국가 코드
 }
 
 /**
  * GPS 위치 권한 요청 및 좌표 가져오기
  * - 실제 기기: GPS 사용
- * - Emulator: 설정된 가상 좌표 사용
+ * - Emulator: Mock 좌표 사용
  */
 export const getLocation = async (): Promise<{ latitude: number; longitude: number } | null> => {
   try {
     // 개발 환경(Emulator)에서는 Mock 좌표 사용
     if (USE_MOCK_LOCATION) {
-      console.warn('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      console.warn('⚠️  [개발 모드] Emulator GPS 한계로 인한 Mock 좌표 사용');
-      console.warn('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      console.warn('📍 사용 좌표: 서울 시청 (37.5665, 126.9780)');
-      console.warn('');
-      console.warn('🔍 Emulator GPS 상태:');
-      console.warn('   - 권한: ✅ 허용됨');
-      console.warn('   - GPS Provider: ❌ OFF 상태 (Emulator 한계)');
-      console.warn('   - 해결: 실제 기기에서는 정상 GPS 작동');
-      console.warn('');
-      console.warn('✅ 실제 기기 배포 시:');
-      console.warn('   - 이 Mock 좌표는 자동으로 비활성화됨');
-      console.warn('   - 실제 GPS 좌표가 사용됨');
-      console.warn('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      
+      console.log('📍 Mock 좌표 사용: 서울 시청');
       return {
         latitude: 37.5665,
         longitude: 126.9780,
       };
     }
 
-    console.log('📍 위치 권한 요청 중...');
-    
     // 1. 위치 권한 요청
     const { status } = await Location.requestForegroundPermissionsAsync();
     
-    console.log('📍 위치 권한 상태:', status);
-    
     if (status !== 'granted') {
-      console.log('⚠️ 위치 권한이 거부되었습니다.');
+      console.log('⚠️ 위치 권한 거부');
       return null;
     }
-
-    console.log('📍 GPS 좌표 가져오는 중...');
     
     // 2. 현재 위치 가져오기 (타임아웃 10초)
     const location = await Promise.race([
@@ -88,26 +94,115 @@ export const getLocation = async (): Promise<{ latitude: number; longitude: numb
     ]);
 
     const { latitude, longitude } = location.coords;
-    
-    // 디버깅: 어디서 실행 중인지 표시
-    const isAndroid = Platform.OS === 'android';
-    const deviceType = isAndroid 
-      ? 'Android'
-      : 'iOS';
-    
-    console.log(`📍 [${deviceType}] 현재 좌표:`, latitude.toFixed(4), longitude.toFixed(4));
+    console.log(`📍 GPS 좌표: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
 
     return { latitude, longitude };
   } catch (error: any) {
-    console.error('❌ 위치 가져오기 실패:', error.message || error);
-    console.error('❌ 에러 전체:', JSON.stringify(error, null, 2));
-    console.log('💡 해결 방법:');
-    console.log('  1. Emulator Location 패널 열기 (우측 ... 버튼)');
-    console.log('  2. 좌표 입력 (Lat: 37.5665, Lon: 126.9780)');
-    console.log('  3. SET LOCATION 클릭');
-    console.log('  4. Google Maps 앱에서 위치 확인');
-    
+    console.error('❌ GPS 오류:', error.message || error);
     return null;
+  }
+};
+
+/**
+ * 영어 지명을 한글로 변환
+ */
+const translateToKorean = (text: string): string => {
+  const translations: Record<string, string> = {
+    // 시/도
+    'Seoul': '서울특별시',
+    'Busan': '부산광역시',
+    'Incheon': '인천광역시',
+    'Daegu': '대구광역시',
+    'Daejeon': '대전광역시',
+    'Gwangju': '광주광역시',
+    'Ulsan': '울산광역시',
+    'Sejong': '세종특별자치시',
+    'Gyeonggi-do': '경기도',
+    'Gangwon-do': '강원도',
+    'North Chungcheong': '충청북도',
+    'South Chungcheong': '충청남도',
+    'North Jeolla': '전라북도',
+    'South Jeolla': '전라남도',
+    'North Gyeongsang': '경상북도',
+    'South Gyeongsang': '경상남도',
+    'Jeju-do': '제주특별자치도',
+    
+    // 서울 구
+    'Gangnam-gu': '강남구',
+    'Gangdong-gu': '강동구',
+    'Gangbuk-gu': '강북구',
+    'Gangseo-gu': '강서구',
+    'Gwanak-gu': '관악구',
+    'Gwangjin-gu': '광진구',
+    'Guro-gu': '구로구',
+    'Geumcheon-gu': '금천구',
+    'Nowon-gu': '노원구',
+    'Dobong-gu': '도봉구',
+    'Dongdaemun-gu': '동대문구',
+    'Dongjak-gu': '동작구',
+    'Mapo-gu': '마포구',
+    'Seodaemun-gu': '서대문구',
+    'Seocho-gu': '서초구',
+    'Seongdong-gu': '성동구',
+    'Seongbuk-gu': '성북구',
+    'Songpa-gu': '송파구',
+    'Yangcheon-gu': '양천구',
+    'Yeongdeungpo-gu': '영등포구',
+    'Yongsan-gu': '용산구',
+    'Eunpyeong-gu': '은평구',
+    'Jongno-gu': '종로구',
+    'Jung-gu': '중구',
+    'Jungnang-gu': '중랑구',
+  };
+  
+  return translations[text] || text;
+};
+
+/**
+ * 좌표를 시/구 주소로 변환 (Reverse Geocoding)
+ * @param lat 위도
+ * @param lon 경도
+ * @returns 시/구 수준 주소 (예: "서울특별시 서초구")
+ */
+const getLocationName = async (lat: number, lon: number): Promise<string> => {
+  try {
+    // OpenWeatherMap Geocoding API 사용
+    const response = await axios.get('http://api.openweathermap.org/geo/1.0/reverse', {
+      params: {
+        lat: lat,
+        lon: lon,
+        limit: 1,
+        appid: OPENWEATHER_API_KEY,
+      },
+    });
+
+    if (response.data && response.data.length > 0) {
+      const location = response.data[0];
+      const state = location.state || ''; // 시/도
+      const name = location.name || '';   // 구/군
+      
+      // 한글로 변환
+      const stateKo = translateToKorean(state);
+      const nameKo = translateToKorean(name);
+      
+      // 한국의 경우 "시/도 + 구/군" 형태로 반환
+      if (stateKo && nameKo) {
+        const result = `${stateKo} ${nameKo}`;
+        console.log(`   📍 위치: ${result}`);
+        return result;
+      } else if (stateKo) {
+        console.log(`   📍 위치: ${stateKo}`);
+        return stateKo;
+      } else if (nameKo) {
+        console.log(`   📍 위치: ${nameKo}`);
+        return nameKo;
+      }
+    }
+    
+    return ''; // 변환 실패 시 빈 문자열
+  } catch (error) {
+    console.error('❌ Geocoding 실패:', error);
+    return '';
   }
 };
 
@@ -126,19 +221,21 @@ export const getCurrentWeather = async (
       throw new Error('OpenWeatherMap API 키가 설정되지 않았습니다. .env 파일을 확인하세요.');
     }
 
-    console.log(`🌤️ 날씨 API 요청: ${lat.toFixed(4)}, ${lon.toFixed(4)}`);
-
-    const response = await axios.get(`${BASE_URL}/weather`, {
+    // 1. 날씨 정보 가져오기
+    const weatherResponse = await axios.get(`${BASE_URL}/weather`, {
       params: {
         lat: lat,
         lon: lon,
         appid: OPENWEATHER_API_KEY,
-        units: 'metric', // 섭씨 온도
-        lang: 'kr',      // 한국어 설명
+        units: 'metric',
+        lang: 'kr',
       },
     });
 
-    const data = response.data;
+    const data = weatherResponse.data;
+    
+    // 2. 주소 변환 (Geocoding)
+    const locationDisplay = await getLocationName(lat, lon);
 
     const weatherData: WeatherData = {
       temperature: Math.round(data.main.temp),
@@ -146,9 +243,12 @@ export const getCurrentWeather = async (
       icon: data.weather[0].icon,
       humidity: data.main.humidity,
       feelsLike: Math.round(data.main.feels_like),
+      location: locationDisplay,
+      cityName: data.name || '',
+      countryCode: data.sys?.country || '',
     };
 
-    console.log('✅ 날씨 정보:', `${weatherData.temperature}°C, ${weatherData.description}`);
+    console.log(`🌤️ 날씨: ${locationDisplay || ''} ${weatherData.temperature}°C, ${weatherData.description}`);
 
     return weatherData;
   } catch (error: any) {
@@ -178,4 +278,3 @@ export const getLocationBasedWeather = async (): Promise<WeatherData | null> => 
     return null;
   }
 };
-
