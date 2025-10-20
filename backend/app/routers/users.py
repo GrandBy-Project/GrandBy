@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_
 from typing import List
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, time
 from pydantic import BaseModel, EmailStr
 import uuid
 import re
@@ -20,6 +20,7 @@ from app.schemas.user import (
     ConnectionCancelRequest, CallScheduleUpdate, CallScheduleResponse
 )
 from app.models.user import User, UserSettings, UserConnection, UserRole, ConnectionStatus, Gender
+from app.models.call import CallSettings
 from app.models.notification import Notification, NotificationType
 from app.routers.auth import get_current_user, pwd_context
 from app.utils.image import save_profile_image, delete_profile_image
@@ -584,25 +585,20 @@ async def get_call_schedule(
     """
     try:
         # 사용자 설정 조회 또는 생성
-        settings = db.query(UserSettings).filter(
-            UserSettings.user_id == current_user.user_id
+        settings = db.query(CallSettings).filter(
+            CallSettings.elderly_id == current_user.user_id
         ).first()
         
         if not settings:
             # 설정이 없으면 기본값으로 생성
-            settings = UserSettings(
-                setting_id=str(uuid.uuid4()),
-                user_id=current_user.user_id,
-                auto_call_enabled=False,
-                scheduled_call_time=None
+            return CallScheduleResponse(
+                is_active=False,
+                call_time=None
             )
-            db.add(settings)
-            db.commit()
-            db.refresh(settings)
         
         return CallScheduleResponse(
-            auto_call_enabled=settings.auto_call_enabled,
-            scheduled_call_time=settings.scheduled_call_time
+            is_active=settings.is_active,
+            call_time=settings.call_time.strftime("%H:%M")
         )
         
     except Exception as e:
@@ -627,45 +623,57 @@ async def update_call_schedule(
     """
     try:
         # 시간 형식 검증 (HH:MM)
-        if schedule_data.auto_call_enabled and schedule_data.scheduled_call_time:
+        if schedule_data.is_active and schedule_data.call_time:
             time_pattern = re.compile(r'^([01]\d|2[0-3]):([0-5]\d)$')
-            if not time_pattern.match(schedule_data.scheduled_call_time):
+            if not time_pattern.match(schedule_data.call_time):
                 raise HTTPException(
                     status_code=400,
                     detail="시간 형식이 올바르지 않습니다. HH:MM 형식으로 입력해주세요. (예: 14:30)"
                 )
         
         # 자동 통화를 활성화하는데 시간이 없으면 에러
-        if schedule_data.auto_call_enabled and not schedule_data.scheduled_call_time:
+        if schedule_data.is_active and not schedule_data.call_time:
             raise HTTPException(
                 status_code=400,
                 detail="자동 통화를 활성화하려면 통화 시간을 설정해야 합니다."
             )
         
-        # 사용자 설정 조회 또는 생성
-        settings = db.query(UserSettings).filter(
-            UserSettings.user_id == current_user.user_id
+        # CallSettings 조회 또는 생성
+        settings = db.query(CallSettings).filter(
+            CallSettings.elderly_id == current_user.user_id
         ).first()
         
         if not settings:
-            settings = UserSettings(
+            # HH:MM 문자열을 Time 객체로 변환
+            if schedule_data.call_time:
+                time_parts = schedule_data.call_time.split(":")
+                call_time = time(hour=int(time_parts[0]), minute=int(time_parts[1]))
+            else:
+                call_time = time(hour=14, minute=0)  # 기본값: 14:00
+            
+            # CallSettings 생성
+            settings = CallSettings(
                 setting_id=str(uuid.uuid4()),
-                user_id=current_user.user_id
+                elderly_id=current_user.user_id,
+                call_time=call_time,
+                is_active=schedule_data.is_active
             )
             db.add(settings)
-        
-        # 설정 업데이트
-        settings.auto_call_enabled = schedule_data.auto_call_enabled
-        settings.scheduled_call_time = schedule_data.scheduled_call_time
+        else:
+            # 기존 설정 업데이트
+            if schedule_data.call_time:
+                time_parts = schedule_data.call_time.split(":")
+                settings.call_time = time(hour=int(time_parts[0]), minute=int(time_parts[1]))
+            settings.is_active = schedule_data.is_active
         
         db.commit()
         db.refresh(settings)
         
-        logger.info(f"✅ 자동 통화 스케줄 업데이트 완료: {current_user.user_id} - {schedule_data.scheduled_call_time} (활성화: {schedule_data.auto_call_enabled})")
+        logger.info(f"✅ 자동 통화 스케줄 업데이트 완료: {current_user.user_id} - {settings.call_time} (활성화: {settings.is_active})")
         
         return CallScheduleResponse(
-            auto_call_enabled=settings.auto_call_enabled,
-            scheduled_call_time=settings.scheduled_call_time
+            is_active=settings.is_active,
+            call_time=settings.call_time.strftime("%H:%M") if settings.call_time else None
         )
         
     except HTTPException:

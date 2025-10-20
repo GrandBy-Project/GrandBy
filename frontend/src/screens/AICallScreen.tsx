@@ -116,11 +116,23 @@ export const AICallScreen = () => {
   const loadCallSchedule = async () => {
     try {
       const schedule = await getCallSchedule();
-      setAutoCallEnabled(schedule.auto_call_enabled);
-      if (schedule.scheduled_call_time) {
-        setScheduledTime(schedule.scheduled_call_time);
+      setAutoCallEnabled(schedule.is_active);
+      
+      // call_time이 문자열 또는 객체일 수 있으므로 처리
+      let timeString: string | null = null;
+      if (schedule.call_time) {
+        if (typeof schedule.call_time === 'string') {
+          timeString = schedule.call_time;
+        } else if (typeof schedule.call_time === 'object') {
+          // Time 객체인 경우 (예: "14:30:00" 형식일 수 있음)
+          timeString = String(schedule.call_time).substring(0, 5); // HH:MM만 추출
+        }
+      }
+      
+      if (timeString) {
+        setScheduledTime(timeString);
         // 시간과 분 분리
-        const [hour, minute] = schedule.scheduled_call_time.split(':');
+        const [hour, minute] = timeString.split(':');
         setSelectedHour(hour);
         setSelectedMinute(minute);
       }
@@ -138,8 +150,8 @@ export const AICallScreen = () => {
       setScheduleLoading(true);
       
       const schedule: CallSchedule = {
-        auto_call_enabled: enabled,
-        scheduled_call_time: enabled ? time : null,
+        is_active: enabled,
+        call_time: enabled ? time : null,
       };
       
       await updateCallSchedule(schedule);
