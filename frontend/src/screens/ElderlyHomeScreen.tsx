@@ -505,7 +505,7 @@ export const ElderlyHomeScreen = () => {
             </View>
             <Text style={[styles.actionLabel, isLargeView && styles.actionLabelLarge]}>AI 통화</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.actionButton, isLargeView && styles.actionButtonLarge]} onPress={() => Alert.alert('준비중', '일기 기능은 개발 중입니다.')}>
+          <TouchableOpacity style={[styles.actionButton, isLargeView && styles.actionButtonLarge]} onPress={() => router.push('/diaries')}>
             <View style={[styles.actionIcon, isLargeView && styles.actionIconLarge]}>
               <DiaryIcon size={isLargeView ? 32 : 24} color="#34B79F" />
             </View>

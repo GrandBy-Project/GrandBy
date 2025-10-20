@@ -48,6 +48,87 @@ llm_service = LLMService()
 # WebSocket 연결 및 대화 세션 관리
 active_connections: Dict[str, WebSocket] = {}
 conversation_sessions: Dict[str, list] = {}
+saved_calls: set = set()  # 중복 저장 방지용 플래그
+
+
+# ==================== 대화 내용 DB 저장 함수 ====================
+
+async def save_conversation_to_db(call_sid: str, conversation: list):
+    """
+    대화 내용을 DB에 저장하는 공통 함수
+    
+    Args:
+        call_sid: Twilio Call SID
+        conversation: 대화 내용 리스트 [{"role": "user", "content": "..."}, ...]
+    """
+    # 이미 저장되었으면 스킵 (중복 방지)
+    if call_sid in saved_calls:
+        logger.info(f"⏭️  이미 저장된 통화: {call_sid}")
+        return
+    
+    # 저장할 내용이 없으면 스킵
+    if not conversation or len(conversation) == 0:
+        logger.warning(f"⚠️  저장할 대화 내용이 없음: {call_sid}")
+        return
+    
+    logger.info(f"💾 대화 기록 저장 시작: {len(conversation)}개 메시지")
+    
+    try:
+        from app.models.call import CallLog, CallTranscript, CallStatus
+        db = next(get_db())
+        
+        # 1. CallLog 업데이트 (통화 종료 시간, 요약)
+        call_log_db = db.query(CallLog).filter(CallLog.call_id == call_sid).first()
+        
+        if call_log_db:
+            call_log_db.call_end_time = datetime.utcnow()
+            call_log_db.call_status = CallStatus.COMPLETED
+            
+            # 통화 시간 계산 (초)
+            if call_log_db.call_start_time:
+                duration = (call_log_db.call_end_time - call_log_db.call_start_time).total_seconds()
+                call_log_db.call_duration = int(duration)
+            
+            # LLM 요약 생성 (대화가 있는 경우에만)
+            if len(conversation) > 0:
+                logger.info("🤖 LLM으로 통화 요약 생성 중...")
+                summary = llm_service.summarize_call_conversation(conversation)
+                call_log_db.conversation_summary = summary
+                logger.info(f"✅ 요약 생성 완료: {summary[:100]}...")
+            
+            db.commit()
+            logger.info(f"✅ CallLog 업데이트 완료")
+        else:
+            logger.warning(f"⚠️  CallLog를 찾을 수 없음: {call_sid}")
+        
+        # 2. CallTranscript 저장 (화자별 대화 내용)
+        for idx, message in enumerate(conversation):
+            speaker = "ELDERLY" if message["role"] == "user" else "AI"
+            
+            transcript = CallTranscript(
+                call_id=call_sid,
+                speaker=speaker,
+                text=message["content"],
+                timestamp=idx * 10.0,  # 대략적인 타임스탬프 (10초 간격)
+                created_at=datetime.utcnow()
+            )
+            db.add(transcript)
+        
+        db.commit()
+        logger.info(f"✅ 대화 내용 {len(conversation)}개 저장 완료")
+        
+        # 저장 성공 플래그 설정
+        saved_calls.add(call_sid)
+        
+        db.close()
+        
+    except Exception as e:
+        logger.error(f"❌ DB 저장 실패: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        if 'db' in locals():
+            db.rollback()
+            db.close()
 
 
 # ==================== AudioProcessor ====================
@@ -1264,10 +1345,16 @@ async def media_stream_handler(
                             )
                             
                             # 대화 히스토리 저장 (최근 10개만 유지)
+                            # ✅ call_sid가 없을 경우를 대비한 안전한 초기화
+                            if call_sid not in conversation_sessions:
+                                conversation_sessions[call_sid] = []
+                                logger.warning(f"⚠️  대화 세션 초기화 누락 감지, 재초기화: {call_sid}")
+                            
                             conversation_sessions[call_sid].append({"role": "user", "content": user_text})
                             conversation_sessions[call_sid].append({"role": "assistant", "content": ai_response})
-                            if len(conversation_sessions[call_sid]) > 10:
-                                conversation_sessions[call_sid] = conversation_sessions[call_sid][-10:]
+                            # 최근 20개(10턴) 유지
+                            if len(conversation_sessions[call_sid]) > 20:
+                                conversation_sessions[call_sid] = conversation_sessions[call_sid][-20:]
                             
                             total_cycle_time = time.time() - cycle_start
                             logger.info(f"⏱️  전체 응답 사이클: {total_cycle_time:.2f}초")
@@ -1290,69 +1377,10 @@ async def media_stream_handler(
                         logger.info(f"{full_transcript}")
                         logger.info(f"─" * 60)
                 
-                # 대화 세션을 DB에 저장
+                # ✅ 대화 세션을 DB에 저장 (함수 호출)
                 if call_sid in conversation_sessions:
                     conversation = conversation_sessions[call_sid]
-                    logger.info(f"💾 대화 기록: {len(conversation)}개 메시지")
-                    
-                    # DB에 대화 내용 및 요약 저장
-                    try:
-                        from app.models.call import CallLog, CallTranscript, CallStatus
-                        db = next(get_db())
-                        
-                        # 1. CallLog 업데이트 (통화 종료 시간, 요약)
-                        call_log_db = db.query(CallLog).filter(CallLog.call_id == call_sid).first()
-                        
-                        if call_log_db:
-                            call_log_db.call_end_time = datetime.utcnow()
-                            call_log_db.call_status = CallStatus.COMPLETED
-                            
-                            # 통화 시간 계산 (초)
-                            if call_log_db.call_start_time:
-                                duration = (call_log_db.call_end_time - call_log_db.call_start_time).total_seconds()
-                                call_log_db.call_duration = int(duration)
-                            
-                            # LLM 요약 생성 (대화가 있는 경우에만)
-                            if len(conversation) > 0:
-                                logger.info("🤖 LLM으로 통화 요약 생성 중...")
-                                summary = llm_service.summarize_call_conversation(conversation)
-                                call_log_db.conversation_summary = summary
-                                logger.info(f"✅ 요약 생성 완료: {summary[:100]}...")
-                            
-                            db.commit()
-                            logger.info(f"✅ CallLog 업데이트 완료")
-                        
-                        # 2. CallTranscript 저장 (화자별 대화 내용)
-                        for idx, message in enumerate(conversation):
-                            speaker = "ELDERLY" if message["role"] == "user" else "AI"
-                            
-                            transcript = CallTranscript(
-                                call_id=call_sid,
-                                speaker=speaker,
-                                text=message["content"],
-                                timestamp=idx * 10.0,  # 대략적인 타임스탬프 (10초 간격)
-                                created_at=datetime.utcnow()
-                            )
-                            db.add(transcript)
-                        
-                        db.commit()
-                        logger.info(f"✅ 대화 내용 {len(conversation)}개 저장 완료")
-                        
-                        db.close()
-                        
-                    except Exception as e:
-                        logger.error(f"❌ DB 저장 실패: {e}")
-                        import traceback
-                        logger.error(traceback.format_exc())
-                        if 'db' in locals():
-                            db.rollback()
-                            db.close()
-                    
-                    # 메모리에서 제거
-                    del conversation_sessions[call_sid]
-                
-                if call_sid in active_connections:
-                    del active_connections[call_sid]
+                    await save_conversation_to_db(call_sid, conversation)
                 
                 logger.info(f"┌{'─'*58}┐")
                 logger.info(f"│ ✅ Twilio 통화 정리 완료                               │")
@@ -1366,11 +1394,23 @@ async def media_stream_handler(
         import traceback
         logger.error(traceback.format_exc())
     finally:
-        # 정리 작업
+        # ✅ 연결 종료 시 항상 DB 저장 (핵심!)
+        # 사용자가 직접 전화를 끊어도 대화 내용 보존
+        if call_sid and call_sid in conversation_sessions:
+            try:
+                conversation = conversation_sessions[call_sid]
+                await save_conversation_to_db(call_sid, conversation)
+                logger.info(f"🔄 Finally 블록에서 DB 저장 완료: {call_sid}")
+            except Exception as e:
+                logger.error(f"❌ Finally 블록 DB 저장 실패: {e}")
+        
+        # 정리 작업 (메모리에서 제거)
         if call_sid and call_sid in active_connections:
             del active_connections[call_sid]
         if call_sid and call_sid in conversation_sessions:
             del conversation_sessions[call_sid]
+        
+        logger.info(f"🧹 WebSocket 정리 완료: {call_sid}")
 
 
 @app.post("/api/twilio/call-status", tags=["Twilio"])
@@ -1385,7 +1425,16 @@ async def call_status_handler(
     logger.info(f"📞 통화 상태 업데이트: {CallSid} - {CallStatus}")
     
     if CallStatus == 'completed':
-        # 통화 종료 시 정리
+        # ✅ 통화 종료 시 DB 저장 (백업용 - 중복 방지 로직 포함)
+        if CallSid in conversation_sessions:
+            try:
+                conversation = conversation_sessions[CallSid]
+                await save_conversation_to_db(CallSid, conversation)
+                logger.info(f"💾 콜백에서 통화 기록 저장 완료: {CallSid}")
+            except Exception as e:
+                logger.error(f"❌ 콜백 DB 저장 실패: {e}")
+        
+        # 세션 정리
         if CallSid in conversation_sessions:
             del conversation_sessions[CallSid]
         if CallSid in active_connections:
