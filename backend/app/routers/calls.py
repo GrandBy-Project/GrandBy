@@ -35,19 +35,29 @@ async def get_call_logs(db: Session = Depends(get_db)):
 @router.get("/{call_id}", response_model=CallLogResponse)
 async def get_call_log(call_id: str, db: Session = Depends(get_db)):
     """
-    통화 상세 정보 조회
-    TODO: 특정 통화 기록 반환
+    통화 상세 정보 조회 (요약 포함)
     """
-    return None
+    call_log = db.query(CallLog).filter(CallLog.call_id == call_id).first()
+    
+    if not call_log:
+        raise HTTPException(status_code=404, detail="Call log not found")
+    
+    return call_log
 
 
 @router.get("/{call_id}/transcript", response_model=List[CallTranscriptResponse])
 async def get_call_transcript(call_id: str, db: Session = Depends(get_db)):
     """
-    통화 텍스트 변환 내용 조회
-    TODO: STT 결과 반환
+    통화 텍스트 변환 내용 조회 (전체 대화 내용)
     """
-    return []
+    transcripts = db.query(CallTranscript).filter(
+        CallTranscript.call_id == call_id
+    ).order_by(CallTranscript.timestamp).all()
+    
+    if not transcripts:
+        raise HTTPException(status_code=404, detail="No transcripts found for this call")
+    
+    return transcripts
 
 
 @router.post("/settings", response_model=CallSettingsResponse)

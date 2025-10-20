@@ -57,6 +57,9 @@ class CallLog(Base):
     # 파일 저장 (S3 URL)
     audio_file_url = Column(String(500), nullable=True)
     
+    # 대화 요약 (LLM 생성)
+    conversation_summary = Column(Text, nullable=True)
+    
     # Twilio 관련
     twilio_call_sid = Column(String(100), nullable=True, unique=True)
     
