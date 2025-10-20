@@ -115,7 +115,7 @@ class STTService:
         """
         동기 방식 파일 변환 (executor에서 실행용)
         
-        이 메서드는 직접 호출하지 마세요. 
+        이 메서드는 직접 호출하지 마세요.
         transcribe_audio_chunk()에서 내부적으로 사용됩니다.
         
         Args:
@@ -130,7 +130,9 @@ class STTService:
                 model=self.model,
                 file=audio_file,
                 language=language,
-                response_format="text"
+                response_format="text",
+                temperature=0.0,  # 랜덤성 최소화
+                prompt="이 입력은 전화 대화의 한 부분입니다. 말이 없으면 아무것도 출력하지 마세요."
             )
         return transcript
     
