@@ -23,12 +23,12 @@ import { useAuthStore } from '../store/authStore';
 
 // 기분 옵션
 const MOOD_OPTIONS = [
-  { value: 'happy', label: '행복해요', emoji: '😊' },
-  { value: 'excited', label: '신나요', emoji: '🤗' },
-  { value: 'calm', label: '평온해요', emoji: '😌' },
-  { value: 'sad', label: '슬퍼요', emoji: '😢' },
-  { value: 'angry', label: '화나요', emoji: '😠' },
-  { value: 'tired', label: '피곤해요', emoji: '😴' },
+  { value: 'happy', label: '행복해요', icon: 'happy', color: '#FFD700' },
+  { value: 'excited', label: '신나요', icon: 'sparkles', color: '#FF6B6B' },
+  { value: 'calm', label: '평온해요', icon: 'leaf', color: '#4ECDC4' },
+  { value: 'sad', label: '슬퍼요', icon: 'sad', color: '#95A5A6' },
+  { value: 'angry', label: '화나요', icon: 'thunderstorm', color: '#E74C3C' },
+  { value: 'tired', label: '피곤해요', icon: 'moon', color: '#9B59B6' },
 ];
 
 export const DiaryWriteScreen = () => {
@@ -84,7 +84,7 @@ export const DiaryWriteScreen = () => {
             
             // 사용자에게 피드백 제공
             Alert.alert(
-              '✅ 자동 완성',
+              '자동 완성',
               'AI와의 대화 내용이 자동으로 입력되었습니다.\n수정 후 저장해주세요!',
               [{ text: '확인' }]
             );
@@ -144,7 +144,7 @@ export const DiaryWriteScreen = () => {
 
       Alert.alert(
         '완료',
-        '일기가 저장되었습니다! 📝',
+        '일기가 저장되었습니다!',
         [
           {
             text: '확인',
@@ -239,7 +239,12 @@ export const DiaryWriteScreen = () => {
                 onPress={() => setSelectedMood(mood.value)}
                 disabled={isSubmitting}
               >
-                <Text style={styles.moodEmoji}>{mood.emoji}</Text>
+                <Ionicons 
+                  name={mood.icon as any} 
+                  size={28} 
+                  color={selectedMood === mood.value ? mood.color : '#999999'} 
+                  style={{ marginBottom: 4 }}
+                />
                 <Text
                   style={[
                     styles.moodLabel,
@@ -279,7 +284,10 @@ export const DiaryWriteScreen = () => {
           {isSubmitting ? (
             <ActivityIndicator size="small" color="#FFFFFF" />
           ) : (
-            <Text style={styles.submitButtonText}>✏️ 작성하기</Text>
+            <View style={styles.submitButtonContent}>
+              <Ionicons name="pencil" size={20} color="#FFFFFF" style={{ marginRight: 8 }} />
+              <Text style={styles.submitButtonText}>작성하기</Text>
+            </View>
           )}
         </TouchableOpacity>
       </ScrollView>
@@ -370,10 +378,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#E8F5F2',
     borderColor: '#34B79F',
   },
-  moodEmoji: {
-    fontSize: 26,
-    marginBottom: 4,
-  },
   moodLabel: {
     fontSize: 12,
     fontWeight: '500',
@@ -417,6 +421,11 @@ const styles = StyleSheet.create({
   },
   submitButtonDisabled: {
     backgroundColor: '#CCCCCC',
+  },
+  submitButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   submitButtonText: {
     fontSize: 18,

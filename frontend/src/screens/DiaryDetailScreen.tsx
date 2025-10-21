@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { getDiary, deleteDiary, Diary } from '../api/diary';
 import { useAuthStore } from '../store/authStore';
 
@@ -132,16 +132,16 @@ export const DiaryDetailScreen = () => {
   };
 
   /**
-   * 기분 이모지 및 텍스트
+   * 기분 아이콘 및 텍스트
    */
-  const getMoodDisplay = (mood?: string | null): { emoji: string; text: string } | null => {
-    const moodMap: Record<string, { emoji: string; text: string }> = {
-      happy: { emoji: '😊', text: '행복해요' },
-      excited: { emoji: '🤗', text: '신나요' },
-      calm: { emoji: '😌', text: '평온해요' },
-      sad: { emoji: '😢', text: '슬퍼요' },
-      angry: { emoji: '😠', text: '화나요' },
-      tired: { emoji: '😴', text: '피곤해요' },
+  const getMoodDisplay = (mood?: string | null): { icon: string; color: string; text: string } | null => {
+    const moodMap: Record<string, { icon: string; color: string; text: string }> = {
+      happy: { icon: 'happy', color: '#FFD700', text: '행복해요' },
+      excited: { icon: 'sparkles', color: '#FF6B6B', text: '신나요' },
+      calm: { icon: 'leaf', color: '#4ECDC4', text: '평온해요' },
+      sad: { icon: 'sad', color: '#95A5A6', text: '슬퍼요' },
+      angry: { icon: 'thunderstorm', color: '#E74C3C', text: '화나요' },
+      tired: { icon: 'moon', color: '#9B59B6', text: '피곤해요' },
     };
     return mood && moodMap[mood] ? moodMap[mood] : null;
   };
@@ -208,17 +208,28 @@ export const DiaryDetailScreen = () => {
         {/* 기분 */}
         {diary.mood && getMoodDisplay(diary.mood) && (
           <View style={styles.moodContainer}>
-            <Text style={styles.moodEmoji}>{getMoodDisplay(diary.mood)!.emoji}</Text>
+            <Ionicons 
+              name={getMoodDisplay(diary.mood)!.icon as any} 
+              size={24} 
+              color={getMoodDisplay(diary.mood)!.color} 
+              style={{ marginRight: 10 }}
+            />
             <Text style={styles.moodText}>{getMoodDisplay(diary.mood)!.text}</Text>
           </View>
         )}
 
         {/* 작성자 정보 */}
         <View style={styles.metaInfo}>
-          <Text style={styles.authorType}>
-            {diary.is_auto_generated ? '🤖 ' : '✏️ '}
-            {getAuthorTypeText(diary.author_type)}
-          </Text>
+          <View style={styles.authorTypeContainer}>
+            {diary.is_auto_generated ? (
+              <MaterialCommunityIcons name="robot" size={18} color="#666666" style={{ marginRight: 4 }} />
+            ) : (
+              <Ionicons name="pencil" size={16} color="#666666" style={{ marginRight: 4 }} />
+            )}
+            <Text style={styles.authorType}>
+              {getAuthorTypeText(diary.author_type)}
+            </Text>
+          </View>
           {diary.status === 'draft' && (
             <View style={styles.draftBadge}>
               <Text style={styles.draftText}>임시저장</Text>
@@ -324,10 +335,6 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     alignSelf: 'flex-start',
   },
-  moodEmoji: {
-    fontSize: 24,
-    marginRight: 10,
-  },
   moodText: {
     fontSize: 15,
     fontWeight: '500',
@@ -338,10 +345,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 20,
   },
+  authorTypeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 12,
+  },
   authorType: {
     fontSize: 15,
     color: '#666666',
-    marginRight: 12,
   },
   draftBadge: {
     backgroundColor: '#FFF3E0',

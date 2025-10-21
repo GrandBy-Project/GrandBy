@@ -57,9 +57,9 @@ def check_and_make_calls():
             # 시간 차이 계산 (분 단위)
             time_diff = abs((call_hour * 60 + call_minute) - (current_hour * 60 + current_minute))
             
-            # ±1분 이내인지 확인
-            if time_diff <= 1:
-                # 오늘 이미 전화했는지 확인 (중복 방지)
+            # 정확히 설정한 시간에만 전화 (0분 차이)
+            if time_diff == 0:
+                # # 오늘 이미 전화했는지 확인 (중복 방지)
                 today_start = current_datetime.replace(hour=0, minute=0, second=0, microsecond=0)
                 existing_call = db.query(CallLog).filter(
                     CallLog.elderly_id == setting.elderly_id,
