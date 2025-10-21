@@ -5,13 +5,14 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import and_
 from typing import List, Optional
 from datetime import date as date_type
 from app.database import get_db
 from app.schemas.diary import DiaryCreate, DiaryUpdate, DiaryResponse, DiaryCommentCreate
 from app.models.diary import Diary, AuthorType
 from app.routers.auth import get_current_user
-from app.models.user import User
+from app.models.user import User, UserRole, UserConnection, ConnectionStatus
 
 router = APIRouter()
 
@@ -22,15 +23,40 @@ async def get_diaries(
     limit: int = 100,
     start_date: Optional[date_type] = None,
     end_date: Optional[date_type] = None,
+    elderly_id: Optional[str] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
     다이어리 목록 조회
-    현재 사용자의 일기 목록 반환
+    - 어르신: 본인의 일기 목록 반환
+    - 보호자: elderly_id 파라미터로 연결된 어르신의 일기 조회
     """
-    query = db.query(Diary).filter(Diary.user_id == current_user.user_id)
     
+    # 보호자가 특정 어르신의 다이어리를 조회하는 경우
+    if elderly_id and current_user.role == UserRole.CAREGIVER:
+        # 연결 확인: 보호자와 어르신이 ACTIVE 상태로 연결되어 있는지
+        connection = db.query(UserConnection).filter(
+            and_(
+                UserConnection.caregiver_id == current_user.user_id,
+                UserConnection.elderly_id == elderly_id,
+                UserConnection.status == ConnectionStatus.ACTIVE
+            )
+        ).first()
+        
+        if not connection:
+            raise HTTPException(
+                status_code=403,
+                detail="해당 어르신과 연결되어 있지 않습니다."
+            )
+        
+        # 연결된 어르신의 다이어리 조회
+        query = db.query(Diary).filter(Diary.user_id == elderly_id)
+    else:
+        # 기본: 본인의 다이어리 조회
+        query = db.query(Diary).filter(Diary.user_id == current_user.user_id)
+    
+    # 날짜 필터링
     if start_date:
         query = query.filter(Diary.date >= start_date)
     if end_date:
@@ -40,7 +66,7 @@ async def get_diaries(
     return diaries
 
 
-@router.post("/", response_model=DiaryResponse)
+@router.post("/", response_model=List[DiaryResponse])
 async def create_diary(
     diary_data: DiaryCreate,
     current_user: User = Depends(get_current_user),
@@ -48,26 +74,60 @@ async def create_diary(
 ):
     """
     다이어리 작성
-    새 일기 생성
+    - 어르신: 본인의 일기 작성
+    - 보호자: 연결된 모든 어르신의 일기장에 일괄 추가
     """
-    # 새 다이어리 생성
-    new_diary = Diary(
-        user_id=current_user.user_id,
-        author_id=current_user.user_id,
-        date=diary_data.date,
-        # title=diary_data.title,
-        content=diary_data.content,
-        # mood=diary_data.mood,
-        author_type=AuthorType.ELDERLY if current_user.role == "elderly" else AuthorType.CAREGIVER,
-        is_auto_generated=False,
-        status=diary_data.status
-    )
+    created_diaries = []
     
-    db.add(new_diary)
+    # 보호자가 작성하는 경우 → 연결된 모든 어르신에게 복제
+    if current_user.role == UserRole.CAREGIVER:
+        # 연결된 모든 어르신 조회
+        connections = db.query(UserConnection).filter(
+            and_(
+                UserConnection.caregiver_id == current_user.user_id,
+                UserConnection.status == ConnectionStatus.ACTIVE
+            )
+        ).all()
+        
+        if not connections:
+            raise HTTPException(
+                status_code=400,
+                detail="연결된 어르신이 없습니다. 먼저 어르신과 연결해주세요."
+            )
+        
+        # 각 어르신마다 동일한 일기 생성
+        for connection in connections:
+            new_diary = Diary(
+                user_id=connection.elderly_id,  # 각 어르신 ID (누구의 일기장)
+                author_id=current_user.user_id,  # 보호자 ID (작성자)
+                date=diary_data.date,
+                content=diary_data.content,
+                author_type=AuthorType.CAREGIVER,
+                is_auto_generated=False,
+                status=diary_data.status
+            )
+            db.add(new_diary)
+            created_diaries.append(new_diary)
+    
+    else:
+        # 어르신 본인의 일기 작성
+        new_diary = Diary(
+            user_id=current_user.user_id,
+            author_id=current_user.user_id,
+            date=diary_data.date,
+            content=diary_data.content,
+            author_type=AuthorType.ELDERLY,
+            is_auto_generated=False,
+            status=diary_data.status
+        )
+        db.add(new_diary)
+        created_diaries.append(new_diary)
+    
     db.commit()
-    db.refresh(new_diary)
+    for diary in created_diaries:
+        db.refresh(diary)
     
-    return new_diary
+    return created_diaries
 
 
 @router.get("/{diary_id}", response_model=DiaryResponse)
@@ -78,17 +138,35 @@ async def get_diary(
 ):
     """
     다이어리 상세 조회
-    특정 일기 반환
+    - 본인 또는 연결된 어르신의 일기 조회 가능
     """
-    diary = db.query(Diary).filter(
-        Diary.diary_id == diary_id,
-        Diary.user_id == current_user.user_id
-    ).first()
+    diary = db.query(Diary).filter(Diary.diary_id == diary_id).first()
     
     if not diary:
         raise HTTPException(status_code=404, detail="일기를 찾을 수 없습니다.")
     
-    return diary
+    # 권한 확인
+    if diary.user_id == current_user.user_id:
+        # 본인의 일기
+        return diary
+    
+    # 보호자인 경우: 연결된 어르신의 일기인지 확인
+    if current_user.role == UserRole.CAREGIVER:
+        connection = db.query(UserConnection).filter(
+            and_(
+                UserConnection.caregiver_id == current_user.user_id,
+                UserConnection.elderly_id == diary.user_id,
+                UserConnection.status == ConnectionStatus.ACTIVE
+            )
+        ).first()
+        
+        if connection:
+            return diary
+    
+    raise HTTPException(
+        status_code=403,
+        detail="해당 일기를 조회할 권한이 없습니다."
+    )
 
 
 @router.put("/{diary_id}", response_model=DiaryResponse)
@@ -134,15 +212,19 @@ async def delete_diary(
 ):
     """
     다이어리 삭제
-    일기 삭제
+    - 본인이 작성했거나 본인 일기장에 있는 일기 삭제 가능
     """
-    diary = db.query(Diary).filter(
-        Diary.diary_id == diary_id,
-        Diary.user_id == current_user.user_id
-    ).first()
+    diary = db.query(Diary).filter(Diary.diary_id == diary_id).first()
     
     if not diary:
         raise HTTPException(status_code=404, detail="일기를 찾을 수 없습니다.")
+    
+    # 권한 확인: 본인이 작성했거나 본인 일기장에 있는 일기만 삭제 가능
+    if diary.author_id != current_user.user_id and diary.user_id != current_user.user_id:
+        raise HTTPException(
+            status_code=403,
+            detail="본인이 작성하거나 본인 일기장에 있는 일기만 삭제할 수 있습니다."
+        )
     
     db.delete(diary)
     db.commit()

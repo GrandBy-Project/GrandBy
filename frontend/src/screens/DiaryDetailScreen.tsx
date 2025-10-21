@@ -15,11 +15,14 @@ import {
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { getDiary, deleteDiary, Diary } from '../api/diary';
+import { useAuthStore } from '../store/authStore';
 
 export const DiaryDetailScreen = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { user } = useAuthStore();
   const { diaryId } = useLocalSearchParams<{ diaryId: string }>();
 
   const [diary, setDiary] = useState<Diary | null>(null);
@@ -166,17 +169,26 @@ export const DiaryDetailScreen = () => {
     );
   }
 
+  // 삭제 권한: 본인이 작성했거나 본인 일기장에 있는 일기
+  const canDelete = user && (diary.author_id === user.user_id || diary.user_id === user.user_id);
+
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       {/* 헤더 */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Text style={styles.backButtonText}>←</Text>
+          <Ionicons name="chevron-back" size={28} color="#333333" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>일기 상세</Text>
-        <TouchableOpacity onPress={handleDelete} style={styles.deleteButton}>
-          <Text style={styles.deleteButtonText}>🗑️</Text>
-        </TouchableOpacity>
+        
+        {/* 삭제 버튼 - 본인이 작성한 경우만 표시 */}
+        {canDelete ? (
+          <TouchableOpacity onPress={handleDelete} style={styles.deleteButton}>
+            <Ionicons name="trash-outline" size={24} color="#FF3B30" />
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.placeholder} />
+        )}
       </View>
 
       {/* 내용 */}
@@ -269,10 +281,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  backButtonText: {
-    fontSize: 28,
-    color: '#333333',
-  },
   headerTitle: {
     fontSize: 20,
     fontWeight: '600',
@@ -284,8 +292,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  deleteButtonText: {
-    fontSize: 24,
+  placeholder: {
+    width: 40,
   },
   scrollView: {
     flex: 1,

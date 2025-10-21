@@ -46,6 +46,7 @@ export const getDiaries = async (params?: {
   limit?: number;
   start_date?: string;
   end_date?: string;
+  elderly_id?: string;
 }): Promise<Diary[]> => {
   const response = await apiClient.get<Diary[]>('/api/diaries/', { params });
   return response.data;
@@ -66,10 +67,10 @@ export const getDiary = async (diaryId: string): Promise<Diary> => {
  * 다이어리 작성
  * 
  * @param data - 다이어리 작성 데이터
- * @returns 생성된 다이어리
+ * @returns 생성된 다이어리 (보호자인 경우 여러 개)
  */
-export const createDiary = async (data: DiaryCreate): Promise<Diary> => {
-  const response = await apiClient.post<Diary>('/api/diaries/', data);
+export const createDiary = async (data: DiaryCreate): Promise<Diary[]> => {
+  const response = await apiClient.post<Diary[]>('/api/diaries/', data);
   return response.data;
 };
 
