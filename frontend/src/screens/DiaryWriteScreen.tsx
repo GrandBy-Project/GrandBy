@@ -142,14 +142,9 @@ export const DiaryWriteScreen = () => {
         status: 'published',
       });
 
-      // 성공 메시지 (보호자인 경우 연결된 어르신 수 표시)
-      const message = user?.role === 'caregiver' && createdDiaries.length > 1
-        ? `연결된 ${createdDiaries.length}명의 어르신 일기장에 저장되었습니다! 📝`
-        : '일기가 저장되었습니다! 📝';
-
       Alert.alert(
         '완료',
-        message,
+        '일기가 저장되었습니다! 📝',
         [
           {
             text: '확인',
