@@ -5,7 +5,9 @@ import React, { useState } from 'react';
 import { View, TouchableOpacity, Text, StyleSheet, Alert, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { SideMenu } from './SideMenu';
+import { Colors } from '../constants/Colors';
 
 export const BottomNavigationBar: React.FC = () => {
   const router = useRouter();
@@ -42,7 +44,7 @@ export const BottomNavigationBar: React.FC = () => {
           onPress={handleMenu}
           activeOpacity={0.7}
         >
-          <Text style={styles.icon}>☰</Text>
+          <Ionicons name="menu" size={24} color={Colors.text} />
           <Text style={styles.label}>메뉴</Text>
         </TouchableOpacity>
 
@@ -53,7 +55,7 @@ export const BottomNavigationBar: React.FC = () => {
           activeOpacity={0.7}
         >
           <View style={styles.homeIconContainer}>
-            <Text style={styles.homeIcon}>🏠</Text>
+            <Ionicons name="home" size={28} color={Colors.textWhite} />
           </View>
           <Text style={styles.homeLabel}>홈</Text>
         </TouchableOpacity>
@@ -64,7 +66,7 @@ export const BottomNavigationBar: React.FC = () => {
           onPress={handleBack}
           activeOpacity={0.7}
         >
-          <Text style={styles.icon}>←</Text>
+          <Ionicons name="arrow-back" size={24} color={Colors.text} />
           <Text style={styles.label}>뒤로</Text>
         </TouchableOpacity>
       </View>
@@ -81,13 +83,13 @@ export const BottomNavigationBar: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     minHeight: 80, // 더 높게 만들어 접근성 향상
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.background,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-around',
     borderTopWidth: 2, // 더 굵은 테두리로 구분 명확화
-    borderTopColor: '#E0E0E0',
-    shadowColor: '#000',
+    borderTopColor: Colors.border,
+    shadowColor: Colors.shadow,
     shadowOffset: { width: 0, height: -3 },
     shadowOpacity: 0.15,
     shadowRadius: 10,
@@ -107,36 +109,29 @@ const styles = StyleSheet.create({
   homeButton: {
     position: 'relative',
   },
-  icon: {
-    fontSize: 32, // 더 큰 아이콘
-    color: '#333333', // 더 진한 색상으로 가독성 향상
-    marginBottom: 6,
-  },
   label: {
     fontSize: 14, // 더 큰 폰트
-    color: '#333333', // 더 진한 색상
+    color: Colors.text, // 더 진한 색상
     fontWeight: '500', // 약간 굵게
+    marginTop: 4,
   },
   homeIconContainer: {
-    backgroundColor: '#007AFF',
+    backgroundColor: Colors.primary,
     width: 60, // 더 큰 원형 버튼
     height: 60,
     borderRadius: 30,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 6,
-    shadowColor: '#007AFF',
+    shadowColor: Colors.primary,
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.4,
     shadowRadius: 6,
     elevation: 6,
   },
-  homeIcon: {
-    fontSize: 32, // 더 큰 홈 아이콘
-  },
   homeLabel: {
     fontSize: 14, // 더 큰 폰트
-    color: '#007AFF',
+    color: Colors.primary,
     fontWeight: '700', // 더 굵게
   },
 });

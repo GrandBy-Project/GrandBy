@@ -48,7 +48,7 @@ class TodoService:
         logger.info(f"🔍 TODO 생성 시작 - Creator ID: {creator_id}")
         logger.info(f"🔍 TODO 데이터: {todo_data.dict()}")
         
-        # 생성자 확인 (보호자만 가능)
+        # 생성자 확인
         creator = db.query(User).filter(User.user_id == creator_id).first()
         logger.info(f"🔍 생성자 조회 결과: {creator}")
         
@@ -57,13 +57,6 @@ class TodoService:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="생성자를 찾을 수 없습니다."
-            )
-            
-        if creator.role != UserRole.CAREGIVER:
-            logger.error(f"❌ 권한 없음: {creator.role}")
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="보호자만 TODO를 생성할 수 있습니다."
             )
         
         # 어르신 확인
@@ -82,6 +75,22 @@ class TodoService:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="해당 어르신을 찾을 수 없습니다."
+            )
+        
+        # 권한 및 creator_type 결정
+        if creator.role == UserRole.CAREGIVER:
+            # 보호자는 어르신에게 TODO 할당 가능
+            creator_type_value = CreatorType.CAREGIVER
+            logger.info(f"✅ 보호자가 TODO 생성")
+        elif creator.role == UserRole.ELDERLY and creator.user_id == todo_data.elderly_id:
+            # 어르신은 본인 일정만 생성 가능
+            creator_type_value = CreatorType.ELDERLY
+            logger.info(f"✅ 어르신이 본인 일정 생성")
+        else:
+            logger.error(f"❌ 권한 없음: {creator.role}, 대상: {todo_data.elderly_id}")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="권한이 없습니다."
             )
         
         # due_time 문자열을 time 객체로 변환
@@ -108,7 +117,7 @@ class TodoService:
             category=todo_data.category,
             due_date=todo_data.due_date,
             due_time=due_time_obj,  # 변환된 time 객체 사용
-            creator_type=CreatorType.CAREGIVER,
+            creator_type=creator_type_value,  # 동적으로 설정된 creator_type 사용
             status=TodoStatus.PENDING,
             is_confirmed=True,
             # 반복 일정 설정
@@ -312,8 +321,8 @@ class TodoService:
                 detail="TODO를 찾을 수 없습니다."
             )
         
-        # 권한 확인 (생성자만 수정 가능)
-        if todo.creator_id != user_id:
+        # 권한 확인 (생성자 또는 본인만 수정 가능)
+        if todo.creator_id != user_id and todo.elderly_id != user_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="TODO를 수정할 권한이 없습니다."
@@ -364,8 +373,8 @@ class TodoService:
                 detail="TODO를 찾을 수 없습니다."
             )
         
-        # 권한 확인
-        if todo.creator_id != user_id:
+        # 권한 확인 (생성자 또는 본인만 삭제 가능)
+        if todo.creator_id != user_id and todo.elderly_id != user_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="TODO를 삭제할 권한이 없습니다."
