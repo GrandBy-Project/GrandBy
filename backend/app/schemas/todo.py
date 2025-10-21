@@ -17,6 +17,9 @@ class TodoCreate(BaseModel):
     due_date: date
     due_time: Optional[str] = None  # 문자열로 받아서 내부에서 time 객체로 변환
     
+    # 공유 설정
+    is_shared_with_caregiver: bool = True  # 기본값: 공유
+    
     # 반복 일정 설정
     is_recurring: bool = False
     recurring_type: Optional[RecurringType] = None
@@ -35,6 +38,9 @@ class TodoUpdate(BaseModel):
     due_date: Optional[date] = None
     due_time: Optional[time] = None
     status: Optional[TodoStatus] = None
+    
+    # 공유 설정 수정 가능
+    is_shared_with_caregiver: Optional[bool] = None
     
     # 반복 일정 수정
     is_recurring: Optional[bool] = None
@@ -55,6 +61,9 @@ class TodoResponse(BaseModel):
     category: Optional[TodoCategory]
     due_date: date
     due_time: Optional[time]
+    
+    # 공유 설정
+    is_shared_with_caregiver: bool
     
     # 반복 일정 정보
     is_recurring: bool

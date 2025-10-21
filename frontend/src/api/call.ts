@@ -111,3 +111,31 @@ export const getCallLog = async (callId: string): Promise<CallLog> => {
   return response.data;
 };
 
+// ==================== TODO 자동 추출 ====================
+
+export interface ExtractedTodo {
+  title: string;
+  description?: string;
+  category?: 'MEDICINE' | 'HOSPITAL' | 'EXERCISE' | 'MEAL' | 'OTHER';
+  due_date: string;  // YYYY-MM-DD
+  due_time?: string | null;  // HH:MM 또는 null
+}
+
+/**
+ * 통화 내용에서 TODO 자동 추출
+ * 
+ * @param callId - 통화 ID (Call SID)
+ * @returns 추출된 TODO 목록
+ */
+export const getExtractedTodos = async (callId: string): Promise<ExtractedTodo[]> => {
+  try {
+    const response = await apiClient.get<{ todos: ExtractedTodo[] }>(
+      `/api/calls/${callId}/extracted-todos`
+    );
+    return response.data.todos || [];
+  } catch (error) {
+    console.error('TODO 추출 실패:', error);
+    return [];
+  }
+};
+

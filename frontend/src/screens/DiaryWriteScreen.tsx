@@ -13,12 +13,14 @@ import {
   ScrollView,
   Alert,
   ActivityIndicator,
+  Switch,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { createDiary } from '../api/diary';
-import { getCallLog } from '../api/call';
+import { getCallLog, getExtractedTodos, ExtractedTodo } from '../api/call';
+import { createTodo } from '../api/todo';
 import { useAuthStore } from '../store/authStore';
 
 // 기분 옵션
@@ -47,6 +49,15 @@ export const DiaryWriteScreen = () => {
   const [selectedMood, setSelectedMood] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingSummary, setIsLoadingSummary] = useState(false);
+  
+  // TODO 관련 state
+  const [suggestedTodos, setSuggestedTodos] = useState<ExtractedTodo[]>([]);
+  const [expandedTodoIndex, setExpandedTodoIndex] = useState<number | null>(null);
+  const [editingTodo, setEditingTodo] = useState<{
+    title: string;
+    description: string;
+    isShared: boolean;
+  } | null>(null);
 
   /**
    * 날짜 포맷팅
@@ -62,42 +73,51 @@ export const DiaryWriteScreen = () => {
   };
 
   /**
-   * 통화 요약 불러오기 (컴포넌트 마운트 시)
+   * 통화 요약 및 TODO 불러오기 (컴포넌트 마운트 시)
    */
   useEffect(() => {
-    const loadCallSummary = async () => {
+    const loadCallData = async () => {
       // 통화에서 온 경우이고 callSid가 있을 때만 실행
       if (fromCall && callSid) {
         try {
           setIsLoadingSummary(true);
-          console.log('📞 통화 요약 불러오기 시작:', callSid);
+          console.log('📞 통화 데이터 불러오기 시작:', callSid);
           
-          // 통화 기록 가져오기
+          // 1. 통화 기록 가져오기 (일기 내용)
           const callLog = await getCallLog(callSid);
           console.log('✅ 통화 기록 조회 완료:', callLog);
           
           // conversation_summary가 있으면 content에 자동 입력
           if (callLog.conversation_summary) {
             setContent(callLog.conversation_summary);
-            setTitle('AI와의 대화 기록'); // 기본 제목도 설정
+            setTitle('AI와의 대화 기록');
             console.log('✅ 통화 요약 자동 입력 완료');
+          }
+          
+          // 2. TODO 자동 추출
+          const extractedTodos = await getExtractedTodos(callSid);
+          console.log('📋 추출된 TODO:', extractedTodos);
+          
+          if (extractedTodos.length > 0) {
+            setSuggestedTodos(extractedTodos);
             
-            // 사용자에게 피드백 제공
+            // 사용자에게 피드백
+            Alert.alert(
+              '💡 일정 발견!',
+              `대화에서 ${extractedTodos.length}개의 일정을 발견했습니다.\n아래에서 등록할 일정을 선택해주세요!`,
+              [{ text: '확인' }]
+            );
+          } else if (callLog.conversation_summary) {
+            // TODO는 없지만 일기는 있는 경우
             Alert.alert(
               '✅ 자동 완성',
               'AI와의 대화 내용이 자동으로 입력되었습니다.\n수정 후 저장해주세요!',
               [{ text: '확인' }]
             );
-          } else {
-            console.log('⚠️ 통화 요약이 없습니다');
-            Alert.alert(
-              '알림',
-              '통화 요약이 아직 생성되지 않았습니다.\n직접 작성해주세요.'
-            );
           }
+          
         } catch (error) {
-          console.error('❌ 통화 요약 불러오기 실패:', error);
-          // 에러가 발생해도 사용자는 계속 일기를 작성할 수 있음
+          console.error('❌ 통화 데이터 불러오기 실패:', error);
           Alert.alert(
             '알림',
             '통화 내용을 불러오지 못했습니다.\n직접 작성해주세요.'
@@ -108,8 +128,88 @@ export const DiaryWriteScreen = () => {
       }
     };
 
-    loadCallSummary();
+    loadCallData();
   }, [fromCall, callSid]);
+
+  /**
+   * 카테고리 아이콘 반환
+   */
+  const getCategoryIcon = (category?: string): string => {
+    switch (category) {
+      case 'MEDICINE': return '💊';
+      case 'HOSPITAL': return '🏥';
+      case 'EXERCISE': return '🏃';
+      case 'MEAL': return '🍽️';
+      default: return '📅';
+    }
+  };
+
+  /**
+   * TODO 날짜 포맷팅
+   */
+  const formatTodoDate = (dateStr: string, timeStr?: string | null): string => {
+    const d = new Date(dateStr);
+    const today = new Date();
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    
+    let result = '';
+    if (d.toDateString() === today.toDateString()) {
+      result = '오늘';
+    } else if (d.toDateString() === tomorrow.toDateString()) {
+      result = '내일';
+    } else {
+      result = `${d.getMonth() + 1}월 ${d.getDate()}일`;
+    }
+    
+    if (timeStr) {
+      result += ` ${timeStr}`;
+    }
+    return result;
+  };
+
+  /**
+   * TODO 확장 (등록 폼 표시)
+   */
+  const handleExpandTodo = (index: number, todo: ExtractedTodo) => {
+    setExpandedTodoIndex(index);
+    setEditingTodo({
+      title: todo.title,
+      description: todo.description || '',
+      isShared: true,  // 기본값: 공유
+    });
+  };
+
+  /**
+   * TODO 등록 확인
+   */
+  const handleConfirmTodo = async (index: number, originalTodo: ExtractedTodo) => {
+    if (!editingTodo || !user) return;
+    
+    try {
+      await createTodo({
+        elderly_id: user.user_id,
+        title: editingTodo.title,
+        description: editingTodo.description,
+        category: originalTodo.category,
+        due_date: originalTodo.due_date,
+        due_time: originalTodo.due_time || undefined,
+        is_shared_with_caregiver: editingTodo.isShared,
+      });
+      
+      // 성공 피드백
+      Alert.alert('✅ 등록 완료', '일정이 등록되었습니다!');
+      
+      // 등록된 TODO 제거
+      setSuggestedTodos(prev => prev.filter((_, i) => i !== index));
+      setExpandedTodoIndex(null);
+      setEditingTodo(null);
+      
+    } catch (error) {
+      console.error('TODO 등록 실패:', error);
+      Alert.alert('오류', '일정 등록에 실패했습니다.');
+    }
+  };
 
   /**
    * 일기 저장
@@ -269,6 +369,131 @@ export const DiaryWriteScreen = () => {
           />
           <Text style={styles.charCount}>{content.length}자</Text>
         </View>
+
+        {/* TODO 제안 섹션 */}
+        {suggestedTodos.length > 0 && (
+          <View style={styles.todoSection}>
+            <Text style={styles.todoSectionTitle}>
+              💡 대화에서 발견된 일정 ({suggestedTodos.length}개)
+            </Text>
+            <Text style={styles.todoSectionHint}>
+              등록하고 싶은 일정을 선택해주세요
+            </Text>
+            
+            {suggestedTodos.map((todo, index) => (
+              <View key={index} style={styles.todoCard}>
+                {/* 카드 헤더 */}
+                <View style={styles.todoCardHeader}>
+                  <View style={styles.todoCardLeft}>
+                    <Text style={styles.todoCategoryIcon}>
+                      {getCategoryIcon(todo.category)}
+                    </Text>
+                    <View style={styles.todoCardInfo}>
+                      <Text style={styles.todoCardTitle}>{todo.title}</Text>
+                      <Text style={styles.todoCardDate}>
+                        {formatTodoDate(todo.due_date, todo.due_time)}
+                      </Text>
+                    </View>
+                  </View>
+                  
+                  {expandedTodoIndex === index ? (
+                    <Text style={styles.todoExpandedIcon}>▼</Text>
+                  ) : (
+                    <TouchableOpacity
+                      style={styles.todoAddButton}
+                      onPress={() => handleExpandTodo(index, todo)}
+                    >
+                      <Text style={styles.todoAddButtonText}>+ 등록</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+                
+                {/* 설명 */}
+                {todo.description && (
+                  <Text style={styles.todoCardDescription}>
+                    {todo.description}
+                  </Text>
+                )}
+                
+                {/* 확장 폼 */}
+                {expandedTodoIndex === index && editingTodo && (
+                  <View style={styles.todoExpandedForm}>
+                    {/* 제목 */}
+                    <View style={styles.formField}>
+                      <Text style={styles.formLabel}>제목</Text>
+                      <TextInput
+                        style={styles.formInput}
+                        value={editingTodo.title}
+                        onChangeText={(text) => 
+                          setEditingTodo({ ...editingTodo, title: text })
+                        }
+                        placeholder="일정 제목"
+                      />
+                    </View>
+                    
+                    {/* 설명 */}
+                    <View style={styles.formField}>
+                      <Text style={styles.formLabel}>설명 (선택)</Text>
+                      <TextInput
+                        style={[styles.formInput, styles.formTextArea]}
+                        value={editingTodo.description}
+                        onChangeText={(text) => 
+                          setEditingTodo({ ...editingTodo, description: text })
+                        }
+                        placeholder="일정 설명"
+                        multiline
+                      />
+                    </View>
+                    
+                    {/* 공유 설정 토글 */}
+                    <View style={styles.formField}>
+                      <View style={styles.shareToggleContainer}>
+                        <View style={styles.shareToggleLeft}>
+                          <Text style={styles.shareToggleLabel}>
+                            보호자와 공유
+                          </Text>
+                          <Text style={styles.shareToggleHint}>
+                            {editingTodo.isShared 
+                              ? '보호자도 이 일정을 볼 수 있어요'
+                              : '나만 볼 수 있어요'}
+                          </Text>
+                        </View>
+                        <Switch
+                          value={editingTodo.isShared}
+                          onValueChange={(value) => 
+                            setEditingTodo({ ...editingTodo, isShared: value })
+                          }
+                          trackColor={{ false: '#E8E8E8', true: '#34B79F' }}
+                          thumbColor='#FFFFFF'
+                        />
+                      </View>
+                    </View>
+                    
+                    {/* 버튼 */}
+                    <View style={styles.formButtons}>
+                      <TouchableOpacity
+                        style={[styles.formButton, styles.cancelButton]}
+                        onPress={() => {
+                          setExpandedTodoIndex(null);
+                          setEditingTodo(null);
+                        }}
+                      >
+                        <Text style={styles.cancelButtonText}>취소</Text>
+                      </TouchableOpacity>
+                      
+                      <TouchableOpacity
+                        style={[styles.formButton, styles.confirmButton]}
+                        onPress={() => handleConfirmTodo(index, todo)}
+                      >
+                        <Text style={styles.confirmButtonText}>등록하기</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                )}
+              </View>
+            ))}
+          </View>
+        )}
 
         {/* 저장 버튼 */}
         <TouchableOpacity
@@ -439,6 +664,159 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#4A90E2',
     fontWeight: '500',
+  },
+  // TODO 섹션 스타일
+  todoSection: {
+    marginTop: 24,
+    marginBottom: 16,
+  },
+  todoSectionTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#333333',
+    marginBottom: 4,
+  },
+  todoSectionHint: {
+    fontSize: 13,
+    color: '#666666',
+    marginBottom: 12,
+  },
+  // TODO 카드
+  todoCard: {
+    backgroundColor: '#F8F9FA',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E8E8E8',
+  },
+  todoCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  todoCardLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  todoCategoryIcon: {
+    fontSize: 24,
+    marginRight: 12,
+  },
+  todoCardInfo: {
+    flex: 1,
+  },
+  todoCardTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333333',
+    marginBottom: 4,
+  },
+  todoCardDate: {
+    fontSize: 13,
+    color: '#666666',
+  },
+  todoCardDescription: {
+    fontSize: 14,
+    color: '#666666',
+    marginTop: 8,
+    lineHeight: 20,
+  },
+  todoAddButton: {
+    backgroundColor: '#34B79F',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  todoAddButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  todoExpandedIcon: {
+    fontSize: 18,
+    color: '#34B79F',
+  },
+  // 확장 폼
+  todoExpandedForm: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#E8E8E8',
+  },
+  formField: {
+    marginBottom: 12,
+  },
+  formLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#333333',
+    marginBottom: 6,
+  },
+  formInput: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E8E8E8',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 15,
+    color: '#333333',
+  },
+  formTextArea: {
+    minHeight: 80,
+    textAlignVertical: 'top',
+  },
+  // 공유 토글
+  shareToggleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F0F8FF',
+    padding: 12,
+    borderRadius: 8,
+  },
+  shareToggleLeft: {
+    flex: 1,
+  },
+  shareToggleLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#333333',
+    marginBottom: 2,
+  },
+  shareToggleHint: {
+    fontSize: 12,
+    color: '#666666',
+  },
+  // 버튼들
+  formButtons: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 12,
+  },
+  formButton: {
+    flex: 1,
+    height: 44,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cancelButton: {
+    backgroundColor: '#F8F8F8',
+  },
+  cancelButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#666666',
+  },
+  confirmButton: {
+    backgroundColor: '#34B79F',
+  },
+  confirmButtonText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
 });
 

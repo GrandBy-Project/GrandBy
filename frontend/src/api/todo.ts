@@ -16,6 +16,7 @@ export interface TodoItem {
   creator_type: 'caregiver' | 'ai' | 'elderly';
   status: 'pending' | 'completed' | 'cancelled';
   is_confirmed: boolean;
+  is_shared_with_caregiver: boolean; // 보호자와 공유 여부
   is_recurring: boolean;
   recurring_type: 'DAILY' | 'WEEKLY' | 'MONTHLY' | null;
   recurring_interval: number | null;
@@ -36,6 +37,7 @@ export interface TodoCreateRequest {
   category?: 'MEDICINE' | 'EXERCISE' | 'MEAL' | 'HOSPITAL' | 'OTHER';
   due_date: string; // YYYY-MM-DD
   due_time?: string; // HH:MM
+  is_shared_with_caregiver?: boolean; // 보호자와 공유 여부 (기본값: true)
   is_recurring?: boolean;
   recurring_type?: 'DAILY' | 'WEEKLY' | 'MONTHLY';
   recurring_interval?: number;
@@ -52,6 +54,7 @@ export interface TodoUpdateRequest {
   due_date?: string;
   due_time?: string;
   status?: 'pending' | 'completed' | 'cancelled';
+  is_shared_with_caregiver?: boolean; // 공유 설정 수정 가능
   is_recurring?: boolean;
   recurring_type?: 'DAILY' | 'WEEKLY' | 'MONTHLY';
   recurring_interval?: number;

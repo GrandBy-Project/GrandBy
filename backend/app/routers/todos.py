@@ -32,16 +32,18 @@ async def get_todos(
     elderly_id: Optional[str] = Query(None, description="어르신 ID (보호자용)"),
     date_filter: Optional[str] = Query("today", description="yesterday, today, tomorrow"),
     status: Optional[TodoStatus] = Query(None, description="상태 필터"),
+    shared_only: bool = Query(False, description="공유된 TODO만 (보호자용)"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
     TODO 목록 조회
     
-    - **어르신**: 본인의 TODO만 조회
-    - **보호자**: elderly_id 지정하여 특정 어르신의 TODO 조회
+    - **어르신**: 본인의 TODO만 조회 (모두 볼 수 있음)
+    - **보호자**: elderly_id 지정, shared_only=true면 공유된 TODO만
     - **date_filter**: yesterday, today, tomorrow
     - **status**: pending, completed, cancelled
+    - **shared_only**: true면 is_shared_with_caregiver=true인 것만
     """
     # 날짜 계산
     today = date.today()
@@ -69,7 +71,8 @@ async def get_todos(
         db=db,
         elderly_id=target_elderly_id,
         target_date=target_date,
-        status_filter=status
+        status_filter=status,
+        shared_only=shared_only if current_user.role != UserRole.ELDERLY else False
     )
     
     return todos
@@ -107,7 +110,8 @@ async def get_todos_by_range(
         elderly_id=target_elderly_id,
         start_date=start_date,
         end_date=end_date,
-        status_filter=status
+        status_filter=status,
+        shared_only=False  # 범위 조회는 필터 적용 안 함 (캘린더용)
     )
     
     return todos

@@ -230,13 +230,13 @@ JSON 형식으로 응답:
     
     def summarize_call_conversation(self, conversation_history: list):
         """
-        통화 대화 내용 요약 (보호자용)
+        통화 내용을 어르신의 1인칭 일기로 변환
         
         Args:
             conversation_history: 대화 기록 [{"role": "user", "content": "..."}, ...]
         
         Returns:
-            str: 요약된 대화 내용
+            str: 1인칭 일기 형식의 내용
         """
         try:
             # 대화 기록을 텍스트로 변환
@@ -247,68 +247,111 @@ JSON 형식으로 응답:
             
             prompt = f"""
 다음은 어르신과 AI 비서의 통화 내용입니다. 
-보호자가 이해하기 쉽게 핵심 내용을 3-5줄로 요약해주세요.
+이 대화를 바탕으로 어르신의 1인칭 시점에서 자연스럽고 따뜻한 일기를 작성해주세요.
 
-요약에 포함할 내용:
-- 어르신의 건강 상태 (식사, 약 복용, 통증 등)
-- 감정 상태 (기분, 우울감 등)
-- 특별한 일정이나 요청사항
-- 주의가 필요한 사항
+작성 가이드:
+- 1인칭 시점으로 작성 ("나는", "오늘은", "내가" 등)
+- 자연스럽고 따뜻한 구어체 사용 (반말 또는 편안한 말투)
+- 대화에서 언급된 활동, 감정, 생각을 모두 포함
+- 건강 상태(식사, 약, 통증 등), 기분, 계획 등을 자연스럽게 녹이기
+- 5-10문장 정도의 편안한 일기 형식
+- 문장은 짧고 간결하게, 하지만 감정은 풍부하게
+- 마치 어르신이 직접 작성한 것처럼 자연스럽게
 
 통화 내용:
 {conversation_text}
 
-요약:
+일기:
 """
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=300,
-                temperature=0.7,
+                max_tokens=500,  # 충분한 길이 확보
+                temperature=0.8,  # 자연스럽고 다양한 표현
             )
             
-            summary = response.choices[0].message.content
-            logger.info(f"✅ 통화 요약 생성 완료")
-            return summary
+            diary = response.choices[0].message.content
+            logger.info(f"✅ 어르신 일기 생성 완료")
+            return diary
         except Exception as e:
-            logger.error(f"❌ 통화 요약 생성 실패: {e}")
-            return "요약 생성 실패"
+            logger.error(f"❌ 일기 생성 실패: {e}")
+            return "일기 생성에 실패했습니다."
     
     def extract_schedule_from_conversation(self, conversation_text: str):
         """
-        통화 내용에서 일정 정보 추출
+        통화 내용에서 일정 정보 추출 (개선 버전)
         
         Args:
             conversation_text: 전체 통화 내용
         
         Returns:
-            list: 추출된 일정 정보 [{"title": "...", "date": "...", "time": "..."}]
+            str: JSON 형식의 일정 목록
         """
         try:
+            from datetime import datetime, timedelta
+            
+            # 오늘 날짜를 기준으로 상대 날짜 해석
+            today = datetime.now()
+            tomorrow = today + timedelta(days=1)
+            day_after_tomorrow = today + timedelta(days=2)
+            
+            # 요일 계산
+            weekdays_kr = ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일']
+            current_weekday = weekdays_kr[today.weekday()]
+            
             prompt = f"""
-다음 대화에서 일정과 관련된 정보를 추출해주세요.
-"내일 병원 가야해", "모레 약 타러 가야지" 같은 표현을 찾아서 JSON 형식으로 반환해주세요.
+다음 대화에서 미래의 일정과 약속을 추출해주세요.
+
+📅 오늘 날짜: {today.strftime('%Y년 %m월 %d일')} ({current_weekday})
+📅 내일: {tomorrow.strftime('%Y-%m-%d')}
+📅 모레: {day_after_tomorrow.strftime('%Y-%m-%d')}
 
 대화:
 {conversation_text}
 
-JSON 형식:
-[{{"title": "병원 가기", "date": "2025-10-11", "time": "15:00"}}]
+추출 규칙:
+1. 미래 일정만 추출 (과거나 완료된 것은 제외)
+2. "내일", "모레", "다음주", "월요일" 등 상대 날짜를 절대 날짜로 변환
+3. 시간이 명시되면 due_time에 포함 (HH:MM 24시간 형식)
+4. 시간이 없으면 due_time은 null
+5. 카테고리 자동 분류:
+   - MEDICINE: 약, 복용, 약국
+   - HOSPITAL: 병원, 진료, 검사, 치료
+   - EXERCISE: 운동, 산책, 체조
+   - MEAL: 식사, 밥, 약속, 만남
+   - OTHER: 기타
+6. 불확실하거나 막연한 표현은 제외 (예: "언젠가", "나중에")
+7. 최대 5개까지만 추출 (중요도 높은 순서)
 
-만약 일정이 없다면 빈 배열 []을 반환해주세요.
+JSON 형식으로 응답 (일정 없으면 빈 배열):
+{{
+  "schedules": [
+    {{
+      "title": "병원 가기",
+      "description": "정형외과 무릎 검사",
+      "category": "HOSPITAL",
+      "due_date": "{tomorrow.strftime('%Y-%m-%d')}",
+      "due_time": "15:00"
+    }}
+  ]
+}}
+
+주의: schedules 배열 안에 일정을 넣어주세요. 일정이 없으면 {{"schedules": []}}를 반환하세요.
 """
+            
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=300,
-                temperature=0.3,
-                response_format={"type": "json_object"}  # JSON 모드
+                max_tokens=800,  # 여러 일정 추출 가능하도록 증가
+                temperature=0.2,  # 정확한 추출을 위해 낮게 설정
+                response_format={"type": "json_object"}
             )
             
-            schedule = response.choices[0].message.content
-            logger.info(f"Extracted schedule: {schedule}")
-            return schedule
+            result = response.choices[0].message.content
+            logger.info(f"✅ 일정 추출 완료")
+            return result
+            
         except Exception as e:
-            logger.error(f"Failed to extract schedule: {e}")
-            raise
+            logger.error(f"❌ 일정 추출 실패: {e}")
+            return '{"schedules": []}'
 
