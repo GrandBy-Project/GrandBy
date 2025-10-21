@@ -14,23 +14,19 @@ import {
   Platform,
   KeyboardAvoidingView,
   Keyboard,
+  ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Header, BottomNavigationBar } from '../components';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-
-interface ScheduleItem {
-  id: string;
-  title: string;
-  description: string;
-  time: string;
-  date: string;
-}
+import { TodoItem, getTodosByRange, createTodo, deleteTodo } from '../api/todo';
+import { useAuthStore } from '../store/authStore';
 
 export const CalendarScreen = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { user } = useAuthStore();
   
   // 날짜 선택 상태
   const [selectedDay, setSelectedDay] = useState(new Date());
@@ -57,30 +53,9 @@ export const CalendarScreen = () => {
     date: '',
   });
   
-  // 목업 데이터
-  const [schedules, setSchedules] = useState<ScheduleItem[]>([
-    {
-      id: '1',
-      title: '친구와 점심',
-      description: '오랜만에 만나는 친구와 점심 약속',
-      time: '오후 12시',
-      date: '2024-01-15',
-    },
-    {
-      id: '2',
-      title: '독서 모임',
-      description: '월간 독서 모임 참석',
-      time: '오후 2시',
-      date: '2024-01-20',
-    },
-    {
-      id: '3',
-      title: '가족 모임',
-      description: '딸 가족과 저녁 식사',
-      time: '오후 6시',
-      date: '2024-01-25',
-    },
-  ]);
+  // API 연동: TodoItem 타입 사용
+  const [schedules, setSchedules] = useState<TodoItem[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
 
   const timeOptions = [
     '오전 6시', '오전 7시', '오전 8시', '오전 9시', '오전 10시',
@@ -88,6 +63,94 @@ export const CalendarScreen = () => {
     '오후 4시', '오후 5시', '오후 6시', '오후 7시', '오후 8시',
     '오후 9시', '하루 종일'
   ];
+
+  // 시간 형식 변환 함수
+  const convertKoreanTimeToHHMM = (koreanTime: string): string => {
+    if (koreanTime === '하루 종일') return '00:00';
+    
+    const match = koreanTime.match(/(오전|오후)\s*(\d+)시/);
+    if (!match) return '00:00';
+    
+    const [, period, hourStr] = match;
+    let hour = parseInt(hourStr, 10);
+    
+    if (period === '오후' && hour !== 12) {
+      hour += 12;
+    } else if (period === '오전' && hour === 12) {
+      hour = 0;
+    }
+    
+    return `${hour.toString().padStart(2, '0')}:00`;
+  };
+
+  const convertHHMMToKoreanTime = (timeStr: string | null): string => {
+    if (!timeStr) return '시간 미정';
+    
+    const [hourStr, minute] = timeStr.split(':');
+    let hour = parseInt(hourStr, 10);
+    
+    if (hour === 0 && minute === '00') return '하루 종일';
+    
+    const period = hour >= 12 ? '오후' : '오전';
+    if (hour > 12) hour -= 12;
+    if (hour === 0) hour = 12;
+    
+    return `${period} ${hour}시`;
+  };
+
+  // 날짜 범위별 일정 조회
+  const loadSchedules = async () => {
+    if (!user) {
+      console.log('⚠️ 사용자 정보 없음, 조회 중단');
+      return;
+    }
+    
+    // 토큰 확인
+    const { TokenManager } = require('../api/client');
+    const tokens = await TokenManager.getTokens();
+    console.log('🔑 저장된 토큰 확인:', tokens ? '있음' : '없음');
+    if (tokens) {
+      console.log('🔑 Access Token:', tokens.access_token ? '존재' : '없음');
+      console.log('🔑 Refresh Token:', tokens.refresh_token ? '존재' : '없음');
+    }
+    
+    try {
+      setIsLoading(true);
+      
+      // 현재 보이는 날짜 범위 계산 (selectedDay 기준으로 ±2주)
+      const startDate = new Date(selectedDay);
+      startDate.setDate(startDate.getDate() - 14);
+      
+      const endDate = new Date(selectedDay);
+      endDate.setDate(endDate.getDate() + 21);
+      
+      const startDateStr = formatDateString(startDate);
+      const endDateStr = formatDateString(endDate);
+      
+      console.log(`📅 캘린더 일정 조회 시작`);
+      console.log(`  - 사용자 ID: ${user.user_id}`);
+      console.log(`  - 사용자 역할: ${user.role}`);
+      console.log(`  - 날짜 범위: ${startDateStr} ~ ${endDateStr}`);
+      
+      const todos = await getTodosByRange(startDateStr, endDateStr);
+      
+      console.log(`✅ 조회된 일정: ${todos.length}개`);
+      setSchedules(todos);
+    } catch (error: any) {
+      console.error('❌ 일정 조회 실패:', error);
+      console.error('❌ 에러 상세:', JSON.stringify(error, null, 2));
+      console.error('❌ 응답 데이터:', error.response?.data);
+      console.error('❌ 응답 상태:', error.response?.status);
+      Alert.alert('오류', `일정을 불러오는데 실패했습니다.\n${error.message || JSON.stringify(error)}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // 컴포넌트 마운트 시 & selectedDay 변경 시 일정 로딩
+  useEffect(() => {
+    loadSchedules();
+  }, [selectedDay]);
 
   // 주간 캘린더 유틸리티 함수들
   const getWeekDates = (date: Date) => {
@@ -130,7 +193,7 @@ export const CalendarScreen = () => {
 
   const getSchedulesForDate = (date: Date) => {
     const dateString = formatDateString(date);
-    return schedules.filter(schedule => schedule.date === dateString);
+    return schedules.filter(schedule => schedule.due_date === dateString);
   };
 
   // 주간 네비게이션
@@ -250,7 +313,7 @@ export const CalendarScreen = () => {
     // 날짜만 선택하고 모달은 열지 않음
   };
 
-  const handleSaveSchedule = () => {
+  const handleSaveSchedule = async () => {
     if (!newSchedule.title.trim()) {
       Alert.alert('알림', '제목을 입력해주세요.');
       return;
@@ -266,18 +329,46 @@ export const CalendarScreen = () => {
       return;
     }
 
-    const newItem: ScheduleItem = {
-      id: Date.now().toString(),
-      title: newSchedule.title,
-      description: newSchedule.description,
-      time: newSchedule.time,
-      date: newSchedule.date,
-    };
+    if (!user) {
+      Alert.alert('오류', '로그인이 필요합니다.');
+      return;
+    }
 
-    setSchedules(prev => [...prev, newItem]);
-    setNewSchedule({ title: '', description: '', time: '', date: '' });
-    setShowAddModal(false);
-    Alert.alert('저장 완료', '일정이 추가되었습니다.');
+    try {
+      setIsLoading(true);
+      
+      // 시간 형식 변환: "오후 12시" → "12:00"
+      const timeHHMM = convertKoreanTimeToHHMM(newSchedule.time);
+      
+      console.log('📝 일정 생성 요청:', {
+        title: newSchedule.title,
+        due_date: newSchedule.date,
+        due_time: timeHHMM,
+      });
+      
+      await createTodo({
+        elderly_id: user.user_id,
+        title: newSchedule.title,
+        description: newSchedule.description,
+        due_date: newSchedule.date,
+        due_time: timeHHMM,
+        category: 'other', // 기본 카테고리
+      });
+      
+      console.log('✅ 일정 생성 성공');
+      
+      // 일정 다시 불러오기
+      await loadSchedules();
+      
+      setNewSchedule({ title: '', description: '', time: '', date: '' });
+      setShowAddModal(false);
+      Alert.alert('저장 완료', '일정이 추가되었습니다.');
+    } catch (error: any) {
+      console.error('❌ 일정 생성 실패:', error);
+      Alert.alert('오류', '일정을 저장하는데 실패했습니다.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleCancelAdd = () => {
@@ -287,7 +378,7 @@ export const CalendarScreen = () => {
   };
 
 
-  const handleDeleteSchedule = (scheduleId: string) => {
+  const handleDeleteSchedule = (todoId: string) => {
     Alert.alert(
       '일정 삭제',
       '이 일정을 삭제하시겠습니까?',
@@ -296,9 +387,26 @@ export const CalendarScreen = () => {
         {
           text: '삭제',
           style: 'destructive',
-          onPress: () => {
-            setSchedules(prev => prev.filter(s => s.id !== scheduleId));
-            Alert.alert('삭제 완료', '일정이 삭제되었습니다.');
+          onPress: async () => {
+            try {
+              setIsLoading(true);
+              
+              console.log('🗑️ 일정 삭제 요청:', todoId);
+              
+              await deleteTodo(todoId);
+              
+              console.log('✅ 일정 삭제 성공');
+              
+              // 일정 다시 불러오기
+              await loadSchedules();
+              
+              Alert.alert('삭제 완료', '일정이 삭제되었습니다.');
+            } catch (error: any) {
+              console.error('❌ 일정 삭제 실패:', error);
+              Alert.alert('오류', '일정을 삭제하는데 실패했습니다.');
+            } finally {
+              setIsLoading(false);
+            }
           },
         },
       ]
@@ -408,7 +516,16 @@ export const CalendarScreen = () => {
           
           {(() => {
             const targetDateString = formatDateString(selectedDay);
-            const filteredSchedules = schedules.filter(schedule => schedule.date === targetDateString);
+            const filteredSchedules = schedules.filter(schedule => schedule.due_date === targetDateString);
+            
+            if (isLoading) {
+              return (
+                <View style={styles.emptyState}>
+                  <ActivityIndicator size="large" color="#40B59F" />
+                  <Text style={styles.emptySubText}>일정을 불러오는 중...</Text>
+                </View>
+              );
+            }
             
             if (filteredSchedules.length === 0) {
               return (
@@ -423,15 +540,20 @@ export const CalendarScreen = () => {
             
             // 시간순으로 정렬
             const sortedSchedules = filteredSchedules.sort((a, b) => {
-              const timeA = a.time.includes('오전') ? 0 : 1;
-              const timeB = b.time.includes('오전') ? 0 : 1;
-              return timeA - timeB;
+              if (!a.due_time) return 1;
+              if (!b.due_time) return -1;
+              return a.due_time.localeCompare(b.due_time);
             });
             
             return (
               <View style={styles.timeScheduleContainer}>
                 {sortedSchedules.map((schedule, index) => (
-                  <View key={schedule.id} style={styles.scheduleCard}>
+                  <TouchableOpacity
+                    key={schedule.todo_id}
+                    style={styles.scheduleCard}
+                    onPress={() => handleDeleteSchedule(schedule.todo_id)}
+                    activeOpacity={0.7}
+                  >
                     <View style={styles.scheduleIconContainer}>
                       <View style={[
                         styles.scheduleIcon,
@@ -441,8 +563,11 @@ export const CalendarScreen = () => {
                       ]}>
                         <Ionicons 
                           name={
-                            schedule.title.includes('약') ? 'medical' : 
-                            schedule.title.includes('병원') ? 'medical-outline' : 'calendar-outline'
+                            schedule.title.includes('약') || schedule.category === 'medicine' ? 'medical' : 
+                            schedule.title.includes('병원') || schedule.category === 'hospital' ? 'medical-outline' :
+                            schedule.category === 'exercise' ? 'fitness-outline' :
+                            schedule.category === 'meal' ? 'restaurant-outline' :
+                            'calendar-outline'
                           }
                           size={24} 
                           color="#FFFFFF" 
@@ -452,16 +577,16 @@ export const CalendarScreen = () => {
                     
                     <View style={styles.scheduleContent}>
                       <Text style={styles.scheduleTitle}>{schedule.title}</Text>
-                      <Text style={styles.scheduleTime}>{schedule.time}</Text>
+                      <Text style={styles.scheduleTime}>{convertHHMMToKoreanTime(schedule.due_time)}</Text>
                       {schedule.description && (
                         <Text style={styles.scheduleDescription}>{schedule.description}</Text>
                       )}
                     </View>
                     
                     <View style={styles.scheduleArrow}>
-                      <Ionicons name="chevron-forward" size={20} color="#CCCCCC" />
+                      <Ionicons name="trash-outline" size={20} color="#FF6B6B" />
                     </View>
-                  </View>
+                  </TouchableOpacity>
                 ))}
               </View>
             );

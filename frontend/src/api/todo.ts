@@ -124,7 +124,7 @@ export const getTodosByRange = async (
   if (elderly_id) params.elderly_id = elderly_id;
   if (status) params.status = status;
 
-  const response = await apiClient.get<TodoItem[]>('/api/todos/range/', { params });
+  const response = await apiClient.get<TodoItem[]>('/api/todos/range', { params });
   return response.data;
 };
 
