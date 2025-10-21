@@ -70,6 +70,26 @@ async def create_diary(
     return new_diary
 
 
+@router.get("/by-call/{call_id}", response_model=DiaryResponse)
+async def get_diary_by_call(
+    call_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    통화 ID로 일기 조회
+    """
+    diary = db.query(Diary).filter(
+        Diary.call_id == call_id,
+        Diary.user_id == current_user.user_id
+    ).first()
+    
+    if not diary:
+        raise HTTPException(status_code=404, detail="해당 통화로 생성된 일기를 찾을 수 없습니다.")
+    
+    return diary
+
+
 @router.get("/{diary_id}", response_model=DiaryResponse)
 async def get_diary(
     diary_id: str,

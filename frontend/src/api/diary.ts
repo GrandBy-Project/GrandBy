@@ -63,6 +63,17 @@ export const getDiary = async (diaryId: string): Promise<Diary> => {
 };
 
 /**
+ * 통화 ID로 일기 조회
+ * 
+ * @param callId - 통화 ID
+ * @returns 다이어리 상세 정보
+ */
+export const getDiaryByCall = async (callId: string): Promise<Diary> => {
+  const response = await apiClient.get<Diary>(`/api/diaries/by-call/${callId}`);
+  return response.data;
+};
+
+/**
  * 다이어리 작성
  * 
  * @param data - 다이어리 작성 데이터
