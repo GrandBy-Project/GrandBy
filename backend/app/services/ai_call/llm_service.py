@@ -230,13 +230,13 @@ JSON 형식으로 응답:
     
     def summarize_call_conversation(self, conversation_history: list):
         """
-        통화 대화 내용 요약 (보호자용)
+        통화 내용을 어르신의 1인칭 일기로 변환
         
         Args:
             conversation_history: 대화 기록 [{"role": "user", "content": "..."}, ...]
         
         Returns:
-            str: 요약된 대화 내용
+            str: 1인칭 일기 형식의 내용
         """
         try:
             # 대화 기록을 텍스트로 변환
@@ -247,32 +247,35 @@ JSON 형식으로 응답:
             
             prompt = f"""
 다음은 어르신과 AI 비서의 통화 내용입니다. 
-보호자가 이해하기 쉽게 핵심 내용을 3-5줄로 요약해주세요.
+이 대화를 바탕으로 어르신의 1인칭 시점에서 자연스럽고 따뜻한 일기를 작성해주세요.
 
-요약에 포함할 내용:
-- 어르신의 건강 상태 (식사, 약 복용, 통증 등)
-- 감정 상태 (기분, 우울감 등)
-- 특별한 일정이나 요청사항
-- 주의가 필요한 사항
+작성 가이드:
+- 1인칭 시점으로 작성 ("나는", "오늘은", "내가" 등)
+- 자연스럽고 따뜻한 구어체 사용 (반말 또는 편안한 말투)
+- 대화에서 언급된 활동, 감정, 생각을 모두 포함
+- 건강 상태(식사, 약, 통증 등), 기분, 계획 등을 자연스럽게 녹이기
+- 5-10문장 정도의 편안한 일기 형식
+- 문장은 짧고 간결하게, 하지만 감정은 풍부하게
+- 마치 어르신이 직접 작성한 것처럼 자연스럽게
 
 통화 내용:
 {conversation_text}
 
-요약:
+일기:
 """
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=300,
-                temperature=0.7,
+                max_tokens=500,  # 충분한 길이 확보
+                temperature=0.8,  # 자연스럽고 다양한 표현
             )
             
-            summary = response.choices[0].message.content
-            logger.info(f"✅ 통화 요약 생성 완료")
-            return summary
+            diary = response.choices[0].message.content
+            logger.info(f"✅ 어르신 일기 생성 완료")
+            return diary
         except Exception as e:
-            logger.error(f"❌ 통화 요약 생성 실패: {e}")
-            return "요약 생성 실패"
+            logger.error(f"❌ 일기 생성 실패: {e}")
+            return "일기 생성에 실패했습니다."
     
     def extract_schedule_from_conversation(self, conversation_text: str):
         """
