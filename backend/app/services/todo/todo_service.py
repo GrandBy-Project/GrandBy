@@ -146,7 +146,8 @@ class TodoService:
         db: Session,
         elderly_id: str,
         target_date: date,
-        status_filter: Optional[TodoStatus] = None
+        status_filter: Optional[TodoStatus] = None,
+        shared_only: bool = False
     ) -> List[Todo]:
         """
         날짜별 TODO 조회
@@ -156,6 +157,7 @@ class TodoService:
             elderly_id: 어르신 ID
             target_date: 조회할 날짜
             status_filter: 상태 필터 (optional)
+            shared_only: 공유된 TODO만 (optional)
         
         Returns:
             TODO 목록
@@ -166,6 +168,10 @@ class TodoService:
                 Todo.due_date == target_date
             )
         )
+        
+        # 공유 필터 (보호자용)
+        if shared_only:
+            query = query.filter(Todo.is_shared_with_caregiver == True)
         
         if status_filter:
             query = query.filter(Todo.status == status_filter)
@@ -178,7 +184,8 @@ class TodoService:
         elderly_id: str,
         start_date: date,
         end_date: date,
-        status_filter: Optional[TodoStatus] = None
+        status_filter: Optional[TodoStatus] = None,
+        shared_only: bool = False
     ) -> List[Todo]:
         """
         날짜 범위별 TODO 조회
@@ -189,6 +196,7 @@ class TodoService:
             start_date: 시작 날짜
             end_date: 종료 날짜
             status_filter: 상태 필터 (optional)
+            shared_only: 공유된 TODO만 (optional)
         
         Returns:
             TODO 목록
@@ -200,6 +208,10 @@ class TodoService:
                 Todo.due_date <= end_date
             )
         )
+        
+        # 공유 필터 (보호자용)
+        if shared_only:
+            query = query.filter(Todo.is_shared_with_caregiver == True)
         
         if status_filter:
             query = query.filter(Todo.status == status_filter)
