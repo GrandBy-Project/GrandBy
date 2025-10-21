@@ -75,6 +75,14 @@ class Todo(Base):
     # 생성 정보
     creator_type = Column(SQLEnum(CreatorType), nullable=False)
     
+    # 공유 설정
+    is_shared_with_caregiver = Column(
+        Boolean, 
+        default=True,
+        nullable=False,
+        comment="보호자와 공유 여부 (True: 공유, False: 어르신만)"
+    )
+    
     # 상태
     status = Column(SQLEnum(TodoStatus), default=TodoStatus.PENDING)
     
