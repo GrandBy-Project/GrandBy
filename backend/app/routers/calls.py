@@ -189,3 +189,70 @@ async def delete_call_settings(
         "elderly_id": elderly_id
     }
 
+
+@router.get("/{call_id}/extracted-todos")
+async def get_extracted_todos(call_id: str, db: Session = Depends(get_db)):
+    """
+    통화 내용에서 TODO 자동 추출
+    
+    Args:
+        call_id: 통화 ID (call_sid)
+    
+    Returns:
+        {
+          "todos": [
+            {
+              "title": "병원 가기",
+              "description": "정형외과 무릎 검사",
+              "category": "HOSPITAL",
+              "due_date": "2025-10-22",
+              "due_time": "15:00"
+            }
+          ]
+        }
+    """
+    from app.services.ai_call.llm_service import LLMService
+    import json
+    
+    logger.info(f"📋 TODO 추출 시작: {call_id}")
+    
+    # 1. call_transcripts에서 대화 전문 조회
+    transcripts = db.query(CallTranscript).filter(
+        CallTranscript.call_id == call_id
+    ).order_by(CallTranscript.timestamp).all()
+    
+    if not transcripts:
+        logger.warning(f"⚠️ 대화 내용 없음: {call_id}")
+        return {"todos": []}
+    
+    # 2. 대화 텍스트 조합
+    conversation_text = "\n".join([
+        f"{t.speaker}: {t.text}" for t in transcripts
+    ])
+    
+    logger.info(f"📝 대화 길이: {len(conversation_text)} characters")
+    
+    # 3. LLM으로 TODO 추출
+    llm_service = LLMService()
+    try:
+        extracted_json = llm_service.extract_schedule_from_conversation(conversation_text)
+        
+        # 4. JSON 파싱
+        result = json.loads(extracted_json)
+        
+        # 5. 결과 검증 및 정제
+        todos = []
+        if isinstance(result, dict) and "schedules" in result:
+            todos = result["schedules"]
+        elif isinstance(result, list):
+            todos = result
+        
+        logger.info(f"✅ TODO {len(todos)}개 추출 완료")
+        return {"todos": todos}
+        
+    except json.JSONDecodeError as e:
+        logger.error(f"❌ JSON 파싱 실패: {e}")
+        return {"todos": []}
+    except Exception as e:
+        logger.error(f"❌ TODO 추출 실패: {e}")
+        return {"todos": []}
