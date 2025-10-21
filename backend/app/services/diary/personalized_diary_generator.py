@@ -29,7 +29,8 @@ class PersonalizedDiaryGenerator:
         user: User,
         structured_data: Dict,
         recent_diaries: List[Diary],
-        db: Session
+        db: Session,
+        conversation_length: int = 0  # 대화 발화 수
     ) -> str:
         """
         개인화된 일기 생성
@@ -55,10 +56,10 @@ class PersonalizedDiaryGenerator:
 - 성별: {user_gender}
 """
             
-            # 2. 최근 일기 스타일 분석
+            # 2. 최근 일기 스타일 분석 (초기에는 생략 - 속도 개선)
             diary_style_context = ""
-            if recent_diaries:
-                diary_style_context = self._analyze_diary_style(recent_diaries)
+            # if recent_diaries:
+            #     diary_style_context = self._analyze_diary_style(recent_diaries)
             
             # 3. 구조화된 데이터를 읽기 쉽게 정리
             structured_summary = self._format_structured_data(structured_data)
@@ -87,43 +88,61 @@ class PersonalizedDiaryGenerator:
 {'='*60}
 일기 작성 지침:
 {'='*60}
-1. **1인칭 시점**: "나는", "내가" 등 어르신 본인의 시점으로 작성
-2. **시간 순서**: 아침 → 낮 → 저녁 순서로 자연스럽게 서술
-3. **구체적 디테일**: 
-   - 무엇을 먹었는지 (맛, 양, 누가 만들었는지)
-   - 누구를 만났는지 (어떤 대화를 나눴는지)
-   - 어디를 갔는지 (날씨, 풍경, 느낌)
-   - 몸 상태는 어땠는지
-4. **감정 표현**: 기쁨, 외로움, 그리움, 감사함 등을 자연스럽게 녹여내기
-5. **일상적 말투**: 
-   - 존댓말 사용 X (일기는 나 자신에게 쓰는 것)
-   - "~했다", "~였다", "~더라" 등 반말 일기체
-   - 어르신이 실제로 쓸 법한 표현 사용
-6. **자연스러운 흐름**: 
-   - 딱딱한 리스트 형식 X
-   - 대화하듯 편안한 문장
-   - 문단 구분 (아침, 낮/오후, 저녁/밤)
-7. **길이**: 3-5문단, 250-400자 내외
-8. **미래 계획**: 마지막에 내일이나 앞으로의 계획 간단히 언급
+⭐⭐⭐ **절대 규칙**: 
+    1. 위 정보에 **명확히 적힌 내용만** 작성
+    2. "평온한", "기분 좋다", "건강을 위해" 같은 일반적 표현 금지
+    3. 추측, 상상, 감정 해석 일절 금지
+    4. 대화가 짧으면 1-2문장만 작성 (억지로 늘리지 마세요)
+    5. 예시:
+       - 대화 "내일 산책 가야 해" → 일기 "내일 산책 가기로 했다."
+       - 대화 "콩나물 볶밥 먹었어" → 일기 "오늘 점심에 콩나물 볶밥을 먹었다."
 
-특별 주의사항:
-- AI와의 통화라는 사실을 언급하지 마세요
-- "통화했다"는 표현보다 "생각해봤다", "떠올랐다" 등으로 자연스럽게
-- 건강 상태는 너무 부정적이지 않게, 하지만 사실적으로
-- 실제 어르신이 직접 손으로 쓴 것처럼 따뜻하고 진솔하게
+1. **1인칭 시점**: "나는", "내가" 등 본인의 시점으로 작성
+2. **언급된 내용만**: 
+   - 먹은 음식이 언급되었으면 → 그 음식만
+   - 만난 사람이 언급되었으면 → 그 사람만
+   - 갔던 장소가 언급되었으면 → 그 장소만
+   - 언급 안된 것은 쓰지 않기
+3. **자연스러운 말투**: 
+   - "~했다", "~였다", "~더라" 등 반말 일기체
+   - 짧고 간단한 문장
+4. **길이 조절**: 
+   - 대화가 짧음 (1-2분) → 50-150자 (2-3문장)
+   - 대화가 보통 (3-5분) → 150-250자 (1-2문단)
+   - 대화가 김 (5분+) → 250-350자 (2-3문단)
+5. **미래 계획**: 언급된 경우에만 간단히 추가
+
+⚠️ 절대 하지 말 것:
+- AI와의 통화라는 사실 언급 금지
+- 언급 안된 감정, 날씨, 디테일 추가 금지
+- 과도한 문학적 표현 금지 (→ 간결하게)
+- 없는 대화 내용 만들어내기 금지
 
 이제 위 정보를 바탕으로 어르신의 입장에서 오늘의 일기를 작성해주세요:
 
 일기:
 """
             
-            logger.info(f"📝 개인화된 일기 생성 시작 (사용자: {user.name})")
+            # 대화 길이에 따른 max_tokens 동적 조절
+            if conversation_length == 0:
+                # 구조화된 데이터의 활동 수로 추정
+                conversation_length = len(structured_data.get('activities', [])) * 3
+            
+            # 대화 길이에 비례한 토큰 수 계산
+            if conversation_length <= 5:  # 매우 짧은 대화 (1-2분)
+                max_tokens = 150  # 30-100자 (200 → 150)
+            elif conversation_length <= 15:  # 보통 대화 (3-5분)
+                max_tokens = 300  # 100-200자 (350 → 300)
+            else:  # 긴 대화 (5분+)
+                max_tokens = 450  # 200-300자 (500 → 450)
+            
+            logger.info(f"📝 개인화된 일기 생성 시작 (사용자: {user.name}, 대화길이: {conversation_length}발화, max_tokens: {max_tokens})")
             
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": diary_prompt}],
-                temperature=0.85,  # 자연스럽고 다양한 표현을 위해
-                max_tokens=800
+                temperature=0.5,  # 0.7 → 0.5 (할루시네이션 강력 방지)
+                max_tokens=max_tokens  # 동적 조절
             )
             
             diary_content = response.choices[0].message.content.strip()

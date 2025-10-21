@@ -90,10 +90,11 @@ def generate_diary_from_call(call_id: str):
             user=elderly,
             structured_data=structured_data,
             recent_diaries=recent_diaries,
-            db=db
+            db=db,
+            conversation_length=len(transcripts)  # 대화 발화 수 전달
         )
         
-        if not diary_content or len(diary_content) < 50:
+        if not diary_content or len(diary_content) < 10:  # 50 → 10 (짧은 대화도 허용)
             logger.error(f"❌ 일기 생성 실패 또는 내용이 너무 짧음")
             return {
                 "success": False,

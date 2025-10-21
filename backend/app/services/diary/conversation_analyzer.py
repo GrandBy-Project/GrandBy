@@ -68,14 +68,14 @@ class ConversationAnalyzer:
 통화 내용:
 {conversation_text}
 
-다음 카테고리별로 정보를 **빠짐없이 상세하게** 추출해주세요:
+다음 카테고리별로 **대화에서 명확히 언급된 정보만** 추출해주세요:
 
-1. activities (활동): 어르신이 오늘 한 일, 하고 있는 일
-   - 식사 (아침/점심/저녁 - 무엇을 먹었는지)
-   - 외출 (어디를 갔는지, 누구와)
-   - 운동/산책
-   - 취미 활동
-   - 가사 활동
+1. activities (활동): 어르신이 실제로 언급한 활동만
+   - 식사 (아침/점심/저녁 - 언급된 음식만)
+   - 외출 (언급된 장소만)
+   - 운동/산책 (언급된 경우만)
+   - 취미 활동 (언급된 경우만)
+   - 가사 활동 (언급된 경우만)
 
 2. health (건강):
    - medication: 약 복용 여부와 상세 내용
@@ -187,19 +187,21 @@ JSON 형식으로만 응답하세요 (다른 텍스트 없이):
     "key_topics": ["주요 대화 주제 리스트"]
 }}
 
-주의사항:
-- 대화에서 명확히 언급된 내용만 추출
+⚠️ 중요한 주의사항:
+- **대화에서 명확히 언급된 내용만 추출** (추측 금지)
+- **언급되지 않은 정보는 빈 값으로 남겨두기** (null, "", [])
 - 추측하지 말고 실제 대화 내용 기반으로만 작성
 - 날짜 추정 시 오늘({datetime.now().strftime('%Y-%m-%d')})을 기준으로 계산
 - todos는 명확한 행동이 필요한 것만 포함
+- 짧은 대화면 간단하게, 긴 대화면 자세하게 추출
 """
             
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": analysis_prompt}],
-                temperature=0.3,  # 정확한 추출을 위해 낮게
+                temperature=0.2,  # 정확한 추출을 위해 더 낮게 (0.3 → 0.2)
                 response_format={"type": "json_object"},
-                max_tokens=2000
+                max_tokens=1500  # 2000 → 1500으로 감소
             )
             
             structured_data = json.loads(response.choices[0].message.content)
