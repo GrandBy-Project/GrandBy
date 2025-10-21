@@ -14,13 +14,16 @@ import {
   Alert,
   RefreshControl,
   ScrollView,
+  Modal,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Calendar, DateData } from 'react-native-calendars';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { getDiaries, Diary } from '../api/diary';
 import { useAuthStore } from '../store/authStore';
+import * as connectionsApi from '../api/connections';
 
 export const DiaryListScreen = () => {
   const router = useRouter();
@@ -33,13 +36,44 @@ export const DiaryListScreen = () => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string>('');
 
+  // 보호자용 상태
+  const [connectedElderly, setConnectedElderly] = useState<any[]>([]);
+  const [selectedElderlyId, setSelectedElderlyId] = useState<string | null>(null);
+  const [selectedElderlyName, setSelectedElderlyName] = useState<string>('');
+  const [showElderlySelector, setShowElderlySelector] = useState(false);
+
+  /**
+   * 연결된 어르신 목록 로드
+   */
+  const loadConnectedElderly = async () => {
+    try {
+      const elderly = await connectionsApi.getConnectedElderly();
+      setConnectedElderly(elderly);
+      
+      // 첫 번째 어르신을 기본 선택
+      if (elderly.length > 0 && !selectedElderlyId) {
+        setSelectedElderlyId(elderly[0].user_id);
+        setSelectedElderlyName(elderly[0].name);
+      }
+    } catch (error) {
+      console.error('연결된 어르신 로드 실패:', error);
+    }
+  };
+
   /**
    * 다이어리 목록 로드
    */
   const loadDiaries = async () => {
     try {
       setIsLoading(true);
-      const data = await getDiaries({ limit: 100 });
+      
+      // 보호자인 경우 선택된 어르신의 다이어리 조회
+      const params: any = { limit: 100 };
+      if (user?.role === 'caregiver' && selectedElderlyId) {
+        params.elderly_id = selectedElderlyId;
+      }
+      
+      const data = await getDiaries(params);
       setDiaries(data);
     } catch (error: any) {
       console.error('다이어리 로드 실패:', error);
@@ -63,14 +97,41 @@ export const DiaryListScreen = () => {
   };
 
   /**
+   * 보호자인 경우 연결된 어르신 목록 로드
+   */
+  useEffect(() => {
+    if (user?.role === 'caregiver') {
+      loadConnectedElderly();
+    }
+  }, [user]);
+
+  /**
+   * 선택된 어르신이 변경되면 다이어리 새로고침
+   */
+  useEffect(() => {
+    if (user?.role === 'caregiver' && selectedElderlyId) {
+      loadDiaries();
+    }
+  }, [selectedElderlyId]);
+
+  /**
    * 화면 포커스 시 데이터 새로고침
    * 일기 작성/삭제 후 돌아왔을 때 자동으로 목록 갱신
    */
   useFocusEffect(
     useCallback(() => {
       loadDiaries();
-    }, [])
+    }, [selectedElderlyId, user])
   );
+
+  /**
+   * 어르신 선택
+   */
+  const handleSelectElderly = (elderly: any) => {
+    setSelectedElderlyId(elderly.user_id);
+    setSelectedElderlyName(elderly.name);
+    setShowElderlySelector(false);
+  };
 
   /**
    * 날짜 포맷팅 (YYYY-MM-DD → YYYY년 MM월 DD일)
@@ -124,12 +185,51 @@ export const DiaryListScreen = () => {
   };
 
   /**
+   * 작성자 배지 정보 가져오기
+   */
+  const getAuthorBadgeInfo = (diary: Diary) => {
+    if (diary.is_auto_generated) {
+      return {
+        icon: 'robot' as const,
+        iconFamily: 'MaterialCommunityIcons' as const,
+        text: 'AI 자동 생성',
+        color: '#9C27B0',
+        bgColor: '#F3E5F5',
+      };
+    }
+    
+    if (diary.author_type === 'caregiver') {
+      return {
+        icon: 'medical' as const,
+        iconFamily: 'Ionicons' as const,
+        text: '보호자 작성',
+        color: '#2196F3',
+        bgColor: '#E3F2FD',
+      };
+    }
+    
+    if (diary.author_type === 'elderly') {
+      return {
+        icon: 'pencil' as const,
+        iconFamily: 'Ionicons' as const,
+        text: '어르신 작성',
+        color: '#4CAF50',
+        bgColor: '#E8F5E9',
+      };
+    }
+    
+    return null;
+  };
+
+  /**
    * 다이어리 아이템 렌더링
    */
   const renderDiaryItem = ({ item }: { item: Diary }) => {
     const contentPreview = item.content.length > 100 
       ? item.content.substring(0, 100) + '...'
       : item.content;
+
+    const authorBadge = getAuthorBadgeInfo(item);
 
     return (
       <TouchableOpacity
@@ -154,12 +254,29 @@ export const DiaryListScreen = () => {
 
         {/* 작성자 정보 */}
         <View style={styles.authorInfo}>
-          <Text style={styles.authorType}>
-            {item.is_auto_generated ? '🤖 ' : '✏️ '}
-            {getAuthorTypeText(item.author_type)}
-          </Text>
+          {authorBadge && (
+            <View style={[styles.authorBadge, { backgroundColor: authorBadge.bgColor }]}>
+              {authorBadge.iconFamily === 'MaterialCommunityIcons' ? (
+                <MaterialCommunityIcons 
+                  name={authorBadge.icon} 
+                  size={14} 
+                  color={authorBadge.color} 
+                />
+              ) : (
+                <Ionicons 
+                  name={authorBadge.icon} 
+                  size={14} 
+                  color={authorBadge.color} 
+                />
+              )}
+              <Text style={[styles.authorBadgeText, { color: authorBadge.color }]}>
+                {authorBadge.text}
+              </Text>
+            </View>
+          )}
           {item.status === 'draft' && (
             <View style={styles.draftBadge}>
+              <Ionicons name="document-text" size={12} color="#F57C00" />
               <Text style={styles.draftText}>임시저장</Text>
             </View>
           )}
@@ -358,9 +475,64 @@ export const DiaryListScreen = () => {
         >
           <Text style={styles.backButtonText}>←</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>나의 일기장</Text>
-        <View style={styles.placeholder} />
+        <Text style={styles.headerTitle}>
+          {user?.role === 'caregiver' && selectedElderlyName
+            ? `${selectedElderlyName}님의 일기장`
+            : '나의 일기장'}
+        </Text>
+        {user?.role === 'caregiver' && connectedElderly.length > 0 ? (
+          <TouchableOpacity 
+            onPress={() => setShowElderlySelector(true)}
+            style={styles.elderlySelectButton}
+          >
+            <Text style={styles.elderlySelectIcon}>👤</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.placeholder} />
+        )}
       </View>
+
+      {/* 어르신 선택 모달 */}
+      <Modal
+        visible={showElderlySelector}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowElderlySelector(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>어르신 선택</Text>
+              <TouchableOpacity 
+                onPress={() => setShowElderlySelector(false)}
+                style={styles.modalCloseButton}
+              >
+                <Text style={styles.modalCloseText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.elderlyList}>
+              {connectedElderly.map((elderly) => (
+                <TouchableOpacity
+                  key={elderly.user_id}
+                  style={[
+                    styles.elderlyItem,
+                    selectedElderlyId === elderly.user_id && styles.selectedElderlyItem
+                  ]}
+                  onPress={() => handleSelectElderly(elderly)}
+                >
+                  <Text style={styles.elderlyName}>
+                    {elderly.name}
+                  </Text>
+                  {selectedElderlyId === elderly.user_id && (
+                    <Text style={styles.checkmark}>✓</Text>
+                  )}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
       {/* 탭 메뉴 */}
       <View style={styles.tabContainer}>
@@ -409,7 +581,7 @@ export const DiaryListScreen = () => {
         style={[styles.floatingButton, { bottom: insets.bottom + 24 }]}
         onPress={() => router.push('/diary-write')}
       >
-        <Text style={styles.floatingButtonIcon}>✏️</Text>
+        <Ionicons name="create" size={28} color="#FFFFFF" />
       </TouchableOpacity>
     </View>
   );
@@ -455,6 +627,82 @@ const styles = StyleSheet.create({
   },
   placeholder: {
     width: 40,
+  },
+  elderlySelectButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F5F5F5',
+    borderRadius: 20,
+  },
+  elderlySelectIcon: {
+    fontSize: 20,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingTop: 20,
+    paddingBottom: 40,
+    maxHeight: '70%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 24,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E8E8E8',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#333333',
+  },
+  modalCloseButton: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalCloseText: {
+    fontSize: 24,
+    color: '#666666',
+  },
+  elderlyList: {
+    paddingHorizontal: 24,
+    paddingTop: 16,
+  },
+  elderlyItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    marginBottom: 12,
+    backgroundColor: '#F9F9F9',
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  selectedElderlyItem: {
+    backgroundColor: '#E8F5F2',
+    borderColor: '#34B79F',
+  },
+  elderlyName: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333333',
+  },
+  checkmark: {
+    fontSize: 24,
+    color: '#34B79F',
   },
   tabContainer: {
     flexDirection: 'row',
@@ -550,9 +798,6 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 8,
   },
-  floatingButtonIcon: {
-    fontSize: 28,
-  },
   listContent: {
     padding: 16,
     paddingBottom: 100,
@@ -604,17 +849,28 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 12,
+    gap: 8,
   },
-  authorType: {
-    fontSize: 14,
-    color: '#666666',
-    marginRight: 8,
+  authorBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+    gap: 4,
+  },
+  authorBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
   },
   draftBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: '#FFF3E0',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     borderRadius: 12,
+    gap: 4,
   },
   draftText: {
     fontSize: 12,

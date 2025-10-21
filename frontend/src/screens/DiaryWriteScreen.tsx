@@ -16,8 +16,10 @@ import {
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { createDiary } from '../api/diary';
 import { getCallLog } from '../api/call';
+import { useAuthStore } from '../store/authStore';
 
 // 기분 옵션
 const MOOD_OPTIONS = [
@@ -32,8 +34,9 @@ const MOOD_OPTIONS = [
 export const DiaryWriteScreen = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { user } = useAuthStore();
   
-  // URL 파라미터에서 통화 정보 가져오기
+  // URL 파라미터에서 정보 가져오기
   const searchParams = useLocalSearchParams();
   const fromCall = searchParams.fromCall === 'true';
   const callSid = searchParams.callSid as string | undefined;
@@ -131,7 +134,7 @@ export const DiaryWriteScreen = () => {
     try {
       setIsSubmitting(true);
 
-      await createDiary({
+      const createdDiaries = await createDiary({
         date,
         title: title.trim(),
         content: content.trim(),
@@ -139,7 +142,6 @@ export const DiaryWriteScreen = () => {
         status: 'published',
       });
 
-      // 성공 메시지 표시
       Alert.alert(
         '완료',
         '일기가 저장되었습니다! 📝',
@@ -147,13 +149,11 @@ export const DiaryWriteScreen = () => {
           {
             text: '확인',
             onPress: () => {
-              // 통화에서 온 경우 메인 페이지로, 아니면 다이어리 목록으로 이동
+              // 통화에서 온 경우 메인 페이지로, 아니면 뒤로가기
               if (fromCall) {
-                // 통화 → 다이어리 작성 → 메인 (뒤로가기 스택 초기화)
                 router.replace('/home');
               } else {
-                // 일반 다이어리 작성 → 다이어리 목록
-                router.replace('/diaries');
+                router.back();
               }
             },
           },
