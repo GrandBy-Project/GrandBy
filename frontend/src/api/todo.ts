@@ -10,14 +10,14 @@ export interface TodoItem {
   creator_id: string;
   title: string;
   description: string | null;
-  category: 'medicine' | 'exercise' | 'meal' | 'hospital' | 'other' | null;
+  category: 'MEDICINE' | 'EXERCISE' | 'MEAL' | 'HOSPITAL' | 'OTHER' | null;
   due_date: string; // YYYY-MM-DD
   due_time: string | null; // HH:MM
   creator_type: 'caregiver' | 'ai' | 'elderly';
   status: 'pending' | 'completed' | 'cancelled';
   is_confirmed: boolean;
   is_recurring: boolean;
-  recurring_type: 'daily' | 'weekly' | 'monthly' | null;
+  recurring_type: 'DAILY' | 'WEEKLY' | 'MONTHLY' | null;
   recurring_interval: number | null;
   recurring_days: number[] | null;
   recurring_day_of_month: number | null;
@@ -33,11 +33,11 @@ export interface TodoCreateRequest {
   elderly_id: string;
   title: string;
   description?: string;
-  category?: 'medicine' | 'exercise' | 'meal' | 'hospital' | 'other';
+  category?: 'MEDICINE' | 'EXERCISE' | 'MEAL' | 'HOSPITAL' | 'OTHER';
   due_date: string; // YYYY-MM-DD
   due_time?: string; // HH:MM
   is_recurring?: boolean;
-  recurring_type?: 'daily' | 'weekly' | 'monthly';
+  recurring_type?: 'DAILY' | 'WEEKLY' | 'MONTHLY';
   recurring_interval?: number;
   recurring_days?: number[]; // [0,1,2,3,4,5,6] (월~일)
   recurring_day_of_month?: number; // 1~31
@@ -48,12 +48,12 @@ export interface TodoCreateRequest {
 export interface TodoUpdateRequest {
   title?: string;
   description?: string;
-  category?: 'medicine' | 'exercise' | 'meal' | 'hospital' | 'other';
+  category?: 'MEDICINE' | 'EXERCISE' | 'MEAL' | 'HOSPITAL' | 'OTHER';
   due_date?: string;
   due_time?: string;
   status?: 'pending' | 'completed' | 'cancelled';
   is_recurring?: boolean;
-  recurring_type?: 'daily' | 'weekly' | 'monthly';
+  recurring_type?: 'DAILY' | 'WEEKLY' | 'MONTHLY';
   recurring_interval?: number;
   recurring_days?: number[];
   recurring_day_of_month?: number;
@@ -124,7 +124,7 @@ export const getTodosByRange = async (
   if (elderly_id) params.elderly_id = elderly_id;
   if (status) params.status = status;
 
-  const response = await apiClient.get<TodoItem[]>('/api/todos/range/', { params });
+  const response = await apiClient.get<TodoItem[]>('/api/todos/range', { params });
   return response.data;
 };
 

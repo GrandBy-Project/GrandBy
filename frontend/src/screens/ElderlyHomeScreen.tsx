@@ -228,7 +228,8 @@ export const ElderlyHomeScreen = () => {
   const router = useRouter();
   const { user, logout } = useAuthStore();
   const insets = useSafeAreaInsets();
-  const [isLargeView, setIsLargeView] = useState(false);
+  // 폰트 크기 단계: 0=작게, 1=크게(기본), 2=더크게
+  const [fontSizeLevel, setFontSizeLevel] = useState(1);
   const [todayTodos, setTodayTodos] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [expandedTodoId, setExpandedTodoId] = useState<string | null>(null);
@@ -462,8 +463,18 @@ export const ElderlyHomeScreen = () => {
     );
   };
 
-  const toggleLargeView = () => {
-    setIsLargeView(!isLargeView);
+  const toggleFontSize = () => {
+    setFontSizeLevel((prev) => (prev + 1) % 3); // 0 -> 1 -> 2 -> 0 순환
+  };
+  
+  // 폰트 크기 레벨에 따른 텍스트 반환
+  const getFontSizeText = () => {
+    switch (fontSizeLevel) {
+      case 0: return '작게';
+      case 1: return '크게';
+      case 2: return '더크게';
+      default: return '크게';
+    }
   };
 
 
@@ -473,10 +484,10 @@ export const ElderlyHomeScreen = () => {
   const dayNames = ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'];
   const dayString = dayNames[today.getDay()];
 
-  // 크게 보기 토글 버튼 컴포넌트
-  const LargeViewButton = () => (
-    <TouchableOpacity onPress={toggleLargeView} style={styles.largeViewButton}>
-      <Text style={styles.largeViewText}>{isLargeView ? 'A-' : 'A+'}</Text>
+  // 폰트 크기 토글 버튼 컴포넌트
+  const FontSizeButton = () => (
+    <TouchableOpacity onPress={toggleFontSize} style={styles.largeViewButton}>
+      <Text style={styles.largeViewText}>{getFontSizeText()}</Text>
     </TouchableOpacity>
   );
 
@@ -484,7 +495,7 @@ export const ElderlyHomeScreen = () => {
     <View style={styles.container}>
       {/* 공통 헤더 */}
       <Header 
-        rightButton={<LargeViewButton />}
+        rightButton={<FontSizeButton />}
       />
 
       {/* 연결 요청 알림 배너 */}
@@ -500,10 +511,10 @@ export const ElderlyHomeScreen = () => {
           <View style={styles.bannerContent}>
             <Text style={styles.bannerIcon}>🔔</Text>
             <View style={styles.bannerText}>
-              <Text style={[styles.bannerTitle, isLargeView && { fontSize: 18 }]}>
+              <Text style={[styles.bannerTitle, fontSizeLevel >= 1 && { fontSize: 18 }, fontSizeLevel >= 2 && { fontSize: 22 }]}>
                 새로운 연결 요청 ({pendingConnections.length})
               </Text>
-              <Text style={[styles.bannerSubtitle, isLargeView && { fontSize: 16 }]}>
+              <Text style={[styles.bannerSubtitle, fontSizeLevel >= 1 && { fontSize: 16 }, fontSizeLevel >= 2 && { fontSize: 18 }]}>
                 {pendingConnections[0].name}님이 보호자 연결을 요청했습니다
               </Text>
             </View>
@@ -520,9 +531,9 @@ export const ElderlyHomeScreen = () => {
               <ProfileIcon size={36} color="#34B79F" />
             </View>
             <View style={styles.profileInfo}>
-              <Text style={[styles.greeting, isLargeView && styles.greetingLarge]}>안녕하세요!</Text>
-              <Text style={[styles.userName, isLargeView && styles.userNameLarge]}>{user?.name || '사용자'}님</Text>
-              <Text style={[styles.userStatus, isLargeView && styles.userStatusLarge]}>건강한 하루 보내세요</Text>
+              <Text style={[styles.greeting, fontSizeLevel >= 1 && styles.greetingLarge, fontSizeLevel >= 2 && { fontSize: 28 }]}>안녕하세요!</Text>
+              <Text style={[styles.userName, fontSizeLevel >= 1 && styles.userNameLarge, fontSizeLevel >= 2 && { fontSize: 32 }]}>{user?.name || '사용자'}님</Text>
+              <Text style={[styles.userStatus, fontSizeLevel >= 1 && styles.userStatusLarge, fontSizeLevel >= 2 && { fontSize: 22 }]}>건강한 하루 보내세요</Text>
             </View>
             <TouchableOpacity style={styles.moreButton}>
               <Text style={styles.moreButtonText}>⋯</Text>
@@ -533,9 +544,9 @@ export const ElderlyHomeScreen = () => {
 
           <View style={styles.todaySection}>
             <View style={styles.todayBadge}>
-              <Text style={[styles.todayText, isLargeView && styles.todayTextLarge]}>오늘</Text>
+              <Text style={[styles.todayText, fontSizeLevel >= 1 && styles.todayTextLarge, fontSizeLevel >= 2 && { fontSize: 22 }]}>오늘</Text>
             </View>
-            <Text style={[styles.dateText, isLargeView && styles.dateTextLarge]}>{dateString} {dayString}</Text>
+            <Text style={[styles.dateText, fontSizeLevel >= 1 && styles.dateTextLarge, fontSizeLevel >= 2 && { fontSize: 20 }]}>{dateString} {dayString}</Text>
           </View>
 
           <View style={styles.divider} />
@@ -543,16 +554,16 @@ export const ElderlyHomeScreen = () => {
           <View style={styles.reminderSection}>
             {upcomingTodo ? (
               <View style={styles.reminderContent}>
-                <PillIcon size={isLargeView ? 20 : 16} color="#FFFFFF" />
-                <Text style={[styles.reminderText, isLargeView && styles.reminderTextLarge]}>
+                <PillIcon size={fontSizeLevel >= 1 ? 20 : 16} color="#FFFFFF" />
+                <Text style={[styles.reminderText, fontSizeLevel >= 1 && styles.reminderTextLarge, fontSizeLevel >= 2 && { fontSize: 18 }]}>
                   {upcomingTodo.due_time ? upcomingTodo.due_time.substring(0, 5) : '시간미정'}에 {upcomingTodo.title}
                   {upcomingTodo.category && ` (${getCategoryName(upcomingTodo.category)})`}
                 </Text>
               </View>
             ) : (
               <View style={styles.reminderContent}>
-                <PillIcon size={isLargeView ? 20 : 16} color="#FFFFFF" />
-                <Text style={[styles.reminderText, isLargeView && styles.reminderTextLarge]}>
+                <PillIcon size={fontSizeLevel >= 1 ? 20 : 16} color="#FFFFFF" />
+                <Text style={[styles.reminderText, fontSizeLevel >= 1 && styles.reminderTextLarge, fontSizeLevel >= 2 && { fontSize: 18 }]}>
                   오늘 예정된 일정이 없습니다
                 </Text>
               </View>
@@ -562,19 +573,19 @@ export const ElderlyHomeScreen = () => {
           <View style={styles.divider} />
 
           <View style={styles.weatherSection}>
-            <SunIcon size={isLargeView ? 32 : 24} color="#FFB800" />
+            <SunIcon size={fontSizeLevel >= 1 ? 32 : 24} color="#FFB800" />
             {isLoadingWeather ? (
-              <Text style={[styles.weatherText, isLargeView && styles.weatherTextLarge]}>
+              <Text style={[styles.weatherText, fontSizeLevel >= 1 && styles.weatherTextLarge, fontSizeLevel >= 2 && { fontSize: 18 }]}>
                 날씨 정보를 불러오는 중...
               </Text>
             ) : weather.temperature !== undefined ? (
               <View style={{ flex: 1, marginLeft: 12 }}>
-                <Text style={[styles.weatherText, isLargeView && styles.weatherTextLarge]}>
+                <Text style={[styles.weatherText, fontSizeLevel >= 1 && styles.weatherTextLarge]}>
                   {weather.location && `${weather.location} `}현재 {weather.temperature}°C, {weather.description}
                 </Text>
               </View>
             ) : (
-              <Text style={[styles.weatherText, isLargeView && styles.weatherTextLarge]}>
+              <Text style={[styles.weatherText, fontSizeLevel >= 1 && styles.weatherTextLarge]}>
                 날씨 정보를 불러올 수 없습니다
               </Text>
             )}
@@ -583,38 +594,38 @@ export const ElderlyHomeScreen = () => {
 
         {/* 빠른 액션 버튼들 */}
         <View style={styles.quickActions}>
-          <TouchableOpacity style={[styles.actionButton, isLargeView && styles.actionButtonLarge]} onPress={() => router.push('/todos')}>
-            <View style={[styles.actionIcon, isLargeView && styles.actionIconLarge]}>
-              <CheckIcon size={isLargeView ? 32 : 24} color="#34B79F" />
+          <TouchableOpacity style={[styles.actionButton, fontSizeLevel >= 1 && styles.actionButtonLarge]} onPress={() => router.push('/todos')}>
+            <View style={[styles.actionIcon, fontSizeLevel >= 1 && styles.actionIconLarge]}>
+              <CheckIcon size={fontSizeLevel >= 1 ? 32 : 24} color="#34B79F" />
             </View>
-            <Text style={[styles.actionLabel, isLargeView && styles.actionLabelLarge]}>할 일</Text>
+            <Text style={[styles.actionLabel, fontSizeLevel >= 1 && styles.actionLabelLarge]}>할 일</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.actionButton, isLargeView && styles.actionButtonLarge]} onPress={() => router.push('/ai-call')}>
-            <View style={[styles.actionIcon, isLargeView && styles.actionIconLarge]}>
-              <PhoneIcon size={isLargeView ? 32 : 24} color="#34B79F" />
+          <TouchableOpacity style={[styles.actionButton, fontSizeLevel >= 1 && styles.actionButtonLarge]} onPress={() => router.push('/ai-call')}>
+            <View style={[styles.actionIcon, fontSizeLevel >= 1 && styles.actionIconLarge]}>
+              <PhoneIcon size={fontSizeLevel >= 1 ? 32 : 24} color="#34B79F" />
             </View>
-            <Text style={[styles.actionLabel, isLargeView && styles.actionLabelLarge]}>AI 통화</Text>
+            <Text style={[styles.actionLabel, fontSizeLevel >= 1 && styles.actionLabelLarge]}>AI 통화</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.actionButton, isLargeView && styles.actionButtonLarge]} onPress={() => router.push('/diaries')}>
-            <View style={[styles.actionIcon, isLargeView && styles.actionIconLarge]}>
-              <DiaryIcon size={isLargeView ? 32 : 24} color="#34B79F" />
+          <TouchableOpacity style={[styles.actionButton, fontSizeLevel >= 1 && styles.actionButtonLarge]} onPress={() => router.push('/diaries')}>
+            <View style={[styles.actionIcon, fontSizeLevel >= 1 && styles.actionIconLarge]}>
+              <DiaryIcon size={fontSizeLevel >= 1 ? 32 : 24} color="#34B79F" />
             </View>
-            <Text style={[styles.actionLabel, isLargeView && styles.actionLabelLarge]}>일기</Text>
+            <Text style={[styles.actionLabel, fontSizeLevel >= 1 && styles.actionLabelLarge]}>일기</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.actionButton, isLargeView && styles.actionButtonLarge]} onPress={() => Alert.alert('준비중', '알림 기능은 개발 중입니다.')}>
-            <View style={[styles.actionIcon, isLargeView && styles.actionIconLarge]}>
-              <NotificationIcon size={isLargeView ? 32 : 24} color="#34B79F" />
+          <TouchableOpacity style={[styles.actionButton, fontSizeLevel >= 1 && styles.actionButtonLarge]} onPress={() => Alert.alert('준비중', '알림 기능은 개발 중입니다.')}>
+            <View style={[styles.actionIcon, fontSizeLevel >= 1 && styles.actionIconLarge]}>
+              <NotificationIcon size={fontSizeLevel >= 1 ? 32 : 24} color="#34B79F" />
             </View>
-            <Text style={[styles.actionLabel, isLargeView && styles.actionLabelLarge]}>알림</Text>
+            <Text style={[styles.actionLabel, fontSizeLevel >= 1 && styles.actionLabelLarge]}>알림</Text>
           </TouchableOpacity>
         </View>
 
         {/* 오늘의 일정 카드 - 미완료 */}
         <View style={styles.scheduleCard}>
           <View style={styles.cardHeader}>
-            <Text style={[styles.cardTitle, isLargeView && styles.cardTitleLarge]}>오늘의 일정</Text>
+            <Text style={[styles.cardTitle, fontSizeLevel >= 1 && styles.cardTitleLarge]}>오늘의 일정</Text>
             <TouchableOpacity onPress={() => router.push('/todos')}>
-              <Text style={[styles.viewAllText, isLargeView && styles.viewAllTextLarge]}>전체보기</Text>
+              <Text style={[styles.viewAllText, fontSizeLevel >= 1 && styles.viewAllTextLarge]}>전체보기</Text>
             </TouchableOpacity>
           </View>
           
@@ -643,23 +654,23 @@ export const ElderlyHomeScreen = () => {
                       activeOpacity={0.7}
                     >
                       <View style={styles.scheduleTime}>
-                        <Text style={[styles.scheduleTimeText, isLargeView && styles.scheduleTimeTextLarge]}>
+                        <Text style={[styles.scheduleTimeText, fontSizeLevel >= 1 && styles.scheduleTimeTextLarge]}>
                           {todo.due_time ? todo.due_time.substring(0, 5) : '시간미정'}
                         </Text>
                       </View>
                       <View style={styles.scheduleContent}>
-                        <Text style={[styles.scheduleTitle, isLargeView && styles.scheduleTitleLarge]}>
+                        <Text style={[styles.scheduleTitle, fontSizeLevel >= 1 && styles.scheduleTitleLarge]}>
                           {todo.title}
                         </Text>
-                        <Text style={[styles.scheduleLocation, isLargeView && styles.scheduleLocationLarge]}>
+                        <Text style={[styles.scheduleLocation, fontSizeLevel >= 1 && styles.scheduleLocationLarge]}>
                           {todo.description || ''}
                         </Text>
-                        <Text style={[styles.scheduleDate, isLargeView && styles.scheduleDateLarge]}>
+                        <Text style={[styles.scheduleDate, fontSizeLevel >= 1 && styles.scheduleDateLarge]}>
                           {todo.category ? `[${getCategoryName(todo.category)}]` : ''}
                         </Text>
                       </View>
                       <View style={styles.scheduleStatus}>
-                        <Text style={[styles.scheduleStatusText, isLargeView && styles.scheduleStatusTextLarge]}>
+                        <Text style={[styles.scheduleStatusText, fontSizeLevel >= 1 && styles.scheduleStatusTextLarge]}>
                           예정
                         </Text>
                       </View>
@@ -673,7 +684,7 @@ export const ElderlyHomeScreen = () => {
                           onPress={() => handleCompleteTodo(todo.todo_id)}
                           activeOpacity={0.7}
                         >
-                          <Text style={[styles.scheduleActionButtonText, isLargeView && { fontSize: 18 }]}>
+                          <Text style={[styles.scheduleActionButtonText, fontSizeLevel >= 1 && { fontSize: 18 }]}>
                             완료하기
                           </Text>
                         </TouchableOpacity>
@@ -695,9 +706,9 @@ export const ElderlyHomeScreen = () => {
           return completedTodos.length > 0 && (
             <View style={styles.scheduleCard}>
               <View style={styles.cardHeader}>
-                <Text style={[styles.cardTitle, isLargeView && styles.cardTitleLarge]}>완료한 일정</Text>
+                <Text style={[styles.cardTitle, fontSizeLevel >= 1 && styles.cardTitleLarge]}>완료한 일정</Text>
                 <View style={styles.completedBadge}>
-                  <Text style={[styles.completedBadgeText, isLargeView && { fontSize: 16 }]}>
+                  <Text style={[styles.completedBadgeText, fontSizeLevel >= 1 && { fontSize: 16 }]}>
                     {completedTodos.length}
                   </Text>
                 </View>
@@ -714,23 +725,23 @@ export const ElderlyHomeScreen = () => {
                       activeOpacity={0.7}
                     >
                       <View style={styles.scheduleTime}>
-                        <Text style={[styles.scheduleTimeText, styles.completedTimeText, isLargeView && styles.scheduleTimeTextLarge]}>
+                        <Text style={[styles.scheduleTimeText, styles.completedTimeText, fontSizeLevel >= 1 && styles.scheduleTimeTextLarge]}>
                           {todo.due_time ? todo.due_time.substring(0, 5) : '시간미정'}
                         </Text>
                       </View>
                       <View style={styles.scheduleContent}>
-                        <Text style={[styles.scheduleTitle, styles.completedTitleText, isLargeView && styles.scheduleTitleLarge]}>
+                        <Text style={[styles.scheduleTitle, styles.completedTitleText, fontSizeLevel >= 1 && styles.scheduleTitleLarge]}>
                           {todo.title}
                         </Text>
-                        <Text style={[styles.scheduleLocation, styles.completedDescText, isLargeView && styles.scheduleLocationLarge]}>
+                        <Text style={[styles.scheduleLocation, styles.completedDescText, fontSizeLevel >= 1 && styles.scheduleLocationLarge]}>
                           {todo.description || ''}
                         </Text>
-                        <Text style={[styles.scheduleDate, styles.completedDescText, isLargeView && styles.scheduleDateLarge]}>
+                        <Text style={[styles.scheduleDate, styles.completedDescText, fontSizeLevel >= 1 && styles.scheduleDateLarge]}>
                           {todo.category ? `[${getCategoryName(todo.category)}]` : ''}
                         </Text>
                       </View>
                       <View style={[styles.scheduleStatus, styles.completedStatus]}>
-                        <Text style={[styles.scheduleStatusText, isLargeView && styles.scheduleStatusTextLarge]}>
+                        <Text style={[styles.scheduleStatusText, fontSizeLevel >= 1 && styles.scheduleStatusTextLarge]}>
                           완료
                         </Text>
                       </View>
@@ -744,7 +755,7 @@ export const ElderlyHomeScreen = () => {
                           onPress={() => handleCancelTodo(todo.todo_id)}
                           activeOpacity={0.7}
                         >
-                          <Text style={[styles.scheduleActionButtonText, isLargeView && { fontSize: 18 }]}>
+                          <Text style={[styles.scheduleActionButtonText, fontSizeLevel >= 1 && { fontSize: 18 }]}>
                             완료 취소
                           </Text>
                         </TouchableOpacity>
@@ -760,27 +771,27 @@ export const ElderlyHomeScreen = () => {
         {/* 건강 상태 요약 */}
         <View style={styles.healthSummaryCard}>
           <View style={styles.cardHeader}>
-            <Text style={[styles.cardTitle, isLargeView && styles.cardTitleLarge]}>건강 상태</Text>
+            <Text style={[styles.cardTitle, fontSizeLevel >= 1 && styles.cardTitleLarge]}>건강 상태</Text>
             <TouchableOpacity>
-              <Text style={[styles.viewAllText, isLargeView && styles.viewAllTextLarge]}>상세보기</Text>
+              <Text style={[styles.viewAllText, fontSizeLevel >= 1 && styles.viewAllTextLarge]}>상세보기</Text>
             </TouchableOpacity>
           </View>
           
           <View style={styles.healthMetrics}>
             <View style={styles.healthMetric}>
-              <Text style={[styles.metricValue, isLargeView && styles.metricValueLarge]}>120/80</Text>
-              <Text style={[styles.metricLabel, isLargeView && styles.metricLabelLarge]}>혈압</Text>
-              <Text style={[styles.metricStatus, isLargeView && styles.metricStatusLarge]}>정상</Text>
+              <Text style={[styles.metricValue, fontSizeLevel >= 1 && styles.metricValueLarge]}>120/80</Text>
+              <Text style={[styles.metricLabel, fontSizeLevel >= 1 && styles.metricLabelLarge]}>혈압</Text>
+              <Text style={[styles.metricStatus, fontSizeLevel >= 1 && styles.metricStatusLarge]}>정상</Text>
             </View>
             <View style={styles.healthMetric}>
-              <Text style={[styles.metricValue, isLargeView && styles.metricValueLarge]}>98</Text>
-              <Text style={[styles.metricLabel, isLargeView && styles.metricLabelLarge]}>혈당</Text>
-              <Text style={[styles.metricStatus, isLargeView && styles.metricStatusLarge]}>정상</Text>
+              <Text style={[styles.metricValue, fontSizeLevel >= 1 && styles.metricValueLarge]}>98</Text>
+              <Text style={[styles.metricLabel, fontSizeLevel >= 1 && styles.metricLabelLarge]}>혈당</Text>
+              <Text style={[styles.metricStatus, fontSizeLevel >= 1 && styles.metricStatusLarge]}>정상</Text>
             </View>
             <View style={styles.healthMetric}>
-              <Text style={[styles.metricValue, isLargeView && styles.metricValueLarge]}>7,500</Text>
-              <Text style={[styles.metricLabel, isLargeView && styles.metricLabelLarge]}>걸음수</Text>
-              <Text style={[styles.metricStatus, isLargeView && styles.metricStatusLarge]}>양호</Text>
+              <Text style={[styles.metricValue, fontSizeLevel >= 1 && styles.metricValueLarge]}>7,500</Text>
+              <Text style={[styles.metricLabel, fontSizeLevel >= 1 && styles.metricLabelLarge]}>걸음수</Text>
+              <Text style={[styles.metricStatus, fontSizeLevel >= 1 && styles.metricStatusLarge]}>양호</Text>
             </View>
           </View>
         </View>
@@ -808,29 +819,29 @@ export const ElderlyHomeScreen = () => {
             <View style={styles.connectionModalContent}>
             {selectedConnection && (
               <>
-                <Text style={[styles.modalTitle, isLargeView && { fontSize: 24 }]}>연결 요청</Text>
+                <Text style={[styles.modalTitle, fontSizeLevel >= 1 && { fontSize: 24 }]}>연결 요청</Text>
                 
                 <View style={styles.modalProfileSection}>
                   <Text style={styles.modalProfileIcon}>👨‍💼</Text>
-                  <Text style={[styles.modalProfileName, isLargeView && { fontSize: 24 }]}>
+                  <Text style={[styles.modalProfileName, fontSizeLevel >= 1 && { fontSize: 24 }]}>
                     {selectedConnection.name}님이
                   </Text>
-                  <Text style={[styles.modalProfileSubtitle, isLargeView && { fontSize: 18 }]}>
+                  <Text style={[styles.modalProfileSubtitle, fontSizeLevel >= 1 && { fontSize: 18 }]}>
                     보호자 연결을 요청했습니다
                   </Text>
                 </View>
 
                 <View style={styles.modalInfoSection}>
                   <View style={styles.modalInfoRow}>
-                    <Text style={[styles.modalInfoLabel, isLargeView && { fontSize: 16 }]}>📧</Text>
-                    <Text style={[styles.modalInfoText, isLargeView && { fontSize: 16 }]}>
+                    <Text style={[styles.modalInfoLabel, fontSizeLevel >= 1 && { fontSize: 16 }]}>📧</Text>
+                    <Text style={[styles.modalInfoText, fontSizeLevel >= 1 && { fontSize: 16 }]}>
                       {selectedConnection.email}
                     </Text>
                   </View>
                   {selectedConnection.phone_number && (
                     <View style={styles.modalInfoRow}>
-                      <Text style={[styles.modalInfoLabel, isLargeView && { fontSize: 16 }]}>📞</Text>
-                      <Text style={[styles.modalInfoText, isLargeView && { fontSize: 16 }]}>
+                      <Text style={[styles.modalInfoLabel, fontSizeLevel >= 1 && { fontSize: 16 }]}>📞</Text>
+                      <Text style={[styles.modalInfoText, fontSizeLevel >= 1 && { fontSize: 16 }]}>
                         {selectedConnection.phone_number}
                       </Text>
                     </View>
@@ -838,16 +849,16 @@ export const ElderlyHomeScreen = () => {
                 </View>
 
                 <View style={styles.modalPermissionSection}>
-                  <Text style={[styles.modalPermissionTitle, isLargeView && { fontSize: 16 }]}>
+                  <Text style={[styles.modalPermissionTitle, fontSizeLevel >= 1 && { fontSize: 16 }]}>
                     ℹ️ 연결하시면 다음을 공유합니다:
                   </Text>
-                  <Text style={[styles.modalPermissionItem, isLargeView && { fontSize: 16 }]}>
+                  <Text style={[styles.modalPermissionItem, fontSizeLevel >= 1 && { fontSize: 16 }]}>
                     • 할일 관리
                   </Text>
-                  <Text style={[styles.modalPermissionItem, isLargeView && { fontSize: 16 }]}>
+                  <Text style={[styles.modalPermissionItem, fontSizeLevel >= 1 && { fontSize: 16 }]}>
                     • 일기 열람
                   </Text>
-                  <Text style={[styles.modalPermissionItem, isLargeView && { fontSize: 16 }]}>
+                  <Text style={[styles.modalPermissionItem, fontSizeLevel >= 1 && { fontSize: 16 }]}>
                     • 건강 정보
                   </Text>
                 </View>
@@ -858,7 +869,7 @@ export const ElderlyHomeScreen = () => {
                     onPress={handleRejectConnection}
                     activeOpacity={0.7}
                   >
-                    <Text style={[styles.rejectButtonText, isLargeView && { fontSize: 18 }]}>
+                    <Text style={[styles.rejectButtonText, fontSizeLevel >= 1 && { fontSize: 18 }]}>
                       거절
                     </Text>
                   </TouchableOpacity>
@@ -868,7 +879,7 @@ export const ElderlyHomeScreen = () => {
                     onPress={handleAcceptConnection}
                     activeOpacity={0.7}
                   >
-                    <Text style={[styles.acceptButtonText, isLargeView && { fontSize: 18 }]}>
+                    <Text style={[styles.acceptButtonText, fontSizeLevel >= 1 && { fontSize: 18 }]}>
                       수락
                     </Text>
                   </TouchableOpacity>
@@ -892,9 +903,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#F8F9FA',
   },
   largeViewButton: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
     backgroundColor: '#34B79F',
     alignItems: 'center',
     justifyContent: 'center',
@@ -905,11 +916,16 @@ const styles = StyleSheet.create({
     elevation: 5,
     borderWidth: 2,
     borderColor: '#FFFFFF',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
   },
   largeViewText: {
-    fontSize: 18,
-    fontWeight: 'bold',
+    fontSize: 14,
+    fontWeight: '700',
     color: '#FFFFFF',
+    textAlign: 'center',
+    lineHeight: 16,
+    letterSpacing: -0.3,
   },
   content: {
     flex: 1,
