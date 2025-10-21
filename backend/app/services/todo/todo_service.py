@@ -120,6 +120,8 @@ class TodoService:
             creator_type=creator_type_value,  # 동적으로 설정된 creator_type 사용
             status=TodoStatus.PENDING,
             is_confirmed=True,
+            # 공유 설정
+            is_shared_with_caregiver=todo_data.is_shared_with_caregiver,
             # 반복 일정 설정
             is_recurring=todo_data.is_recurring,
             recurring_type=todo_data.recurring_type,
