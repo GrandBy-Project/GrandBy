@@ -18,19 +18,19 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { createDiary } from '../api/diary';
+import { createDiary, getDiary, updateDiary, Diary } from '../api/diary';
 import { getCallLog, getExtractedTodos, ExtractedTodo } from '../api/call';
 import { createTodo } from '../api/todo';
 import { useAuthStore } from '../store/authStore';
 
 // 기분 옵션
 const MOOD_OPTIONS = [
-  { value: 'happy', label: '행복해요', emoji: '😊' },
-  { value: 'excited', label: '신나요', emoji: '🤗' },
-  { value: 'calm', label: '평온해요', emoji: '😌' },
-  { value: 'sad', label: '슬퍼요', emoji: '😢' },
-  { value: 'angry', label: '화나요', emoji: '😠' },
-  { value: 'tired', label: '피곤해요', emoji: '😴' },
+  { value: 'happy', label: '행복해요', icon: 'happy', color: '#FFD700' },
+  { value: 'excited', label: '신나요', icon: 'sparkles', color: '#FF6B6B' },
+  { value: 'calm', label: '평온해요', icon: 'leaf', color: '#4ECDC4' },
+  { value: 'sad', label: '슬퍼요', icon: 'sad', color: '#95A5A6' },
+  { value: 'angry', label: '화나요', icon: 'thunderstorm', color: '#E74C3C' },
+  { value: 'tired', label: '피곤해요', icon: 'moon', color: '#9B59B6' },
 ];
 
 export const DiaryWriteScreen = () => {
@@ -42,6 +42,8 @@ export const DiaryWriteScreen = () => {
   const searchParams = useLocalSearchParams();
   const fromCall = searchParams.fromCall === 'true';
   const callSid = searchParams.callSid as string | undefined;
+  const diaryId = searchParams.diaryId as string | undefined; // 수정 모드용
+  const isEditMode = !!diaryId; // 수정 모드 여부
 
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]); // YYYY-MM-DD
   const [title, setTitle] = useState('');
@@ -49,6 +51,7 @@ export const DiaryWriteScreen = () => {
   const [selectedMood, setSelectedMood] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingSummary, setIsLoadingSummary] = useState(false);
+  const [existingDiary, setExistingDiary] = useState<Diary | null>(null);
   
   // TODO 관련 state
   const [suggestedTodos, setSuggestedTodos] = useState<ExtractedTodo[]>([]);
@@ -73,12 +76,45 @@ export const DiaryWriteScreen = () => {
   };
 
   /**
+   * 수정 모드: 기존 다이어리 불러오기
+   */
+  useEffect(() => {
+    const loadDiary = async () => {
+      if (isEditMode && diaryId) {
+        try {
+          setIsLoadingSummary(true);
+          const diary = await getDiary(diaryId);
+          setExistingDiary(diary);
+          
+          // 폼에 기존 데이터 채우기
+          setDate(diary.date);
+          setTitle(diary.title || '');
+          setContent(diary.content);
+          setSelectedMood(diary.mood || '');
+          
+        } catch (error) {
+          console.error('다이어리 로드 실패:', error);
+          Alert.alert(
+            '오류',
+            '일기를 불러올 수 없습니다.',
+            [{ text: '확인', onPress: () => router.back() }]
+          );
+        } finally {
+          setIsLoadingSummary(false);
+        }
+      }
+    };
+
+    loadDiary();
+  }, [isEditMode, diaryId]);
+
+  /**
    * 통화 요약 및 TODO 불러오기 (컴포넌트 마운트 시)
    */
   useEffect(() => {
     const loadCallData = async () => {
       // 통화에서 온 경우이고 callSid가 있을 때만 실행
-      if (fromCall && callSid) {
+      if (fromCall && callSid && !isEditMode) {
         try {
           setIsLoadingSummary(true);
           console.log('📞 통화 데이터 불러오기 시작:', callSid);
@@ -110,7 +146,7 @@ export const DiaryWriteScreen = () => {
           } else if (callLog.conversation_summary) {
             // TODO는 없지만 일기는 있는 경우
             Alert.alert(
-              '✅ 자동 완성',
+              '자동 완성',
               'AI와의 대화 내용이 자동으로 입력되었습니다.\n수정 후 저장해주세요!',
               [{ text: '확인' }]
             );
@@ -129,7 +165,7 @@ export const DiaryWriteScreen = () => {
     };
 
     loadCallData();
-  }, [fromCall, callSid]);
+  }, [fromCall, callSid, isEditMode]);
 
   /**
    * 카테고리 아이콘 반환
@@ -234,31 +270,55 @@ export const DiaryWriteScreen = () => {
     try {
       setIsSubmitting(true);
 
-      const createdDiaries = await createDiary({
-        date,
-        title: title.trim(),
-        content: content.trim(),
-        mood: selectedMood,
-        status: 'published',
-      });
+      if (isEditMode && diaryId) {
+        // 수정 모드
+        await updateDiary(diaryId, {
+          title: title.trim() || undefined,
+          content: content.trim(),
+          mood: selectedMood || undefined,
+          status: 'published',
+        });
 
-      Alert.alert(
-        '완료',
-        '일기가 저장되었습니다! 📝',
-        [
-          {
-            text: '확인',
-            onPress: () => {
-              // 통화에서 온 경우 메인 페이지로, 아니면 뒤로가기
-              if (fromCall) {
-                router.replace('/home');
-              } else {
+        Alert.alert(
+          '완료',
+          '일기가 수정되었습니다!',
+          [
+            {
+              text: '확인',
+              onPress: () => {
                 router.back();
-              }
+              },
             },
-          },
-        ]
-      );
+          ]
+        );
+      } else {
+        // 작성 모드
+        await createDiary({
+          date,
+          title: title.trim() || undefined,
+          content: content.trim(),
+          mood: selectedMood || undefined,
+          status: 'published',
+        });
+
+        Alert.alert(
+          '완료',
+          '일기가 저장되었습니다!',
+          [
+            {
+              text: '확인',
+              onPress: () => {
+                // 통화에서 온 경우 메인 페이지로, 아니면 뒤로가기
+                if (fromCall) {
+                  router.replace('/home');
+                } else {
+                  router.back();
+                }
+              },
+            },
+          ]
+        );
+      }
 
     } catch (error: any) {
       console.error('일기 저장 실패:', error);
@@ -289,7 +349,7 @@ export const DiaryWriteScreen = () => {
         >
           <Text style={styles.backButtonText}>←</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>일기 작성</Text>
+        <Text style={styles.headerTitle}>{isEditMode ? '일기 수정' : '일기 작성'}</Text>
         <View style={styles.placeholder} />
       </View>
 
@@ -339,7 +399,12 @@ export const DiaryWriteScreen = () => {
                 onPress={() => setSelectedMood(mood.value)}
                 disabled={isSubmitting}
               >
-                <Text style={styles.moodEmoji}>{mood.emoji}</Text>
+                <Ionicons 
+                  name={mood.icon as any} 
+                  size={28} 
+                  color={selectedMood === mood.value ? mood.color : '#999999'} 
+                  style={{ marginBottom: 4 }}
+                />
                 <Text
                   style={[
                     styles.moodLabel,
@@ -370,8 +435,8 @@ export const DiaryWriteScreen = () => {
           <Text style={styles.charCount}>{content.length}자</Text>
         </View>
 
-        {/* TODO 제안 섹션 */}
-        {suggestedTodos.length > 0 && (
+        {/* TODO 제안 섹션 (작성 모드일 때만) */}
+        {!isEditMode && suggestedTodos.length > 0 && (
           <View style={styles.todoSection}>
             <Text style={styles.todoSectionTitle}>
               💡 대화에서 발견된 일정 ({suggestedTodos.length}개)
@@ -504,7 +569,17 @@ export const DiaryWriteScreen = () => {
           {isSubmitting ? (
             <ActivityIndicator size="small" color="#FFFFFF" />
           ) : (
-            <Text style={styles.submitButtonText}>✏️ 작성하기</Text>
+            <View style={styles.submitButtonContent}>
+              <Ionicons 
+                name={isEditMode ? "checkmark-circle" : "pencil"} 
+                size={20} 
+                color="#FFFFFF" 
+                style={{ marginRight: 8 }} 
+              />
+              <Text style={styles.submitButtonText}>
+                {isEditMode ? '수정 완료' : '작성하기'}
+              </Text>
+            </View>
           )}
         </TouchableOpacity>
       </ScrollView>
@@ -595,10 +670,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#E8F5F2',
     borderColor: '#34B79F',
   },
-  moodEmoji: {
-    fontSize: 26,
-    marginBottom: 4,
-  },
   moodLabel: {
     fontSize: 12,
     fontWeight: '500',
@@ -642,6 +713,11 @@ const styles = StyleSheet.create({
   },
   submitButtonDisabled: {
     backgroundColor: '#CCCCCC',
+  },
+  submitButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   submitButtonText: {
     fontSize: 18,

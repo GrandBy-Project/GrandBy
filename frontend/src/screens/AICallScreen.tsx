@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { makeRealtimeAICall, getCallSchedule, updateCallSchedule, CallSchedule, getCallStatus } from '../api/call';
 import { useAuthStore } from '../store/authStore';
 
@@ -298,7 +299,7 @@ export const AICallScreen = () => {
       case 'calling':
         return '전화 연결 중...';
       case 'in_progress':
-        return '전화가 걸려갑니다!\n전화를 받아주세요 📞';
+        return '전화가 걸려갑니다!\n전화를 받아주세요';
       case 'completed':
         return '통화가 완료되었습니다';
       case 'error':
@@ -309,20 +310,20 @@ export const AICallScreen = () => {
   };
   
   /**
-   * 상태에 따른 아이콘 표시
+   * 상태에 따른 아이콘 정보 반환
    */
-  const getStatusIcon = () => {
+  const getStatusIconInfo = (): { name: string; family: 'Ionicons' | 'MaterialCommunityIcons'; color: string } => {
     switch (callStatus) {
-    case 'calling':
-      return '📞';
-    case 'in_progress':
-      return '🎙️';
-    case 'completed':
-      return '✅';
-    case 'error':
-      return '❌';
-    default:
-      return '🤖';
+      case 'calling':
+        return { name: 'call', family: 'Ionicons', color: '#34B79F' };
+      case 'in_progress':
+        return { name: 'mic', family: 'Ionicons', color: '#FF6B6B' };
+      case 'completed':
+        return { name: 'checkmark-circle', family: 'Ionicons', color: '#4CAF50' };
+      case 'error':
+        return { name: 'close-circle', family: 'Ionicons', color: '#F44336' };
+      default:
+        return { name: 'robot', family: 'MaterialCommunityIcons', color: '#34B79F' };
     }
   };
   
@@ -350,7 +351,19 @@ export const AICallScreen = () => {
         <View style={styles.content}>
         {/* 상태 아이콘 */}
         <View style={styles.iconContainer}>
-          <Text style={styles.statusIcon}>{getStatusIcon()}</Text>
+          {getStatusIconInfo().family === 'MaterialCommunityIcons' ? (
+            <MaterialCommunityIcons 
+              name={getStatusIconInfo().name as any} 
+              size={64} 
+              color={getStatusIconInfo().color} 
+            />
+          ) : (
+            <Ionicons 
+              name={getStatusIconInfo().name as any} 
+              size={64} 
+              color={getStatusIconInfo().color} 
+            />
+          )}
         </View>
         
         {/* 상태 메시지 */}
@@ -417,7 +430,7 @@ export const AICallScreen = () => {
               <ActivityIndicator color="#FFFFFF" size="large" />
             ) : (
               <>
-                <Text style={styles.callButtonIcon}>📞</Text>
+                <Ionicons name="call" size={28} color="#FFFFFF" style={{ marginRight: 12 }} />
                 <Text style={styles.callButtonText}>AI 비서 호출하기</Text>
               </>
             )}
@@ -452,7 +465,10 @@ export const AICallScreen = () => {
               });
             }}
           >
-            <Text style={styles.doneButtonText}>📝 다이어리 작성하기</Text>
+            <View style={styles.doneButtonContent}>
+              <Ionicons name="create" size={24} color="#FFFFFF" style={{ marginRight: 8 }} />
+              <Text style={styles.doneButtonText}>다이어리 작성하기</Text>
+            </View>
           </TouchableOpacity>
         )}
       </View>
@@ -461,7 +477,10 @@ export const AICallScreen = () => {
       {callStatus === 'idle' && (
         <View style={styles.scheduleSection}>
           <View style={styles.scheduleSectionHeader}>
-            <Text style={styles.scheduleSectionTitle}>⏰ 자동 통화 예약</Text>
+            <View style={styles.scheduleTitleContainer}>
+              <Ionicons name="alarm" size={20} color="#333333" style={{ marginRight: 8 }} />
+              <Text style={styles.scheduleSectionTitle}>자동 통화 예약</Text>
+            </View>
             <View style={styles.switchContainer}>
               {scheduleLoading && (
                 <ActivityIndicator size="small" color="#34B79F" style={{ marginRight: 8 }} />
@@ -552,9 +571,12 @@ export const AICallScreen = () => {
                   {/* 선택된 시간 미리보기 */}
                   <View style={styles.timePreview}>
                     <Text style={styles.timePreviewLabel}>선택된 시간</Text>
-                    <Text style={styles.timePreviewText}>
-                      🕐 {selectedHour}:{selectedMinute}
-                    </Text>
+                    <View style={styles.timePreviewContent}>
+                      <Ionicons name="time" size={28} color="#34B79F" style={{ marginRight: 8 }} />
+                      <Text style={styles.timePreviewText}>
+                        {selectedHour}:{selectedMinute}
+                      </Text>
+                    </View>
                   </View>
                   
                   {/* 버튼 */}
@@ -578,7 +600,10 @@ export const AICallScreen = () => {
                   style={styles.timePicker}
                   onPress={startEditingTime}
                 >
-                  <Text style={styles.timePickerText}>🕐 {scheduledTime}</Text>
+                  <View style={styles.timePickerContent}>
+                    <Ionicons name="time" size={24} color="#34B79F" style={{ marginRight: 8 }} />
+                    <Text style={styles.timePickerText}>{scheduledTime}</Text>
+                  </View>
                   <Text style={styles.timePickerHint}>매일 이 시간에 전화가 걸립니다</Text>
                 </TouchableOpacity>
               )}
@@ -593,11 +618,18 @@ export const AICallScreen = () => {
              styles.footer,
              { paddingBottom: Math.max(insets.bottom + 16, 24) }  // ← 안드로이드 네비게이션 바 고려
            ]}>
-             <Text style={styles.footerText}>
-               🤖 실시간 AI 대화 기능{'\n'}
-               💡 AI 비서는 한국어로 대화합니다{'\n'}
-               📞 전화를 받으면 자유롭게 대화하세요!
-             </Text>
+             <View style={styles.footerItem}>
+               <MaterialCommunityIcons name="robot" size={18} color="#666666" style={{ marginRight: 8 }} />
+               <Text style={styles.footerText}>실시간 AI 대화 기능</Text>
+             </View>
+             <View style={styles.footerItem}>
+               <Ionicons name="bulb" size={18} color="#666666" style={{ marginRight: 8 }} />
+               <Text style={styles.footerText}>AI 비서는 한국어로 대화합니다</Text>
+             </View>
+             <View style={styles.footerItem}>
+               <Ionicons name="call" size={18} color="#666666" style={{ marginRight: 8 }} />
+               <Text style={styles.footerText}>전화를 받으면 자유롭게 대화하세요!</Text>
+             </View>
            </View>
          )}
       </ScrollView>
@@ -651,9 +683,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 24,
-  },
-  statusIcon: {
-    fontSize: 64,
   },
   statusMessage: {
     fontSize: 24,
@@ -711,10 +740,6 @@ const styles = StyleSheet.create({
   callButtonDisabled: {
     backgroundColor: '#CCCCCC',
   },
-  callButtonIcon: {
-    fontSize: 32,
-    marginRight: 12,
-  },
   callButtonText: {
     fontSize: 20,
     fontWeight: '600',
@@ -740,6 +765,10 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  doneButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   doneButtonText: {
     fontSize: 18,
@@ -767,11 +796,15 @@ const styles = StyleSheet.create({
     padding: 24,
     backgroundColor: '#F8F8F8',
   },
+  footerItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: 4,
+  },
   footerText: {
     fontSize: 14,
     color: '#666666',
-    textAlign: 'center',
-    lineHeight: 20,
   },
   scrollView: {
     flex: 1,
@@ -793,6 +826,10 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 16,
+  },
+  scheduleTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   scheduleSectionTitle: {
     fontSize: 18,
@@ -819,11 +856,15 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#34B79F',
   },
+  timePickerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
   timePickerText: {
     fontSize: 24,
     fontWeight: '600',
     color: '#34B79F',
-    marginBottom: 4,
   },
   timePickerHint: {
     fontSize: 13,
@@ -894,6 +935,10 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#666666',
     marginBottom: 8,
+  },
+  timePreviewContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   timePreviewText: {
     fontSize: 28,

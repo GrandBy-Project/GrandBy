@@ -120,6 +120,14 @@ async def save_conversation_to_db(call_sid: str, conversation: list):
         # 저장 성공 플래그 설정
         saved_calls.add(call_sid)
         
+        # ✅ 일기 자동 생성 트리거
+        try:
+            from app.tasks.diary_generator import generate_diary_from_call
+            generate_diary_from_call.delay(call_sid)
+            logger.info(f"📝 일기 자동 생성 작업 예약: {call_sid}")
+        except Exception as e:
+            logger.error(f"❌ 일기 생성 작업 예약 실패: {e}")
+        
         db.close()
         
     except Exception as e:

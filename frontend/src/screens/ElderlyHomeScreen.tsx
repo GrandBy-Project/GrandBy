@@ -17,12 +17,14 @@ import { useAuthStore } from '../store/authStore';
 import { useRouter } from 'expo-router';
 import { BottomNavigationBar, Header } from '../components';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import * as todoApi from '../api/todo';
 import { Colors } from '../constants/Colors';
 import * as connectionsApi from '../api/connections';
 import * as notificationsApi from '../api/notifications';
 import { Modal } from 'react-native';
 import * as weatherApi from '../api/weather';
+import { getDiaries, Diary } from '../api/diary';
 
 // 커스텀 아이콘 컴포넌트들
 const CheckIcon = ({ size = 24, color = '#34B79F' }: { size?: number; color?: string }) => (
@@ -239,6 +241,9 @@ export const ElderlyHomeScreen = () => {
   const [showConnectionModal, setShowConnectionModal] = useState(false);
   const [selectedConnection, setSelectedConnection] = useState<connectionsApi.ConnectionWithUserInfo | null>(null);
 
+  // 임시저장 다이어리 관련 state
+  const [draftDiaries, setDraftDiaries] = useState<Diary[]>([]);
+
   // 날씨 정보 state
   const [weather, setWeather] = useState<{
     temperature?: number;
@@ -251,13 +256,18 @@ export const ElderlyHomeScreen = () => {
   // 가장 가까운 일정 state
   const [upcomingTodo, setUpcomingTodo] = useState<any | null>(null);
 
-  // 오늘의 할 일 및 연결 요청 불러오기
-  useEffect(() => {
-    loadTodayTodos();
-    loadPendingConnections();
-    loadWeather();
+  // 화면 포커스 시 데이터 새로고침
+  useFocusEffect(
+    React.useCallback(() => {
+      loadTodayTodos();
+      loadPendingConnections();
+      loadDraftDiaries();
+      loadWeather();
+    }, [])
+  );
 
-    // 날씨 정보 30분마다 자동 갱신
+  // 날씨 정보 30분마다 자동 갱신
+  useEffect(() => {
     const weatherInterval = setInterval(() => {
       console.log('🔄 날씨 정보 자동 갱신 (30분)');
       loadWeather();
@@ -330,6 +340,17 @@ export const ElderlyHomeScreen = () => {
       setPendingConnections(connections.pending);
     } catch (error) {
       console.error('연결 요청 불러오기 실패:', error);
+    }
+  };
+
+  // 임시저장 다이어리 불러오기
+  const loadDraftDiaries = async () => {
+    try {
+      const diaries = await getDiaries({ limit: 100 });
+      const drafts = diaries.filter(diary => diary.status === 'draft');
+      setDraftDiaries(drafts);
+    } catch (error) {
+      console.error('임시저장 다이어리 불러오기 실패:', error);
     }
   };
 
@@ -516,6 +537,31 @@ export const ElderlyHomeScreen = () => {
               </Text>
               <Text style={[styles.bannerSubtitle, fontSizeLevel >= 1 && { fontSize: 16 }, fontSizeLevel >= 2 && { fontSize: 18 }]}>
                 {pendingConnections[0].name}님이 보호자 연결을 요청했습니다
+              </Text>
+            </View>
+            <Text style={styles.bannerArrow}>›</Text>
+          </View>
+        </TouchableOpacity>
+      )}
+
+      {/* 임시저장 다이어리 알림 배너 */}
+      {draftDiaries.length > 0 && (
+        <TouchableOpacity
+          style={styles.draftNotificationBanner}
+          onPress={() => {
+            // 첫 번째 임시저장 다이어리로 이동
+            router.push(`/diary-detail?diaryId=${draftDiaries[0].diary_id}`);
+          }}
+          activeOpacity={0.8}
+        >
+          <View style={styles.bannerContent}>
+            <Text style={styles.bannerIcon}>✍️</Text>
+            <View style={styles.bannerText}>
+              <Text style={[styles.bannerTitle, fontSizeLevel >= 1 && { fontSize: 18 }, fontSizeLevel >= 2 && { fontSize: 22 }]}>
+                작성 중인 일기가 있어요! ({draftDiaries.length})
+              </Text>
+              <Text style={[styles.bannerSubtitle, fontSizeLevel >= 1 && { fontSize: 16 }, fontSizeLevel >= 2 && { fontSize: 18 }]}>
+                임시저장된 일기를 확인해보세요
               </Text>
             </View>
             <Text style={styles.bannerArrow}>›</Text>
@@ -1296,6 +1342,22 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     borderLeftWidth: 4,
     borderLeftColor: '#FF9500',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  // 임시저장 다이어리 알림 배너
+  draftNotificationBanner: {
+    backgroundColor: '#FFF9E6',
+    borderRadius: 12,
+    padding: 16,
+    marginHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 8,
+    borderLeftWidth: 4,
+    borderLeftColor: '#F57C00',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,

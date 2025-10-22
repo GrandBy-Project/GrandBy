@@ -170,18 +170,18 @@ export const DiaryListScreen = () => {
   };
 
   /**
-   * 기분 이모지 가져오기
+   * 기분 아이콘 정보 가져오기
    */
-  const getMoodEmoji = (mood?: string | null): string => {
-    const moodMap: Record<string, string> = {
-      happy: '😊',
-      excited: '🤗',
-      calm: '😌',
-      sad: '😢',
-      angry: '😠',
-      tired: '😴',
+  const getMoodIcon = (mood?: string | null): { name: string; color: string } | null => {
+    const moodMap: Record<string, { name: string; color: string }> = {
+      happy: { name: 'happy', color: '#FFD700' },
+      excited: { name: 'sparkles', color: '#FF6B6B' },
+      calm: { name: 'leaf', color: '#4ECDC4' },
+      sad: { name: 'sad', color: '#95A5A6' },
+      angry: { name: 'thunderstorm', color: '#E74C3C' },
+      tired: { name: 'moon', color: '#9B59B6' },
     };
-    return mood ? moodMap[mood] || '' : '';
+    return mood && moodMap[mood] ? moodMap[mood] : null;
   };
 
   /**
@@ -242,8 +242,12 @@ export const DiaryListScreen = () => {
             <Text style={styles.dateText}>{formatDate(item.date)}</Text>
             <Text style={styles.dayText}>({formatDayOfWeek(item.date)})</Text>
           </View>
-          {item.mood && (
-            <Text style={styles.moodEmoji}>{getMoodEmoji(item.mood)}</Text>
+          {item.mood && getMoodIcon(item.mood) && (
+            <Ionicons 
+              name={getMoodIcon(item.mood)!.name as any} 
+              size={24} 
+              color={getMoodIcon(item.mood)!.color} 
+            />
           )}
         </View>
 
@@ -303,7 +307,7 @@ export const DiaryListScreen = () => {
    */
   const renderEmptyState = () => (
     <View style={styles.emptyContainer}>
-      <Text style={styles.emptyIcon}>📖</Text>
+      <Ionicons name="book-outline" size={64} color="#CCCCCC" style={{ marginBottom: 16 }} />
       <Text style={styles.emptyTitle}>작성된 일기가 없습니다</Text>
       <Text style={styles.emptyDescription}>
         AI와의 통화를 통해 자동으로 일기가 생성되거나{'\n'}
@@ -404,9 +408,12 @@ export const DiaryListScreen = () => {
         <View style={styles.recentDiariesSection}>
           {selectedDate ? (
             <>
-              <Text style={styles.sectionTitle}>
-                📅 {formatDate(selectedDate)} ({formatDayOfWeek(selectedDate)})
-              </Text>
+              <View style={styles.sectionTitleContainer}>
+                <Ionicons name="calendar-outline" size={20} color="#333333" />
+                <Text style={styles.sectionTitle}>
+                  {formatDate(selectedDate)} ({formatDayOfWeek(selectedDate)})
+                </Text>
+              </View>
               {diaries.filter(diary => diary.date === selectedDate).length > 0 ? (
                 diaries
                   .filter(diary => diary.date === selectedDate)
@@ -420,8 +427,12 @@ export const DiaryListScreen = () => {
                         <Text style={styles.miniDiaryDate}>
                           {formatDate(diary.date)} ({formatDayOfWeek(diary.date)})
                         </Text>
-                        {diary.mood && (
-                          <Text style={styles.miniMoodEmoji}>{getMoodEmoji(diary.mood)}</Text>
+                        {diary.mood && getMoodIcon(diary.mood) && (
+                          <Ionicons 
+                            name={getMoodIcon(diary.mood)!.name as any} 
+                            size={20} 
+                            color={getMoodIcon(diary.mood)!.color} 
+                          />
                         )}
                       </View>
                       {diary.title && (
@@ -436,7 +447,7 @@ export const DiaryListScreen = () => {
                   ))
               ) : (
                 <View style={styles.emptySelectedDate}>
-                  <Text style={styles.emptySelectedDateIcon}>📖</Text>
+                  <Ionicons name="book-outline" size={48} color="#CCCCCC" style={{ marginBottom: 12 }} />
                   <Text style={styles.emptySelectedDateText}>
                     작성된 일기가 없습니다
                   </Text>
@@ -445,7 +456,7 @@ export const DiaryListScreen = () => {
             </>
           ) : (
             <View style={styles.selectDatePrompt}>
-              <Text style={styles.selectDateIcon}>👆</Text>
+              <Ionicons name="hand-left-outline" size={48} color="#CCCCCC" style={{ marginBottom: 16 }} />
               <Text style={styles.selectDateText}>
                 캘린더에서 날짜를 선택하면{'\n'}해당 날짜의 일기를 확인할 수 있습니다
               </Text>
@@ -485,7 +496,7 @@ export const DiaryListScreen = () => {
             onPress={() => setShowElderlySelector(true)}
             style={styles.elderlySelectButton}
           >
-            <Text style={styles.elderlySelectIcon}>👤</Text>
+            <Ionicons name="person-outline" size={20} color="#333333" />
           </TouchableOpacity>
         ) : (
           <View style={styles.placeholder} />
@@ -507,7 +518,7 @@ export const DiaryListScreen = () => {
                 onPress={() => setShowElderlySelector(false)}
                 style={styles.modalCloseButton}
               >
-                <Text style={styles.modalCloseText}>✕</Text>
+                <Ionicons name="close" size={28} color="#666666" />
               </TouchableOpacity>
             </View>
 
@@ -525,7 +536,7 @@ export const DiaryListScreen = () => {
                     {elderly.name}
                   </Text>
                   {selectedElderlyId === elderly.user_id && (
-                    <Text style={styles.checkmark}>✓</Text>
+                    <Ionicons name="checkmark" size={28} color="#34B79F" />
                   )}
                 </TouchableOpacity>
               ))}
@@ -540,16 +551,28 @@ export const DiaryListScreen = () => {
           style={[styles.tab, activeTab === 'list' && styles.activeTab]}
           onPress={() => setActiveTab('list')}
         >
+          <Ionicons 
+            name="list-outline" 
+            size={20} 
+            color={activeTab === 'list' ? '#FFFFFF' : '#666666'} 
+            style={{ marginRight: 6 }}
+          />
           <Text style={[styles.tabText, activeTab === 'list' && styles.activeTabText]}>
-            📋 목록
+            목록
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.tab, activeTab === 'calendar' && styles.activeTab]}
           onPress={() => setActiveTab('calendar')}
         >
+          <Ionicons 
+            name="calendar-outline" 
+            size={20} 
+            color={activeTab === 'calendar' ? '#FFFFFF' : '#666666'} 
+            style={{ marginRight: 6 }}
+          />
           <Text style={[styles.tabText, activeTab === 'calendar' && styles.activeTabText]}>
-            📅 캘린더
+            캘린더
           </Text>
         </TouchableOpacity>
       </View>
@@ -636,9 +659,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#F5F5F5',
     borderRadius: 20,
   },
-  elderlySelectIcon: {
-    fontSize: 20,
-  },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
@@ -672,10 +692,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  modalCloseText: {
-    fontSize: 24,
-    color: '#666666',
-  },
   elderlyList: {
     paddingHorizontal: 24,
     paddingTop: 16,
@@ -700,10 +716,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#333333',
   },
-  checkmark: {
-    fontSize: 24,
-    color: '#34B79F',
-  },
   tabContainer: {
     flexDirection: 'row',
     backgroundColor: '#F5F5F5',
@@ -714,6 +726,7 @@ const styles = StyleSheet.create({
   },
   tab: {
     flex: 1,
+    flexDirection: 'row',
     paddingVertical: 12,
     paddingHorizontal: 16,
     alignItems: 'center',
@@ -744,11 +757,16 @@ const styles = StyleSheet.create({
     padding: 16,
     paddingBottom: 100,
   },
+  sectionTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 16,
+  },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '700',
     color: '#333333',
-    marginBottom: 16,
   },
   miniDiaryCard: {
     backgroundColor: '#FFFFFF',
@@ -768,9 +786,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#34B79F',
-  },
-  miniMoodEmoji: {
-    fontSize: 20,
   },
   miniDiaryTitle: {
     fontSize: 15,
@@ -836,9 +851,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#34B79F',
   },
-  moodEmoji: {
-    fontSize: 24,
-  },
   titleText: {
     fontSize: 17,
     fontWeight: '600',
@@ -893,10 +905,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 100,
   },
-  emptyIcon: {
-    fontSize: 64,
-    marginBottom: 16,
-  },
   emptyTitle: {
     fontSize: 20,
     fontWeight: '600',
@@ -918,10 +926,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     marginTop: 8,
   },
-  emptySelectedDateIcon: {
-    fontSize: 48,
-    marginBottom: 12,
-  },
   emptySelectedDateText: {
     fontSize: 16,
     color: '#666666',
@@ -932,10 +936,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 60,
     paddingHorizontal: 20,
-  },
-  selectDateIcon: {
-    fontSize: 48,
-    marginBottom: 16,
   },
   selectDateText: {
     fontSize: 16,

@@ -62,7 +62,7 @@ async def get_diaries(
     if end_date:
         query = query.filter(Diary.date <= end_date)
     
-    diaries = query.order_by(Diary.date.desc()).offset(skip).limit(limit).all()
+    diaries = query.order_by(Diary.created_at.desc()).offset(skip).limit(limit).all()
     return diaries
 
 
@@ -101,7 +101,9 @@ async def create_diary(
                 user_id=connection.elderly_id,  # 각 어르신 ID (누구의 일기장)
                 author_id=current_user.user_id,  # 보호자 ID (작성자)
                 date=diary_data.date,
+                title=diary_data.title,
                 content=diary_data.content,
+                mood=diary_data.mood,
                 author_type=AuthorType.CAREGIVER,
                 is_auto_generated=False,
                 status=diary_data.status
@@ -115,7 +117,9 @@ async def create_diary(
             user_id=current_user.user_id,
             author_id=current_user.user_id,
             date=diary_data.date,
+            title=diary_data.title,
             content=diary_data.content,
+            mood=diary_data.mood,
             author_type=AuthorType.ELDERLY,
             is_auto_generated=False,
             status=diary_data.status
@@ -179,6 +183,7 @@ async def update_diary(
     """
     다이어리 수정
     일기 내용 수정
+    임시 저장 상태에서 발행 상태로 변경 시 어르신 작성으로 설정
     """
     diary = db.query(Diary).filter(
         Diary.diary_id == diary_id,
@@ -189,13 +194,21 @@ async def update_diary(
         raise HTTPException(status_code=404, detail="일기를 찾을 수 없습니다.")
     
     # 수정 가능한 필드만 업데이트
-    # if diary_data.title is not None:
-        # diary.title = diary_data.title
+    if diary_data.title is not None:
+        diary.title = diary_data.title
     if diary_data.content is not None:
         diary.content = diary_data.content
-    # if diary_data.mood is not None:
-        # diary.mood = diary_data.mood
+    if diary_data.mood is not None:
+        diary.mood = diary_data.mood
     if diary_data.status is not None:
+        # 임시 저장 상태에서 발행 상태로 변경 시 어르신 작성으로 변경
+        # is_auto_generated는 유지하여 AI 자동 생성 + 어르신 작성 배지 모두 표시
+        from app.models.diary import DiaryStatus
+        if (diary.status == DiaryStatus.DRAFT and 
+            diary_data.status == DiaryStatus.PUBLISHED and
+            current_user.role == UserRole.ELDERLY):
+            diary.author_type = AuthorType.ELDERLY
+            diary.author_id = current_user.user_id
         diary.status = diary_data.status
     
     db.commit()
