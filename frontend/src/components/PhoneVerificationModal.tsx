@@ -15,7 +15,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../constants/Colors';
 import { Button } from './Button';
-import { checkPhoneVerification, resendPhoneVerification } from '../api/auth';
+import { checkPhoneVerification } from '../api/auth';
 import { PhoneVerification } from '../types';
 
 interface PhoneVerificationModalProps {
@@ -30,7 +30,6 @@ export const PhoneVerificationModal: React.FC<PhoneVerificationModalProps> = ({
   onVerified,
 }) => {
   const [isChecking, setIsChecking] = useState(false);
-  const [isResending, setIsResending] = useState(false);
   const [checkCount, setCheckCount] = useState(0);
   const [verified, setVerified] = useState(false);
 
@@ -73,28 +72,6 @@ export const PhoneVerificationModal: React.FC<PhoneVerificationModalProps> = ({
     }
   };
 
-  // 인증 재요청
-  const handleResend = async () => {
-    try {
-      setIsResending(true);
-
-      const response = await resendPhoneVerification(verificationInfo.phone_number);
-
-      Alert.alert(
-        '인증 전화 재발송 📞',
-        response.message + '\n\n새로운 인증 코드: ' + response.validation_code,
-        [{ text: '확인' }]
-      );
-    } catch (error: any) {
-      Alert.alert(
-        '오류',
-        error.response?.data?.detail || '인증 전화 재발송에 실패했습니다.'
-      );
-    } finally {
-      setIsResending(false);
-    }
-  };
-
   return (
     <Modal
       visible={visible}
@@ -115,14 +92,6 @@ export const PhoneVerificationModal: React.FC<PhoneVerificationModalProps> = ({
 
           {/* 내용 */}
           <View style={styles.content}>
-            <View style={styles.infoBox}>
-              <Text style={styles.infoTitle}>📞 인증 전화가 곧 걸려옵니다</Text>
-              <Text style={styles.infoText}>
-                Twilio로부터 자동 전화가 발신됩니다.
-                {'\n'}전화를 받아 다음 코드를 입력해주세요:
-              </Text>
-            </View>
-
             {/* 국제전화 안내 - 강조 */}
             <View style={[styles.infoBox, { backgroundColor: Colors.warningLight }]}>
               <Text style={[styles.infoTitle, { color: Colors.warning }]}>⚠️ 국제전화 안내</Text>
@@ -151,9 +120,6 @@ export const PhoneVerificationModal: React.FC<PhoneVerificationModalProps> = ({
           {/* 자동 확인 안내 */}
           <View style={styles.autoCheckInfo}>
             <ActivityIndicator size="small" color={Colors.primary} />
-            <Text style={styles.autoCheckText}>
-              10초마다 자동으로 인증 상태를 확인합니다
-            </Text>
           </View>
         </View>
       </View>

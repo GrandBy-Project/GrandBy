@@ -19,6 +19,11 @@ import uuid
 import random
 import string
 from app.utils.email import send_verification_email, send_password_reset_email
+from app.services.ai_call.twilio_service import TwilioService
+from app.utils.phone import normalize_phone_number
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 security = HTTPBearer()
@@ -75,6 +80,9 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
     
     hashed_password = pwd_context.hash(password_to_hash)
     
+    # 전화번호를 국제 형식으로 변환
+    normalized_phone = normalize_phone_number(user_data.phone_number)
+    
     # 사용자 생성
     new_user = User(
         user_id=str(uuid.uuid4()),
@@ -111,6 +119,17 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
         "token_type": "bearer",
         "user": UserResponse.from_orm(new_user)
     }
+    
+    # ARS 인증 정보 추가 (프론트엔드에서 사용자에게 안내)
+    if verification_info:
+        response_data["phone_verification"] = {
+            "required": True,
+            "message": "전화번호 인증을 위해 Twilio로부터 전화가 걸려올 예정입니다. 통화를 받아 코드를 입력해주세요.",
+            "validation_code": verification_info['validation_code'],
+            "phone_number": normalized_phone
+        }
+    
+    return response_data
 
 
 @router.post("/login", response_model=Token)
@@ -684,5 +703,136 @@ async def reset_password_verify(
         "success": True,
         "message": "비밀번호가 성공적으로 변경되었습니다"
     }
+
+
+# ==================== 전화번호 ARS 인증 ====================
+
+class RequestPhoneVerificationRequest(BaseModel):
+    phone_number: str
+    friendly_name: str = "사용자"
+
+
+class RequestPhoneVerificationResponse(BaseModel):
+    success: bool
+    message: str
+    validation_code: str
+
+
+@router.post("/request-phone-verification", response_model=RequestPhoneVerificationResponse)
+async def request_phone_verification(
+    request: RequestPhoneVerificationRequest
+):
+    """
+    전화번호 ARS 인증 요청 (회원가입 전 - 로그인 불필요)
+    Twilio가 전화를 걸어 6자리 코드 입력 요청
+    """
+    try:
+        normalized_phone = normalize_phone_number(request.phone_number)
+        
+        if not normalized_phone:
+            raise HTTPException(
+                status_code=400,
+                detail="유효하지 않은 전화번호입니다"
+            )
+        
+        # 이미 인증된 번호인지 확인
+        twilio_service = TwilioService()
+        is_verified = twilio_service.check_caller_id_verified(normalized_phone)
+        
+        if is_verified:
+            return {
+                "success": True,
+                "message": "이미 인증된 전화번호입니다",
+                "validation_code": "000000"  # 이미 인증됨
+            }
+        
+        # ARS 인증 요청
+        verification_info = twilio_service.add_verified_caller_id(
+            phone_number=normalized_phone,
+            friendly_name=request.friendly_name
+        )
+        
+        logger.info(f"📞 ARS 인증 요청 (회원가입 전): {normalized_phone}")
+        logger.info(f"🔐 인증 코드: {verification_info['validation_code']}")
+        
+        return {
+            "success": True,
+            "message": "인증 전화가 발송되었습니다. 통화를 받아 코드를 입력해주세요.",
+            "validation_code": verification_info['validation_code']
+        }
+    except Exception as e:
+        logger.error(f"전화번호 인증 요청 실패: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"전화번호 인증 요청에 실패했습니다: {str(e)}"
+        )
+
+
+class CheckPhoneVerificationRequest(BaseModel):
+    phone_number: str
+
+
+class CheckPhoneVerificationResponse(BaseModel):
+    verified: bool
+    message: str
+
+
+@router.post("/check-phone-verification", response_model=CheckPhoneVerificationResponse)
+async def check_phone_verification(
+    request: CheckPhoneVerificationRequest
+):
+    """
+    사용자의 전화번호가 Twilio Verified Caller IDs에 등록되었는지 확인
+    ARS 인증 완료 여부 체크 (회원가입 전에도 사용 가능 - 로그인 불필요)
+    """
+    try:
+        normalized_phone = normalize_phone_number(request.phone_number)
+        
+        if not normalized_phone:
+            raise HTTPException(
+                status_code=400,
+                detail="유효하지 않은 전화번호입니다"
+            )
+        
+        twilio_service = TwilioService()
+        is_verified = twilio_service.check_caller_id_verified(normalized_phone)
+        
+        return {
+            "verified": is_verified,
+            "message": "전화번호가 인증되었습니다" if is_verified else "전화번호 인증이 필요합니다"
+        }
+    except Exception as e:
+        logger.error(f"전화번호 인증 확인 실패: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="전화번호 인증 확인에 실패했습니다"
+        )
+
+
+class GetVerifiedCallersResponse(BaseModel):
+    callers: list
+
+
+@router.get("/verified-callers", response_model=GetVerifiedCallersResponse)
+async def get_verified_callers(
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Twilio에 등록된 Verified Caller IDs 목록 조회
+    관리자 또는 디버깅용
+    """
+    try:
+        twilio_service = TwilioService()
+        callers = twilio_service.get_verified_caller_ids()
+        
+        return {
+            "callers": callers
+        }
+    except Exception as e:
+        logger.error(f"Verified Caller IDs 조회 실패: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Verified Caller IDs 조회에 실패했습니다"
+        )
 
 

@@ -29,9 +29,10 @@ import {
   validateBirthDate,
   formatBirthDate,
 } from '../utils/validation';
-import { UserRole, Gender } from '../types';
+import { UserRole, Gender, PhoneVerification } from '../types';
 import apiClient, { TokenManager } from '../api/client';
 import { TermsModal } from '../components/TermsModal';
+import { PhoneVerificationModal } from '../components/PhoneVerificationModal';
 import { useAuthStore } from '../store/authStore';
 
 export const RegisterScreen = () => {
@@ -58,6 +59,7 @@ export const RegisterScreen = () => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [name, setName] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
+  const [phoneVerified, setPhoneVerified] = useState(false);
   const [birthDate, setBirthDate] = useState('');
   const [gender, setGender] = useState<Gender>(Gender.MALE);
   const [role, setRole] = useState<UserRole>(UserRole.ELDERLY);
@@ -69,9 +71,14 @@ export const RegisterScreen = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isSendingCode, setIsSendingCode] = useState(false);
   const [isVerifyingCode, setIsVerifyingCode] = useState(false);
+  const [isRequestingPhoneVerification, setIsRequestingPhoneVerification] = useState(false);
   
   // 약관 모달 상태
   const [showTermsModal, setShowTermsModal] = useState(false);
+  
+  // ARS 인증 모달 상태
+  const [showPhoneVerificationModal, setShowPhoneVerificationModal] = useState(false);
+  const [phoneVerificationInfo, setPhoneVerificationInfo] = useState<PhoneVerification | null>(null);
 
   // 타이머
   useEffect(() => {
@@ -158,6 +165,64 @@ export const RegisterScreen = () => {
   const handlePhoneNumberChange = (text: string) => {
     const formatted = formatPhoneNumber(text);
     setPhoneNumber(formatted);
+    // 전화번호가 변경되면 인증 상태 초기화
+    if (phoneVerified && formatted !== phoneNumber) {
+      setPhoneVerified(false);
+    }
+  };
+  
+  // 전화번호 ARS 인증 요청
+  const handleRequestPhoneVerification = async () => {
+    const phoneValidation = validatePhoneNumber(phoneNumber);
+    if (!phoneValidation.valid) {
+      setErrors({ ...errors, phoneNumber: phoneValidation.message });
+      return;
+    }
+
+    try {
+      setIsRequestingPhoneVerification(true);
+      setErrors({ ...errors, phoneNumber: '' });
+
+      // ARS 인증 요청 (회원가입 전)
+      const response = await apiClient.post('/api/auth/request-phone-verification', {
+        phone_number: phoneNumber.replace(/[^\d]/g, ''),
+        friendly_name: name || '사용자'
+      });
+
+      // 이미 인증된 전화번호인 경우 (다른 사람이 사용 중)
+      if (response.data.validation_code === '000000' || 
+          response.data.message === '이미 인증된 전화번호입니다') {
+        Alert.alert(
+          '사용 불가 ⚠️',
+          '이미 사용 중인 전화번호입니다.\n본인의 전화번호로 인증해주세요.',
+          [{ text: '확인' }]
+        );
+        return;
+      }
+
+      // 인증 정보 설정
+      setPhoneVerificationInfo({
+        required: true,
+        message: response.data.message,
+        validation_code: response.data.validation_code,
+        phone_number: phoneNumber.replace(/[^\d]/g, '')
+      });
+
+      // 모달 표시
+      setShowPhoneVerificationModal(true);
+
+    } catch (error: any) {
+      Alert.alert('오류', error.response?.data?.detail || 'ARS 인증 요청에 실패했습니다.');
+    } finally {
+      setIsRequestingPhoneVerification(false);
+    }
+  };
+  
+  // ARS 인증 완료 (회원가입 전)
+  const handlePhoneVerifiedBeforeRegister = () => {
+    setPhoneVerified(true);
+    setShowPhoneVerificationModal(false);
+    Alert.alert('인증 완료! ✅', '전화번호 인증이 완료되었습니다.');
   };
   
   // 생년월일 입력 처리
@@ -196,6 +261,11 @@ export const RegisterScreen = () => {
     const phoneValidation = validatePhoneNumber(phoneNumber);
     if (!phoneValidation.valid) {
       newErrors.phoneNumber = phoneValidation.message;
+    }
+    
+    // 전화번호 인증 확인
+    if (!phoneVerified) {
+      newErrors.phoneNumber = '전화번호 ARS 인증을 완료해주세요';
     }
     
     // 생년월일 검증 (필수)
@@ -247,6 +317,7 @@ export const RegisterScreen = () => {
       // Zustand 스토어에 사용자 정보 저장
       setUser(response.data.user);
 
+      // 회원가입 완료
       Alert.alert('환영합니다!', '회원가입이 완료되었습니다.', [
         {
           text: '확인',
@@ -288,7 +359,7 @@ export const RegisterScreen = () => {
           <View style={styles.emailContainer}>
             <View style={{ flex: 1 }}>
               <Input
-                inputRef={emailRef}
+                ref={emailRef}
                 label=""
                 value={email}
                 onChangeText={setEmail}
@@ -321,7 +392,7 @@ export const RegisterScreen = () => {
             <View style={styles.codeContainer}>
               <View style={{ flex: 1 }}>
                 <Input
-                  inputRef={verificationCodeRef}
+                  ref={verificationCodeRef}
                   label=""
                   value={verificationCode}
                   onChangeText={setVerificationCode}
@@ -352,7 +423,7 @@ export const RegisterScreen = () => {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>비밀번호 * (최소 6자)</Text>
           <Input
-            inputRef={passwordRef}
+            ref={passwordRef}
             label=""
             value={password}
             onChangeText={setPassword}
@@ -391,7 +462,7 @@ export const RegisterScreen = () => {
           )}
 
           <Input
-            inputRef={confirmPasswordRef}
+            ref={confirmPasswordRef}
             label=""
             value={confirmPassword}
             onChangeText={setConfirmPassword}
@@ -407,7 +478,7 @@ export const RegisterScreen = () => {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>이름 *</Text>
           <Input
-            inputRef={nameRef}
+            ref={nameRef}
             label=""
             value={name}
             onChangeText={setName}
@@ -420,25 +491,43 @@ export const RegisterScreen = () => {
 
         {/* 전화번호 */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>전화번호 *</Text>
-          <Input
-            inputRef={phoneRef}
-            label=""
-            value={phoneNumber}
-            onChangeText={handlePhoneNumberChange}
-            placeholder="010-1234-5678"
-            keyboardType="phone-pad"
-            error={errors.phoneNumber}
-            returnKeyType="next"
-            onSubmitEditing={() => birthDateRef.current?.focus()}
-          />
+          <Text style={styles.sectionTitle}>전화번호 * (ARS 인증 필수)</Text>
+          <View style={styles.emailContainer}>
+            <View style={{ flex: 1 }}>
+              <Input
+                ref={phoneRef}
+                label=""
+                value={phoneNumber}
+                onChangeText={handlePhoneNumberChange}
+                placeholder="010-1234-5678"
+                keyboardType="phone-pad"
+                error={errors.phoneNumber}
+                returnKeyType="next"
+                onSubmitEditing={() => !phoneVerified && handleRequestPhoneVerification()}
+                editable={!phoneVerified}
+              />
+            </View>
+            {!phoneVerified && (
+              <Button
+                title="ARS 인증"
+                onPress={handleRequestPhoneVerification}
+                loading={isRequestingPhoneVerification}
+                variant="outline"
+              />
+            )}
+            {phoneVerified && (
+              <View style={styles.verifiedBadge}>
+                <Text style={styles.verifiedText}>✓ 인증완료</Text>
+              </View>
+            )}
+          </View>
         </View>
 
         {/* 생년월일 */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>생년월일 * (YYYY-MM-DD)</Text>
           <Input
-            inputRef={birthDateRef}
+            ref={birthDateRef}
             label=""
             value={birthDate}
             onChangeText={handleBirthDateChange}
@@ -545,6 +634,15 @@ export const RegisterScreen = () => {
         onAgree={handleAgreeTerms}
         onCancel={() => setShowTermsModal(false)}
       />
+      
+      {/* ARS 전화번호 인증 모달 */}
+      {phoneVerificationInfo && (
+        <PhoneVerificationModal
+          visible={showPhoneVerificationModal}
+          verificationInfo={phoneVerificationInfo}
+          onVerified={handlePhoneVerifiedBeforeRegister}
+        />
+      )}
     </KeyboardAvoidingView>
   );
 };
