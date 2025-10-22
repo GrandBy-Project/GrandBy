@@ -129,6 +129,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    entrypoint: []
     environment:
       DATABASE_URL: postgresql://grandby:${DB_PASSWORD:-grandby_secret_password}@db:5432/grandby_db
       REDIS_URL: redis://redis:6379/0
@@ -161,6 +162,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    entrypoint: []
     environment:
       DATABASE_URL: postgresql://grandby:${DB_PASSWORD:-grandby_secret_password}@db:5432/grandby_db
       REDIS_URL: redis://redis:6379/0
