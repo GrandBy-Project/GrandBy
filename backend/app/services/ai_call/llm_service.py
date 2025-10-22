@@ -195,7 +195,7 @@ JSON 형식으로 응답:
     
     def summarize_conversation_to_diary(self, conversation_text: str):
         """
-        통화 내용을 1인칭 일기로 변환
+        통화 내용을 1인칭 일기로 변환 (할루시네이션 방지 개선)
         
         Args:
             conversation_text: 전체 통화 내용
@@ -209,6 +209,12 @@ JSON 형식으로 응답:
 이 대화를 바탕으로 어르신의 1인칭 시점에서 자연스러운 일기를 작성해주세요.
 일기는 따뜻하고 친근한 말투로, 하루의 주요 내용과 감정을 담아주세요.
 
+⚠️ 중요한 제약사항:
+- 대화에서 실제로 언급된 내용만 포함하세요
+- 추측이나 가정으로 내용을 보완하지 마세요
+- 대화에서 나온 내용만을 바탕으로 일기를 작성하세요
+- 예를 들어, 대화에서 약 복용이 언급되지 않았다면 약 복용에 대한 내용을 포함하지 마세요
+
 통화 내용:
 {conversation_text}
 
@@ -218,7 +224,7 @@ JSON 형식으로 응답:
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=500,
-                temperature=0.8,
+                temperature=0.3,  # 할루시네이션 방지를 위해 낮춤
             )
             
             diary = response.choices[0].message.content
@@ -230,7 +236,7 @@ JSON 형식으로 응답:
     
     def summarize_call_conversation(self, conversation_history: list):
         """
-        통화 내용을 어르신의 1인칭 일기로 변환
+        통화 내용을 어르신의 1인칭 일기로 변환 (할루시네이션 방지 개선)
         
         Args:
             conversation_history: 대화 기록 [{"role": "user", "content": "..."}, ...]
@@ -252,11 +258,17 @@ JSON 형식으로 응답:
 작성 가이드:
 - 1인칭 시점으로 작성 ("나는", "오늘은", "내가" 등)
 - 자연스럽고 따뜻한 구어체 사용 (반말 또는 편안한 말투)
-- 대화에서 언급된 활동, 감정, 생각을 모두 포함
+- 대화에서 실제로 언급된 활동, 감정, 생각만 포함
 - 건강 상태(식사, 약, 통증 등), 기분, 계획 등을 자연스럽게 녹이기
 - 5-10문장 정도의 편안한 일기 형식
 - 문장은 짧고 간결하게, 하지만 감정은 풍부하게
 - 마치 어르신이 직접 작성한 것처럼 자연스럽게
+
+⚠️ 중요한 제약사항:
+- 대화에서 언급되지 않은 내용은 절대 추가하지 마세요
+- 추측이나 가정으로 내용을 보완하지 마세요
+- 대화에서 나온 내용만을 바탕으로 일기를 작성하세요
+- 예를 들어, 대화에서 약 복용이 언급되지 않았다면 약 복용에 대한 내용을 포함하지 마세요
 
 통화 내용:
 {conversation_text}
@@ -267,7 +279,7 @@ JSON 형식으로 응답:
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=500,  # 충분한 길이 확보
-                temperature=0.8,  # 자연스럽고 다양한 표현
+                temperature=0.3,  # 할루시네이션 방지를 위해 낮춤
             )
             
             diary = response.choices[0].message.content
@@ -279,7 +291,7 @@ JSON 형식으로 응답:
     
     def extract_schedule_from_conversation(self, conversation_text: str):
         """
-        통화 내용에서 일정 정보 추출 (개선 버전)
+        통화 내용에서 일정 정보 추출 (개선 버전 - 날짜 할당 문제 수정)
         
         Args:
             conversation_text: 전체 통화 내용
@@ -311,7 +323,9 @@ JSON 형식으로 응답:
 
 추출 규칙:
 1. 미래 일정만 추출 (과거나 완료된 것은 제외)
-2. "내일", "모레", "다음주", "월요일" 등 상대 날짜를 절대 날짜로 변환
+2. 구체적인 날짜/시간 언급이 있는 일정만 추출:
+   - "내일", "모레", "다음주 월요일", "10월 25일" 등 명확한 날짜 표현
+   - "오후 3시", "저녁 7시" 등 구체적인 시간 표현
 3. 시간이 명시되면 due_time에 포함 (HH:MM 24시간 형식)
 4. 시간이 없으면 due_time은 null
 5. 카테고리 자동 분류:
@@ -320,7 +334,11 @@ JSON 형식으로 응답:
    - EXERCISE: 운동, 산책, 체조
    - MEAL: 식사, 밥, 약속, 만남
    - OTHER: 기타
-6. 불확실하거나 막연한 표현은 제외 (예: "언젠가", "나중에")
+6. 다음 경우는 제외:
+   - 막연한 표현: "언젠가", "나중에", "이따가", "가능하면"
+   - 과거형 표현: "했어", "갔어", "왔어"
+   - 일반적인 계획: "산책하러 가야지", "약 먹어야지" (구체적 날짜 없음)
+   - 단순한 의도: "가고 싶어", "해야겠어" (확정되지 않은 계획)
 7. 최대 5개까지만 추출 (중요도 높은 순서)
 
 JSON 형식으로 응답 (일정 없으면 빈 배열):
@@ -336,14 +354,17 @@ JSON 형식으로 응답 (일정 없으면 빈 배열):
   ]
 }}
 
-주의: schedules 배열 안에 일정을 넣어주세요. 일정이 없으면 {{"schedules": []}}를 반환하세요.
+주의: 
+- schedules 배열 안에 일정을 넣어주세요. 
+- 일정이 없으면 {{"schedules": []}}를 반환하세요.
+- 구체적인 날짜/시간 언급이 없는 일정은 절대 포함하지 마세요.
 """
             
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=800,  # 여러 일정 추출 가능하도록 증가
-                temperature=0.2,  # 정확한 추출을 위해 낮게 설정
+                temperature=0.1,  # 정확한 추출을 위해 더 낮게 설정
                 response_format={"type": "json_object"}
             )
             
