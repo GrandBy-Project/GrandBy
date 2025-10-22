@@ -120,18 +120,6 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
         "user": UserResponse.from_orm(new_user)
     }
     
-    # ARS 인증 정보 추가 (프론트엔드에서 사용자에게 안내)
-    if verification_info:
-        response_data["phone_verification"] = {
-            "required": True,
-            "message": "전화번호 인증을 위해 Twilio로부터 전화가 걸려올 예정입니다. 통화를 받아 코드를 입력해주세요.",
-            "validation_code": verification_info['validation_code'],
-            "phone_number": normalized_phone
-        }
-    
-    return response_data
-
-
 @router.post("/login", response_model=Token)
 async def login(user_data: UserLogin, db: Session = Depends(get_db)):
     """
