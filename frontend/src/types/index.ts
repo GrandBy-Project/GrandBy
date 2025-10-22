@@ -48,12 +48,21 @@ export interface RegisterRequest {
   auth_provider?: string;
 }
 
+// 전화번호 인증 정보
+export interface PhoneVerification {
+  required: boolean;
+  message: string;
+  validation_code: string;
+  phone_number: string;
+}
+
 // 인증 응답
 export interface AuthResponse {
   access_token: string;
   refresh_token: string;
   token_type: string;
   user: User;
+  phone_verification?: PhoneVerification;
 }
 
 // API 에러 응답
