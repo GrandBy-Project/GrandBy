@@ -61,6 +61,10 @@ class User(Base):
     # 프로필
     profile_image_url = Column(String(500), nullable=True)  # 프로필 이미지
     
+    # 푸시 알림
+    push_token = Column(String(255), nullable=True, index=True)
+    push_token_updated_at = Column(DateTime, nullable=True)
+    
     # 계정 상태
     is_active = Column(Boolean, default=True)
     is_verified = Column(Boolean, default=False)
