@@ -62,7 +62,7 @@ async def get_diaries(
     if end_date:
         query = query.filter(Diary.date <= end_date)
     
-    diaries = query.order_by(Diary.date.desc()).offset(skip).limit(limit).all()
+    diaries = query.order_by(Diary.created_at.desc()).offset(skip).limit(limit).all()
     return diaries
 
 
