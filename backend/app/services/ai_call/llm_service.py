@@ -168,7 +168,7 @@ JSON 형식으로 응답:
             stream = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                max_tokens=200,
+                max_tokens=500,
                 temperature=0.8,
                 stream=True  # ⭐ 핵심: 스트리밍 활성화
             )

@@ -35,7 +35,7 @@ from app.services.ai_call.twilio_service import TwilioService
 # 로거 설정 (시간 포함)
 logging.basicConfig(
     level=settings.LOG_LEVEL,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format='%(asctime)s.%(msecs)03d - %(name)s - %(levelname)s - %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
@@ -600,23 +600,23 @@ async def process_streaming_response(
     audio_processor=None
 ) -> str:
     """
-    스트리밍 방식으로 LLM → TTS → Twilio 전송을 병렬 처리
+    스트리밍 방식으로 LLM → TTS → Twilio 전송을 순차 처리
     
-    이것이 핵심 최적화 함수입니다!
+    ✅ 수정 사항 (2025.10.22): 병렬 처리 → 순차 처리로 변경
+    - 이유: 병렬 TTS로 인한 음성 순서 뒤바뀜 문제 해결
+    - 트레이드오프: 약 0.5~1초 응답 시간 증가, 순서 100% 보장
     
     동작 방식:
-    1. LLM이 단어/구를 생성하면 즉시 받기 시작
-    2. 문장이 완성되면 (. ! ? 감지) 즉시 TTS 변환
-    3. TTS 변환과 동시에 다음 문장 LLM 생성 진행
-    4. 변환된 음성을 바로 Twilio로 전송
-    
-    결과: 사용자는 AI가 생각하는 것처럼 자연스럽게 느낌
+    1. LLM 스트리밍: 문장 생성 시 리스트에 저장 (즉시 실행 안 함)
+    2. LLM 완료 후: 저장된 문장을 순서대로 TTS 변환 및 전송
+    3. 결과: 생성 순서대로 정확한 음성 출력
     
     Args:
         websocket: Twilio WebSocket 연결
         stream_sid: Twilio Stream SID  
         user_text: 사용자 발화 전체 텍스트
         conversation_history: 대화 기록
+        audio_processor: AudioProcessor 인스턴스 (에코 방지용)
     
     Returns:
         str: 생성된 전체 AI 응답
@@ -629,7 +629,7 @@ async def process_streaming_response(
     
     try:
         logger.info(f"\n{'='*60}")
-        logger.info(f"🚀 스트리밍 응답 파이프라인 시작")
+        logger.info(f"🚀 스트리밍 응답 파이프라인 시작 (순차 처리)")
         logger.info(f"{'='*60}")
         
         pipeline_start = time.time()
@@ -637,7 +637,10 @@ async def process_streaming_response(
         # 문장 버퍼 및 전체 응답 저장
         sentence_buffer = ""
         full_response = []
-        sentence_tasks = []  # 병렬 TTS 태스크 추적
+        sentence_list = []  # ✅ 변경: 순서 보장용 문장 리스트
+        
+        # ==================== 단계 1: LLM 스트리밍 & 문장 수집 ====================
+        logger.info("🤖 LLM 스트리밍 시작 (문장 수집 단계)")
         
         # LLM 스트리밍 시작 (비동기 생성기)
         async for chunk in llm_service.generate_response_streaming(
@@ -659,13 +662,8 @@ async def process_streaming_response(
                     
                     if sentence:
                         logger.info(f"📝 문장 완성: {sentence}")
-                        
-                        # 즉시 TTS 변환 및 전송 (비동기 태스크로 실행)
-                        # 여러 문장이 동시에 처리될 수 있음 (병렬 처리)
-                        task = asyncio.create_task(
-                            convert_and_send_audio(websocket, stream_sid, sentence)
-                        )
-                        sentence_tasks.append(task)
+                        # ✅ 변경: 리스트에 추가만 (즉시 실행 안 함)
+                        sentence_list.append(sentence)
                 
                 # 마지막 불완전한 문장은 버퍼에 유지
                 sentence_buffer = sentences[-1] if len(sentences) % 2 == 1 else ""
@@ -673,20 +671,33 @@ async def process_streaming_response(
         # 남은 버퍼 처리 (마지막 문장)
         if sentence_buffer.strip():
             logger.info(f"📝 마지막 문장: {sentence_buffer}")
-            task = asyncio.create_task(
-                convert_and_send_audio(websocket, stream_sid, sentence_buffer)
-            )
-            sentence_tasks.append(task)
+            sentence_list.append(sentence_buffer)
         
-        # 모든 TTS 변환/전송이 완료될 때까지 대기 + 재생 시간 수집
+        logger.info(f"\n{'='*60}")
+        logger.info(f"✅ LLM 스트리밍 완료")
+        logger.info(f"📊 수집된 문장: {len(sentence_list)}개")
+        logger.info(f"{'='*60}\n")
+        
+        # ==================== 단계 2: 순차 TTS 처리 ====================
+        logger.info("🔊 TTS 순차 처리 시작")
+        
         total_playback_duration = 0.0
-        if sentence_tasks:
-            playback_durations = await asyncio.gather(*sentence_tasks, return_exceptions=True)
-            # 예외를 제외하고 재생 시간 합산
-            for duration in playback_durations:
-                if isinstance(duration, (int, float)) and duration > 0:
-                    total_playback_duration += duration
         
+        # ✅ 핵심 변경: 순서대로 하나씩 처리
+        for idx, sentence in enumerate(sentence_list, 1):
+            logger.info(f"\n[{idx}/{len(sentence_list)}] 🎵 TTS 처리: {sentence[:50]}{'...' if len(sentence) > 50 else ''}")
+            
+            # await로 완료 대기 (순차 실행)
+            playback_duration = await convert_and_send_audio(
+                websocket, 
+                stream_sid, 
+                sentence
+            )
+            
+            total_playback_duration += playback_duration
+            logger.info(f"[{idx}/{len(sentence_list)}] ✅ 전송 완료 (재생: {playback_duration:.2f}초)")
+        
+        # ==================== 단계 3: 완료 처리 ====================
         pipeline_time = time.time() - pipeline_start
         final_text = "".join(full_response)
         
