@@ -63,16 +63,16 @@ def check_and_make_calls():
             # 정확히 설정한 시간에만 전화 (0분 차이)
             if time_diff == 0:
                 # 오늘 이미 전화했는지 확인 (중복 방지)
-                today_start = current_datetime.replace(hour=0, minute=0, second=0, microsecond=0)
-                existing_call = db.query(CallLog).filter(
-                    CallLog.elderly_id == setting.elderly_id,
-                    CallLog.created_at >= today_start,
-                    CallLog.call_status.in_([CallStatus.INITIATED, CallStatus.ANSWERED, CallStatus.COMPLETED])
-                ).first()
+                # today_start = current_datetime.replace(hour=0, minute=0, second=0, microsecond=0)
+                # existing_call = db.query(CallLog).filter(
+                #     CallLog.elderly_id == setting.elderly_id,
+                #     CallLog.created_at >= today_start,
+                #     CallLog.call_status.in_([CallStatus.INITIATED, CallStatus.ANSWERED, CallStatus.COMPLETED])
+                # ).first()
                 
-                if existing_call:
-                    logger.info(f"⏭️  오늘 이미 통화함: {setting.elderly_id}")
-                    continue
+                # if existing_call:
+                #     logger.info(f"⏭️  오늘 이미 통화함: {setting.elderly_id}")
+                #     continue
                 
                 settings_to_call.append(setting)
                 logger.info(f"📞 예약 통화 대상: {setting.elderly_id} ({call_hour:02d}:{call_minute:02d})")

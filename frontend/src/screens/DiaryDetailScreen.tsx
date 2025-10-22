@@ -41,6 +41,16 @@ export const DiaryDetailScreen = () => {
     try {
       setIsLoading(true);
       const data = await getDiary(diaryId);
+      
+      // 임시저장 상태면 바로 작성 페이지로 이동
+      if (data.status === 'draft') {
+        router.replace({
+          pathname: '/diary-write',
+          params: { diaryId: data.diary_id },
+        });
+        return;
+      }
+      
       setDiary(data);
     } catch (error: any) {
       console.error('다이어리 로드 실패:', error);

@@ -18,7 +18,7 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { createDiary } from '../api/diary';
+import { createDiary, getDiary, updateDiary, Diary } from '../api/diary';
 import { getCallLog, getExtractedTodos, ExtractedTodo } from '../api/call';
 import { createTodo } from '../api/todo';
 import { useAuthStore } from '../store/authStore';
@@ -42,6 +42,8 @@ export const DiaryWriteScreen = () => {
   const searchParams = useLocalSearchParams();
   const fromCall = searchParams.fromCall === 'true';
   const callSid = searchParams.callSid as string | undefined;
+  const diaryId = searchParams.diaryId as string | undefined; // 수정 모드용
+  const isEditMode = !!diaryId; // 수정 모드 여부
 
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]); // YYYY-MM-DD
   const [title, setTitle] = useState('');
@@ -49,6 +51,7 @@ export const DiaryWriteScreen = () => {
   const [selectedMood, setSelectedMood] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingSummary, setIsLoadingSummary] = useState(false);
+  const [existingDiary, setExistingDiary] = useState<Diary | null>(null);
   
   // TODO 관련 state
   const [suggestedTodos, setSuggestedTodos] = useState<ExtractedTodo[]>([]);
@@ -73,12 +76,45 @@ export const DiaryWriteScreen = () => {
   };
 
   /**
+   * 수정 모드: 기존 다이어리 불러오기
+   */
+  useEffect(() => {
+    const loadDiary = async () => {
+      if (isEditMode && diaryId) {
+        try {
+          setIsLoadingSummary(true);
+          const diary = await getDiary(diaryId);
+          setExistingDiary(diary);
+          
+          // 폼에 기존 데이터 채우기
+          setDate(diary.date);
+          setTitle(diary.title || '');
+          setContent(diary.content);
+          setSelectedMood(diary.mood || '');
+          
+        } catch (error) {
+          console.error('다이어리 로드 실패:', error);
+          Alert.alert(
+            '오류',
+            '일기를 불러올 수 없습니다.',
+            [{ text: '확인', onPress: () => router.back() }]
+          );
+        } finally {
+          setIsLoadingSummary(false);
+        }
+      }
+    };
+
+    loadDiary();
+  }, [isEditMode, diaryId]);
+
+  /**
    * 통화 요약 및 TODO 불러오기 (컴포넌트 마운트 시)
    */
   useEffect(() => {
     const loadCallData = async () => {
       // 통화에서 온 경우이고 callSid가 있을 때만 실행
-      if (fromCall && callSid) {
+      if (fromCall && callSid && !isEditMode) {
         try {
           setIsLoadingSummary(true);
           console.log('📞 통화 데이터 불러오기 시작:', callSid);
@@ -129,7 +165,7 @@ export const DiaryWriteScreen = () => {
     };
 
     loadCallData();
-  }, [fromCall, callSid]);
+  }, [fromCall, callSid, isEditMode]);
 
   /**
    * 카테고리 아이콘 반환
@@ -234,31 +270,55 @@ export const DiaryWriteScreen = () => {
     try {
       setIsSubmitting(true);
 
-      const createdDiaries = await createDiary({
-        date,
-        title: title.trim(),
-        content: content.trim(),
-        mood: selectedMood,
-        status: 'published',
-      });
+      if (isEditMode && diaryId) {
+        // 수정 모드
+        await updateDiary(diaryId, {
+          title: title.trim() || undefined,
+          content: content.trim(),
+          mood: selectedMood || undefined,
+          status: 'published',
+        });
 
-      Alert.alert(
-        '완료',
-        '일기가 저장되었습니다!',
-        [
-          {
-            text: '확인',
-            onPress: () => {
-              // 통화에서 온 경우 메인 페이지로, 아니면 뒤로가기
-              if (fromCall) {
-                router.replace('/home');
-              } else {
+        Alert.alert(
+          '완료',
+          '일기가 수정되었습니다!',
+          [
+            {
+              text: '확인',
+              onPress: () => {
                 router.back();
-              }
+              },
             },
-          },
-        ]
-      );
+          ]
+        );
+      } else {
+        // 작성 모드
+        await createDiary({
+          date,
+          title: title.trim() || undefined,
+          content: content.trim(),
+          mood: selectedMood || undefined,
+          status: 'published',
+        });
+
+        Alert.alert(
+          '완료',
+          '일기가 저장되었습니다!',
+          [
+            {
+              text: '확인',
+              onPress: () => {
+                // 통화에서 온 경우 메인 페이지로, 아니면 뒤로가기
+                if (fromCall) {
+                  router.replace('/home');
+                } else {
+                  router.back();
+                }
+              },
+            },
+          ]
+        );
+      }
 
     } catch (error: any) {
       console.error('일기 저장 실패:', error);
@@ -289,7 +349,7 @@ export const DiaryWriteScreen = () => {
         >
           <Text style={styles.backButtonText}>←</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>일기 작성</Text>
+        <Text style={styles.headerTitle}>{isEditMode ? '일기 수정' : '일기 작성'}</Text>
         <View style={styles.placeholder} />
       </View>
 
@@ -375,8 +435,8 @@ export const DiaryWriteScreen = () => {
           <Text style={styles.charCount}>{content.length}자</Text>
         </View>
 
-        {/* TODO 제안 섹션 */}
-        {suggestedTodos.length > 0 && (
+        {/* TODO 제안 섹션 (작성 모드일 때만) */}
+        {!isEditMode && suggestedTodos.length > 0 && (
           <View style={styles.todoSection}>
             <Text style={styles.todoSectionTitle}>
               💡 대화에서 발견된 일정 ({suggestedTodos.length}개)
@@ -510,8 +570,15 @@ export const DiaryWriteScreen = () => {
             <ActivityIndicator size="small" color="#FFFFFF" />
           ) : (
             <View style={styles.submitButtonContent}>
-              <Ionicons name="pencil" size={20} color="#FFFFFF" style={{ marginRight: 8 }} />
-              <Text style={styles.submitButtonText}>작성하기</Text>
+              <Ionicons 
+                name={isEditMode ? "checkmark-circle" : "pencil"} 
+                size={20} 
+                color="#FFFFFF" 
+                style={{ marginRight: 8 }} 
+              />
+              <Text style={styles.submitButtonText}>
+                {isEditMode ? '수정 완료' : '작성하기'}
+              </Text>
             </View>
           )}
         </TouchableOpacity>
