@@ -126,5 +126,107 @@ class TwilioService:
             logger.error(f"❌ Failed to generate voice access token: {e}")
             raise
     
+    def add_verified_caller_id(self, phone_number: str, friendly_name: str = None):
+        """
+        Verified Caller ID 등록 (ARS 인증 방식)
+        
+        Twilio가 해당 번호로 전화를 걸어 6자리 코드를 입력받아 인증
+        한국 전화번호는 ARS 인증만 가능
+        
+        Args:
+            phone_number: 등록할 전화번호 (+821012345678 형식)
+            friendly_name: 전화번호의 별칭 (선택)
+        
+        Returns:
+            dict: {
+                "sid": str,              # Validation Request SID
+                "phone_number": str,     # 등록된 전화번호
+                "validation_code": str,  # 사용자가 입력할 6자리 코드
+                "call_sid": str         # 인증 통화 SID
+            }
+        """
+        try:
+            # validation_requests API 사용 (올바른 방법)
+            validation_request = self.client.validation_requests.create(
+                phone_number=phone_number,
+                friendly_name=friendly_name or phone_number
+            )
+            
+            logger.info(f"✅ Validation Request created")
+            logger.info(f"📞 Phone: {validation_request.phone_number}")
+            logger.info(f"🔐 Validation Code: {validation_request.validation_code}")
+            logger.info(f"📞 Call SID: {validation_request.call_sid}")
+            
+            return {
+                "sid": validation_request.call_sid,
+                "phone_number": validation_request.phone_number,
+                "validation_code": validation_request.validation_code,
+                "call_sid": validation_request.call_sid
+            }
+        except Exception as e:
+            logger.error(f"❌ Failed to add verified caller ID: {e}")
+            raise
+    
+    def check_caller_id_verified(self, phone_number: str) -> bool:
+        """
+        전화번호가 이미 Verified Caller IDs에 등록되어 있는지 확인
+        
+        Args:
+            phone_number: 확인할 전화번호 (+821012345678 형식)
+        
+        Returns:
+            bool: 등록 여부
+        """
+        try:
+            caller_ids = self.client.outgoing_caller_ids.list(
+                phone_number=phone_number
+            )
+            
+            is_verified = len(caller_ids) > 0
+            logger.info(f"📞 {phone_number} verified status: {is_verified}")
+            return is_verified
+        except Exception as e:
+            logger.error(f"❌ Failed to check caller ID: {e}")
+            return False
+    
+    def get_verified_caller_ids(self):
+        """
+        등록된 Verified Caller IDs 목록 조회
+        
+        Returns:
+            list: Verified Caller IDs 목록
+        """
+        try:
+            caller_ids = self.client.outgoing_caller_ids.list()
+            
+            result = []
+            for caller_id in caller_ids:
+                result.append({
+                    "sid": caller_id.sid,
+                    "phone_number": caller_id.phone_number,
+                    "friendly_name": caller_id.friendly_name,
+                    "date_created": caller_id.date_created
+                })
+            
+            logger.info(f"✅ Retrieved {len(result)} verified caller IDs")
+            return result
+        except Exception as e:
+            logger.error(f"❌ Failed to get verified caller IDs: {e}")
+            raise
+    
+    def delete_verified_caller_id(self, caller_id_sid: str):
+        """
+        Verified Caller ID 삭제
+        
+        Args:
+            caller_id_sid: 삭제할 Caller ID의 SID
+        """
+        try:
+            self.client.outgoing_caller_ids(caller_id_sid).delete()
+            logger.info(f"✅ Verified Caller ID deleted: {caller_id_sid}")
+        except Exception as e:
+            logger.error(f"❌ Failed to delete verified caller ID: {e}")
+            raise
+    
     # TODO: TwiML 생성, 음성 스트리밍 처리 등 추가 구현 필요
 
