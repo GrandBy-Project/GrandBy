@@ -28,7 +28,7 @@ const MOOD_OPTIONS = [
   { value: 'happy', label: '행복해요', icon: 'happy', color: '#FFD700' },
   { value: 'excited', label: '신나요', icon: 'sparkles', color: '#FF6B6B' },
   { value: 'calm', label: '평온해요', icon: 'leaf', color: '#4ECDC4' },
-  { value: 'sad', label: '슬퍼요', icon: 'sad', color: '#95A5A6' },
+  { value: 'sad', label: '슬퍼요', icon: 'sad', color: '#5499C7' },
   { value: 'angry', label: '화나요', icon: 'thunderstorm', color: '#E74C3C' },
   { value: 'tired', label: '피곤해요', icon: 'moon', color: '#9B59B6' },
 ];

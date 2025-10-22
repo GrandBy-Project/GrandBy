@@ -190,15 +190,15 @@ export const RegisterScreen = () => {
       });
 
       // 이미 인증된 전화번호인 경우 (다른 사람이 사용 중)
-      if (response.data.validation_code === '000000' || 
-          response.data.message === '이미 인증된 전화번호입니다') {
-        Alert.alert(
-          '사용 불가 ⚠️',
-          '이미 사용 중인 전화번호입니다.\n본인의 전화번호로 인증해주세요.',
-          [{ text: '확인' }]
-        );
-        return;
-      }
+      // if (response.data.validation_code === '000000' || 
+      //     response.data.message === '이미 인증된 전화번호입니다') {
+      //   Alert.alert(
+      //     '사용 불가 ⚠️',
+      //     '이미 사용 중인 전화번호입니다.\n본인의 전화번호로 인증해주세요.',
+      //     [{ text: '확인' }]
+      //   );
+      //   return;
+      // }
 
       // 인증 정보 설정
       setPhoneVerificationInfo({

@@ -94,7 +94,10 @@ export const PhoneVerificationModal: React.FC<PhoneVerificationModalProps> = ({
           <View style={styles.content}>
             {/* 국제전화 안내 - 강조 */}
             <View style={[styles.infoBox, { backgroundColor: Colors.warningLight }]}>
-              <Text style={[styles.infoTitle, { color: Colors.warning }]}>⚠️ 국제전화 안내</Text>
+              <View style={styles.titleRow}>
+                <Ionicons name="warning" size={20} color={Colors.warning} />
+                <Text style={[styles.infoTitle, { color: Colors.warning }]}>국제전화 안내</Text>
+              </View>
               <Text style={styles.infoText}>
                 • "국제전화입니다" 음성이 먼저 나옵니다{'\n'}
                 • 음성 안내 후 아래 코드를 입력해주세요
@@ -109,7 +112,10 @@ export const PhoneVerificationModal: React.FC<PhoneVerificationModalProps> = ({
 
             {/* 안내사항 */}
             <View style={styles.noticeBox}>
-              <Text style={styles.noticeTitle}>💡 안내사항</Text>
+              <View style={styles.titleRow}>
+                <Ionicons name="information-circle" size={20} color={Colors.warning} />
+                <Text style={styles.noticeTitle}>안내사항</Text>
+              </View>
               <Text style={styles.noticeText}>
                 • 코드를 정확히 입력해주세요{'\n'}
                 • 인증 완료까지 최대 1분 소요됩니다{'\n'}
@@ -157,13 +163,13 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   title: {
-    fontSize: 24,
+    fontSize: 28,
     fontWeight: 'bold',
     color: Colors.text,
     marginBottom: 8,
   },
   subtitle: {
-    fontSize: 16,
+    fontSize: 18,
     color: Colors.textSecondary,
   },
   content: {
@@ -175,16 +181,21 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 16,
   },
-  infoTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.primary,
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     marginBottom: 8,
   },
+  infoTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: Colors.primary,
+  },
   infoText: {
-    fontSize: 14,
+    fontSize: 16,
     color: Colors.text,
-    lineHeight: 20,
+    lineHeight: 24,
   },
   codeBox: {
     backgroundColor: Colors.backgroundLight,
@@ -196,37 +207,15 @@ const styles = StyleSheet.create({
     borderColor: Colors.primary,
   },
   codeLabel: {
-    fontSize: 14,
+    fontSize: 16,
     color: Colors.textSecondary,
     marginBottom: 8,
   },
   code: {
-    fontSize: 36,
+    fontSize: 42,
     fontWeight: 'bold',
     color: Colors.primary,
-    letterSpacing: 8,
-  },
-  codeHelper: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-    marginTop: 8,
-  },
-  phoneBox: {
-    backgroundColor: Colors.backgroundLight,
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  phoneLabel: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-    marginBottom: 4,
-  },
-  phone: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: Colors.text,
+    letterSpacing: 10,
   },
   noticeBox: {
     backgroundColor: Colors.warningLight,
@@ -234,21 +223,14 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   noticeTitle: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '600',
     color: Colors.warning,
-    marginBottom: 8,
   },
   noticeText: {
-    fontSize: 13,
+    fontSize: 15,
     color: Colors.text,
-    lineHeight: 20,
-  },
-  buttons: {
-    gap: 12,
-  },
-  button: {
-    marginBottom: 0,
+    lineHeight: 22,
   },
   autoCheckInfo: {
     flexDirection: 'row',
@@ -259,10 +241,6 @@ const styles = StyleSheet.create({
     paddingTop: 16,
     borderTopWidth: 1,
     borderTopColor: Colors.border,
-  },
-  autoCheckText: {
-    fontSize: 12,
-    color: Colors.textSecondary,
   },
 });
 

@@ -85,6 +85,22 @@ export interface Diary {
   updated_at: string;
 }
 
+// 다이어리 댓글
+export interface DiaryComment {
+  comment_id: string;
+  user_id: string;
+  content: string;
+  is_read: boolean;
+  created_at: string;
+  user_name: string;
+  user_role: string;
+}
+
+// 댓글 작성 요청
+export interface CommentCreateRequest {
+  content: string;
+}
+
 // TODO
 export interface Todo {
   todo_id: string;
