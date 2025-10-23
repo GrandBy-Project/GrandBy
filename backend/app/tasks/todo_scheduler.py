@@ -78,17 +78,29 @@ def send_todo_reminders():
         logger.info("⏰ TODO 리마인더 체크 시작")
         
         now = datetime.now()
-        # 10분 후 ~ 20분 후 시간대 (10분 주기로 실행되므로)
-        start_time = now + timedelta(minutes=10)
-        end_time = now + timedelta(minutes=20)
+        today = now.date()
         
-        # PENDING 상태의 TODO 중 시작 시간이 10~20분 사이인 것 조회
+        # 10분 후 ~ 20분 후 시간대 (10분 주기로 실행되므로)
+        reminder_start = now + timedelta(minutes=10)
+        reminder_end = now + timedelta(minutes=20)
+        
+        # 오늘 날짜의 PENDING 상태 TODO 조회
         upcoming_todos = db.query(Todo).filter(
             Todo.status == TodoStatus.PENDING,
-            Todo.start_time.isnot(None),
-            Todo.start_time >= start_time,
-            Todo.start_time < end_time
+            Todo.due_date == today,
+            Todo.due_time.isnot(None)
         ).all()
+        
+        # 시간 필터링 (10~20분 사이)
+        filtered_todos = []
+        for todo in upcoming_todos:
+            # due_date + due_time을 datetime으로 결합
+            todo_datetime = datetime.combine(todo.due_date, todo.due_time)
+            
+            if reminder_start <= todo_datetime < reminder_end:
+                filtered_todos.append(todo)
+        
+        upcoming_todos = filtered_todos
         
         logger.info(f"📋 알림 대상 TODO: {len(upcoming_todos)}개")
         
