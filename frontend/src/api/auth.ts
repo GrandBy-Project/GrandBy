@@ -80,14 +80,5 @@ export const refreshToken = async (refreshToken: string) => {
   return response.data;
 };
 
-/**
- * 전화번호 ARS 인증 상태 확인 (로그인 불필요)
- */
-export const checkPhoneVerification = async (phoneNumber: string) => {
-  const response = await apiClient.post('/api/auth/check-phone-verification', {
-    phone_number: phoneNumber
-  });
-  return response.data;
-};
 
 
