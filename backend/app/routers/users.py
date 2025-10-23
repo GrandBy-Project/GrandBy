@@ -960,10 +960,23 @@ async def update_push_token(
     - Expo Push Token 저장
     """
     
-    if not token_data.push_token or not token_data.push_token.startswith('ExponentPushToken'):
+    # FCM 토큰 또는 Expo Push Token 모두 허용
+    if not token_data.push_token:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="유효하지 않은 푸시 토큰입니다."
+            detail="푸시 토큰이 제공되지 않았습니다."
+        )
+    
+    # 토큰 유효성 검사 (FCM 토큰 또는 Expo Push Token)
+    is_valid_token = (
+        token_data.push_token.startswith('ExponentPushToken') or  # Expo Push Token
+        len(token_data.push_token) > 50  # FCM 토큰 (긴 문자열)
+    )
+    
+    if not is_valid_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="유효하지 않은 푸시 토큰 형식입니다."
         )
     
     current_user.push_token = token_data.push_token

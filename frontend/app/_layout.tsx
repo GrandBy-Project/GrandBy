@@ -49,16 +49,19 @@ export default function RootLayout() {
         return;
       }
 
-      // Expo Push Token 가져오기
-      const token = await Notifications.getExpoPushTokenAsync({
+      // FCM 토큰 직접 가져오기 (Firebase Admin SDK용)
+      const fcmToken = await Notifications.getDevicePushTokenAsync();
+      console.log('FCM Token:', fcmToken.data);
+      
+      // Expo Push Token도 가져오기 (Expo Push API용)
+      const expoToken = await Notifications.getExpoPushTokenAsync({
         projectId: '8c549577-e069-461c-807f-3f64d823fe74',
       });
+      console.log('Expo Push Token:', expoToken.data);
       
-      console.log('Expo Push Token:', token.data);
-      
-      // 서버에 토큰 등록
-      await registerPushToken(token.data);
-      console.log('푸시 토큰이 서버에 등록되었습니다.');
+      // 서버에 FCM 토큰 등록 (Firebase Admin SDK용)
+      await registerPushToken(fcmToken.data);
+      console.log('FCM 토큰이 서버에 등록되었습니다.');
       
     } catch (error) {
       console.error('푸시 알림 등록 실패:', error);

@@ -3,7 +3,7 @@
     "name": "Grandby",
     "slug": "frontend",
     "version": "1.0.0",
-    "owner": "grandby",
+    "owner": "grandby2",
     "orientation": "portrait",
     "platforms": [
       "ios",
@@ -57,7 +57,10 @@
           "icon": "./assets/icon.png",
           "color": "#ffffff",
           "sounds": [],
-          "modes": ["production", "development"],
+          "modes": [
+            "production",
+            "development"
+          ],
           "notificationPermission": "알림을 받기 위해 권한이 필요합니다."
         }
       ],
@@ -81,10 +84,10 @@
       ]
     ],
     "extra": {
+      "router": {},
       "eas": {
-        "projectId": "8c549577-e069-461c-807f-3f64d823fe74"
-      },
-      "router": {}
+        "projectId": "034ee5d2-677f-46a1-95f6-a022d63f5874"
+      }
     }
   }
 }

@@ -1,25 +1,41 @@
 """
 푸시 알림 서비스
-Expo Push Notification 전송
+Firebase Admin SDK를 사용한 푸시 알림 전송
 """
 
-import httpx
 import logging
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 from datetime import datetime
+
+import firebase_admin
+from firebase_admin import credentials, messaging
 
 from app.models.user import User, UserSettings
 from app.models.notification import Notification, NotificationType
 
 logger = logging.getLogger(__name__)
 
-# Expo Push Notification API
-EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
-
 
 class NotificationService:
     """알림 서비스"""
+    
+    _firebase_app = None
+    
+    @classmethod
+    def _get_firebase_app(cls):
+        """Firebase Admin SDK 앱 인스턴스 가져오기"""
+        if cls._firebase_app is None:
+            try:
+                # 서비스 계정 키 파일 경로
+                cred_path = "/app/credentials/firebase-admin-key.json"
+                cred = credentials.Certificate(cred_path)
+                cls._firebase_app = firebase_admin.initialize_app(cred)
+                logger.info("✅ Firebase Admin SDK 초기화 완료")
+            except Exception as e:
+                logger.error(f"❌ Firebase Admin SDK 초기화 실패: {str(e)}")
+                raise
+        return cls._firebase_app
     
     @staticmethod
     def can_send_notification(user: User, db: Session, notification_type: str = None) -> bool:
@@ -34,8 +50,18 @@ class NotificationService:
         Returns:
             bool: 알림 전송 가능 여부
         """
-        # 푸시 토큰 확인
-        if not user.push_token or not user.push_token.startswith('ExponentPushToken'):
+        # 푸시 토큰 확인 (FCM 토큰 또는 Expo Push Token 모두 허용)
+        if not user.push_token:
+            logger.debug(f"User {user.user_id} has no push token")
+            return False
+        
+        # FCM 토큰 또는 Expo Push Token 검증
+        is_valid_token = (
+            user.push_token.startswith('ExponentPushToken') or  # Expo Push Token
+            len(user.push_token) > 50  # FCM 토큰 (긴 문자열)
+        )
+        
+        if not is_valid_token:
             logger.debug(f"User {user.user_id} has no valid push token")
             return False
         
@@ -80,10 +106,10 @@ class NotificationService:
         priority: str = "default"
     ) -> Dict[str, Any]:
         """
-        Expo Push Notification 전송
+        Firebase Admin SDK를 사용한 푸시 알림 전송 (HTTP v1 API)
         
         Args:
-            push_tokens: Expo 푸시 토큰 리스트
+            push_tokens: FCM 토큰 리스트
             title: 알림 제목
             body: 알림 내용
             data: 추가 데이터
@@ -96,49 +122,67 @@ class NotificationService:
             logger.warning("No push tokens provided")
             return {"success": False, "error": "No push tokens"}
         
-        # 유효한 토큰만 필터링
-        valid_tokens = [
-            token for token in push_tokens 
-            if token and token.startswith('ExponentPushToken')
-        ]
+        # 유효한 FCM 토큰 필터링
+        valid_tokens = []
+        for token in push_tokens:
+            if token and len(token) > 10:  # FCM 토큰은 긴 문자열
+                valid_tokens.append(token)
         
         if not valid_tokens:
-            logger.warning(f"No valid push tokens: {push_tokens}")
-            return {"success": False, "error": "No valid push tokens"}
-        
-        # 메시지 구성
-        messages = []
-        for token in valid_tokens:
-            messages.append({
-                'to': token,
-                'sound': 'default',
-                'title': title,
-                'body': body,
-                'data': data or {},
-                'priority': priority,
-                'channelId': 'default',
-                'badge': 1,
-            })
+            logger.warning(f"No valid FCM tokens: {push_tokens}")
+            return {"success": False, "error": "No valid FCM tokens"}
         
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.post(
-                    EXPO_PUSH_URL,
-                    json=messages,
-                    headers={'Content-Type': 'application/json'}
-                )
-                
-                result = response.json()
-                
-                # 성공 로그
-                logger.info(f"✅ Push notification sent to {len(valid_tokens)} device(s): {title}")
-                logger.debug(f"Response: {result}")
-                
-                return {
-                    "success": True,
-                    "data": result,
-                    "sent_count": len(valid_tokens)
-                }
+            # Firebase Admin SDK 초기화
+            NotificationService._get_firebase_app()
+            
+            # Firebase Admin SDK로 메시지 전송 (HTTP v1 API 자동 사용)
+            success_count = 0
+            failed_count = 0
+            responses = []
+            
+            for fcm_token in valid_tokens:
+                try:
+                    # 메시지 구성
+                    message = messaging.Message(
+                        notification=messaging.Notification(
+                            title=title,
+                            body=body
+                        ),
+                        data=data or {},
+                        token=fcm_token,
+                        android=messaging.AndroidConfig(
+                            priority="high" if priority == "high" else "normal"
+                        )
+                    )
+                    
+                    # 메시지 전송 (HTTP v1 API 자동 사용)
+                    response = messaging.send(message)
+                    success_count += 1
+                    responses.append({
+                        "success": True,
+                        "message_id": response,
+                        "token": fcm_token
+                    })
+                    logger.info(f"✅ Push notification sent to {fcm_token}: {title}")
+                    
+                except Exception as e:
+                    failed_count += 1
+                    responses.append({
+                        "success": False,
+                        "error": str(e),
+                        "token": fcm_token
+                    })
+                    logger.error(f"❌ Failed to send to {fcm_token}: {str(e)}")
+            
+            logger.info(f"✅ Push notification batch completed: {success_count}/{len(valid_tokens)} sent")
+            
+            return {
+                "success": success_count > 0,
+                "sent_count": success_count,
+                "failed_count": failed_count,
+                "responses": responses
+            }
         
         except Exception as e:
             logger.error(f"❌ Failed to send push notification: {str(e)}")
@@ -173,15 +217,24 @@ class NotificationService:
             bool: 성공 여부
         """
         try:
-            # 사용자 조회
-            user = db.query(User).filter(User.user_id == user_id).first()
+            # 사용자 조회 (UUID 또는 email로 검색)
+            user = None
+            
+            # 먼저 UUID로 검색 시도
+            if len(user_id) == 36 and '-' in user_id:  # UUID 형식
+                user = db.query(User).filter(User.user_id == user_id).first()
+            
+            # UUID로 찾지 못했으면 email로 검색
+            if not user:
+                user = db.query(User).filter(User.email == user_id).first()
+            
             if not user:
                 logger.error(f"User not found: {user_id}")
                 return False
             
             # DB에 알림 저장
             notification = Notification(
-                user_id=user_id,
+                user_id=user.user_id,  # 실제 사용자의 UUID 사용
                 type=notification_type,
                 title=title,
                 message=message,
@@ -299,7 +352,7 @@ class NotificationService:
         return await NotificationService.create_and_send_notification(
             db=db,
             user_id=user_id,
-            notification_type=NotificationType.TODO_REMINDER,
+            notification_type=NotificationType.DIARY_CREATED,  # TODO_CREATED 타입이 없어서 임시로 사용
             title="✨ 새로운 일정이 추가되었어요",
             message=f"{creator_name}님이 '{todo_title}' 일정을 추가했습니다.",
             related_id=todo_id,
