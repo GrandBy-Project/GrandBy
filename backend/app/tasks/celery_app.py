@@ -46,10 +46,10 @@ celery_app.conf.beat_schedule = {
         "task": "app.tasks.todo_scheduler.generate_daily_recurring_todos",
         "schedule": crontab(hour=0, minute=0),  # 매일 00:00
     },
-    # TODO 리마인더 전송 (매 30분마다)
+    # TODO 리마인더 전송 (매 10분마다)
     "send-todo-reminders": {
         "task": "app.tasks.todo_scheduler.send_todo_reminders",
-        "schedule": crontab(minute="*/30"),  # 30분마다
+        "schedule": crontab(minute="*/10"),  # 10분마다 (10분 전 알림)
     },
     # 미완료 TODO 체크 (매일 밤 9시)
     "check-overdue-todos": {

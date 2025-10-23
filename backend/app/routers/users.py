@@ -217,6 +217,20 @@ async def create_connection(
     db.commit()
     db.refresh(new_connection)
     
+    # 🔔 연결 요청 푸시 알림 전송 (비동기)
+    try:
+        from app.services.notification_service import NotificationService
+        await NotificationService.notify_connection_request(
+            db=db,
+            elderly_id=elderly.user_id,
+            caregiver_name=current_user.name,
+            connection_id=new_connection.connection_id
+        )
+    except Exception as notify_error:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"⚠️ 연결 요청 알림 전송 실패 (연결은 생성됨): {str(notify_error)}")
+    
     return ConnectionResponse.from_orm(new_connection)
 
 
@@ -375,6 +389,21 @@ async def accept_connection(
     
     db.commit()
     db.refresh(connection)
+    
+    # 🔔 연결 수락 푸시 알림 전송 (비동기)
+    if caregiver:
+        try:
+            from app.services.notification_service import NotificationService
+            await NotificationService.notify_connection_accepted(
+                db=db,
+                caregiver_id=caregiver.user_id,
+                elderly_name=current_user.name,
+                connection_id=connection.connection_id
+            )
+        except Exception as notify_error:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"⚠️ 연결 수락 알림 전송 실패 (연결은 수락됨): {str(notify_error)}")
     
     return ConnectionResponse.from_orm(connection)
 
@@ -914,4 +943,109 @@ async def delete_account(
         "message": "계정이 삭제되었습니다. 30일 이내 복구 가능합니다.",
         "deleted_at": current_user.deleted_at.isoformat()
     }
+
+
+# ==================== 푸시 토큰 업데이트 ====================
+@router.put("/push-token")
+async def update_push_token(
+    token_data: "PushTokenUpdate",
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    푸시 알림 토큰 업데이트
+    
+    - 앱 시작 시 자동으로 호출
+    - Expo Push Token 저장
+    """
+    from app.schemas.user import PushTokenUpdate
+    
+    if not token_data.push_token or not token_data.push_token.startswith('ExponentPushToken'):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="유효하지 않은 푸시 토큰입니다."
+        )
+    
+    current_user.push_token = token_data.push_token
+    current_user.push_token_updated_at = datetime.utcnow()
+    
+    db.commit()
+    
+    logger.info(f"✅ 푸시 토큰 업데이트 완료: {current_user.user_id}")
+    
+    return {
+        "success": True,
+        "message": "푸시 토큰이 업데이트되었습니다.",
+        "updated_at": current_user.push_token_updated_at.isoformat()
+    }
+
+
+# ==================== 사용자 설정 조회 ====================
+@router.get("/settings", response_model="UserSettingsResponse")
+async def get_user_settings(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    사용자 설정 조회
+    """
+    from app.schemas.user import UserSettingsResponse
+    
+    settings = db.query(UserSettings).filter(
+        UserSettings.user_id == current_user.user_id
+    ).first()
+    
+    if not settings:
+        # 설정이 없으면 기본값으로 생성
+        settings = UserSettings(
+            setting_id=str(uuid.uuid4()),
+            user_id=current_user.user_id
+        )
+        db.add(settings)
+        db.commit()
+        db.refresh(settings)
+    
+    return UserSettingsResponse.from_orm(settings)
+
+
+# ==================== 사용자 설정 업데이트 ====================
+@router.put("/settings", response_model="UserSettingsResponse")
+async def update_user_settings(
+    settings_data: "UserSettingsUpdate",
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    사용자 설정 업데이트
+    
+    - 푸시 알림 세부 설정
+    - 자동 다이어리 생성 설정
+    """
+    from app.schemas.user import UserSettingsUpdate, UserSettingsResponse
+    
+    settings = db.query(UserSettings).filter(
+        UserSettings.user_id == current_user.user_id
+    ).first()
+    
+    if not settings:
+        # 설정이 없으면 생성
+        settings = UserSettings(
+            setting_id=str(uuid.uuid4()),
+            user_id=current_user.user_id
+        )
+        db.add(settings)
+    
+    # 업데이트할 항목만 변경
+    update_data = settings_data.dict(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(settings, field, value)
+    
+    settings.updated_at = datetime.utcnow()
+    
+    db.commit()
+    db.refresh(settings)
+    
+    logger.info(f"✅ 사용자 설정 업데이트 완료: {current_user.user_id}")
+    
+    return UserSettingsResponse.from_orm(settings)
 

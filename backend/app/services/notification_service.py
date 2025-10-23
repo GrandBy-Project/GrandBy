@@ -1,0 +1,424 @@
+"""
+푸시 알림 서비스
+Expo Push Notification 전송
+"""
+
+import httpx
+import logging
+from typing import List, Optional, Dict, Any
+from sqlalchemy.orm import Session
+from datetime import datetime
+
+from app.models.user import User, UserSettings
+from app.models.notification import Notification, NotificationType
+
+logger = logging.getLogger(__name__)
+
+# Expo Push Notification API
+EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
+
+
+class NotificationService:
+    """알림 서비스"""
+    
+    @staticmethod
+    def can_send_notification(user: User, db: Session, notification_type: str = None) -> bool:
+        """
+        사용자가 알림을 받을 수 있는지 확인
+        
+        Args:
+            user: 사용자 객체
+            db: DB 세션
+            notification_type: 알림 종류 (todo_reminder, todo_incomplete, etc.)
+        
+        Returns:
+            bool: 알림 전송 가능 여부
+        """
+        # 푸시 토큰 확인
+        if not user.push_token or not user.push_token.startswith('ExponentPushToken'):
+            logger.debug(f"User {user.user_id} has no valid push token")
+            return False
+        
+        # 사용자 설정 확인
+        settings = db.query(UserSettings).filter(
+            UserSettings.user_id == user.user_id
+        ).first()
+        
+        if not settings:
+            logger.warning(f"User {user.user_id} has no settings")
+            return False
+        
+        # 전체 푸시 알림 비활성화
+        if not settings.push_notification_enabled:
+            logger.debug(f"User {user.user_id} has push notifications disabled")
+            return False
+        
+        # 알림 종류별 확인
+        if notification_type:
+            type_mapping = {
+                'todo_reminder': settings.push_todo_reminder_enabled,
+                'todo_incomplete': settings.push_todo_incomplete_enabled,
+                'todo_created': settings.push_todo_created_enabled,
+                'diary_created': settings.push_diary_enabled,
+                'call_completed': settings.push_call_enabled,
+                'connection_request': settings.push_connection_enabled,
+                'connection_accepted': settings.push_connection_enabled,
+            }
+            
+            if notification_type in type_mapping and not type_mapping[notification_type]:
+                logger.debug(f"User {user.user_id} has {notification_type} notifications disabled")
+                return False
+        
+        return True
+    
+    @staticmethod
+    async def send_push_notification(
+        push_tokens: List[str],
+        title: str,
+        body: str,
+        data: Optional[Dict[str, Any]] = None,
+        priority: str = "default"
+    ) -> Dict[str, Any]:
+        """
+        Expo Push Notification 전송
+        
+        Args:
+            push_tokens: Expo 푸시 토큰 리스트
+            title: 알림 제목
+            body: 알림 내용
+            data: 추가 데이터
+            priority: 우선순위 (default, normal, high)
+        
+        Returns:
+            dict: 전송 결과
+        """
+        if not push_tokens:
+            logger.warning("No push tokens provided")
+            return {"success": False, "error": "No push tokens"}
+        
+        # 유효한 토큰만 필터링
+        valid_tokens = [
+            token for token in push_tokens 
+            if token and token.startswith('ExponentPushToken')
+        ]
+        
+        if not valid_tokens:
+            logger.warning(f"No valid push tokens: {push_tokens}")
+            return {"success": False, "error": "No valid push tokens"}
+        
+        # 메시지 구성
+        messages = []
+        for token in valid_tokens:
+            messages.append({
+                'to': token,
+                'sound': 'default',
+                'title': title,
+                'body': body,
+                'data': data or {},
+                'priority': priority,
+                'channelId': 'default',
+                'badge': 1,
+            })
+        
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(
+                    EXPO_PUSH_URL,
+                    json=messages,
+                    headers={'Content-Type': 'application/json'}
+                )
+                
+                result = response.json()
+                
+                # 성공 로그
+                logger.info(f"✅ Push notification sent to {len(valid_tokens)} device(s): {title}")
+                logger.debug(f"Response: {result}")
+                
+                return {
+                    "success": True,
+                    "data": result,
+                    "sent_count": len(valid_tokens)
+                }
+        
+        except Exception as e:
+            logger.error(f"❌ Failed to send push notification: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    @staticmethod
+    async def create_and_send_notification(
+        db: Session,
+        user_id: str,
+        notification_type: NotificationType,
+        title: str,
+        message: str,
+        related_id: Optional[str] = None,
+        notification_type_key: Optional[str] = None
+    ) -> bool:
+        """
+        알림 생성 및 푸시 알림 전송
+        
+        Args:
+            db: DB 세션
+            user_id: 사용자 ID
+            notification_type: 알림 유형
+            title: 알림 제목
+            message: 알림 내용
+            related_id: 관련 리소스 ID
+            notification_type_key: 알림 종류 키 (can_send_notification용)
+        
+        Returns:
+            bool: 성공 여부
+        """
+        try:
+            # 사용자 조회
+            user = db.query(User).filter(User.user_id == user_id).first()
+            if not user:
+                logger.error(f"User not found: {user_id}")
+                return False
+            
+            # DB에 알림 저장
+            notification = Notification(
+                user_id=user_id,
+                type=notification_type,
+                title=title,
+                message=message,
+                related_id=related_id,
+                is_read=False,
+                is_pushed=False
+            )
+            db.add(notification)
+            db.commit()
+            
+            logger.info(f"📝 Notification created: {notification_type} for {user_id}")
+            
+            # 푸시 알림 전송 가능 여부 확인
+            if not NotificationService.can_send_notification(user, db, notification_type_key):
+                logger.info(f"Push notification disabled for user {user_id}")
+                return True
+            
+            # 푸시 알림 전송
+            result = await NotificationService.send_push_notification(
+                push_tokens=[user.push_token],
+                title=title,
+                body=message,
+                data={
+                    'notification_id': notification.notification_id,
+                    'type': notification_type.value,
+                    'related_id': related_id
+                },
+                priority='default'
+            )
+            
+            # 푸시 전송 상태 업데이트
+            if result.get('success'):
+                notification.is_pushed = True
+                db.commit()
+                logger.info(f"✅ Push notification sent to {user_id}")
+            else:
+                logger.warning(f"⚠️ Push notification failed for {user_id}: {result.get('error')}")
+            
+            return True
+        
+        except Exception as e:
+            logger.error(f"❌ Failed to create and send notification: {str(e)}")
+            db.rollback()
+            return False
+    
+    @staticmethod
+    async def notify_todo_reminder(
+        db: Session,
+        user_id: str,
+        todo_title: str,
+        todo_id: str,
+        minutes_before: int = 10
+    ) -> bool:
+        """
+        TODO 리마인더 알림 전송
+        
+        Args:
+            db: DB 세션
+            user_id: 어르신 ID
+            todo_title: TODO 제목
+            todo_id: TODO ID
+            minutes_before: 몇 분 전인지
+        """
+        return await NotificationService.create_and_send_notification(
+            db=db,
+            user_id=user_id,
+            notification_type=NotificationType.TODO_REMINDER,
+            title=f"🔔 {minutes_before}분 후 일정이 있어요!",
+            message=f"'{todo_title}' 일정이 곧 시작됩니다.",
+            related_id=todo_id,
+            notification_type_key='todo_reminder'
+        )
+    
+    @staticmethod
+    async def notify_todo_incomplete(
+        db: Session,
+        user_id: str,
+        incomplete_count: int
+    ) -> bool:
+        """
+        미완료 TODO 알림 전송
+        
+        Args:
+            db: DB 세션
+            user_id: 어르신 ID
+            incomplete_count: 미완료 개수
+        """
+        return await NotificationService.create_and_send_notification(
+            db=db,
+            user_id=user_id,
+            notification_type=NotificationType.TODO_REMINDER,
+            title="📋 오늘의 할 일을 확인해주세요",
+            message=f"아직 완료하지 못한 일정이 {incomplete_count}개 있어요.",
+            notification_type_key='todo_incomplete'
+        )
+    
+    @staticmethod
+    async def notify_todo_created(
+        db: Session,
+        user_id: str,
+        todo_title: str,
+        todo_id: str,
+        creator_name: str
+    ) -> bool:
+        """
+        새로운 TODO 생성 알림
+        
+        Args:
+            db: DB 세션
+            user_id: 어르신 ID
+            todo_title: TODO 제목
+            todo_id: TODO ID
+            creator_name: 생성자 이름
+        """
+        return await NotificationService.create_and_send_notification(
+            db=db,
+            user_id=user_id,
+            notification_type=NotificationType.TODO_REMINDER,
+            title="✨ 새로운 일정이 추가되었어요",
+            message=f"{creator_name}님이 '{todo_title}' 일정을 추가했습니다.",
+            related_id=todo_id,
+            notification_type_key='todo_created'
+        )
+    
+    @staticmethod
+    async def notify_diary_created(
+        db: Session,
+        caregiver_ids: List[str],
+        elderly_name: str,
+        diary_id: str
+    ) -> bool:
+        """
+        다이어리 생성 알림 (보호자에게)
+        
+        Args:
+            db: DB 세션
+            caregiver_ids: 보호자 ID 리스트
+            elderly_name: 어르신 이름
+            diary_id: 다이어리 ID
+        """
+        success = True
+        for caregiver_id in caregiver_ids:
+            result = await NotificationService.create_and_send_notification(
+                db=db,
+                user_id=caregiver_id,
+                notification_type=NotificationType.DIARY_CREATED,
+                title="📖 새로운 일기가 작성되었어요",
+                message=f"{elderly_name}님의 오늘 일기가 자동으로 작성되었습니다.",
+                related_id=diary_id,
+                notification_type_key='diary_created'
+            )
+            if not result:
+                success = False
+        
+        return success
+    
+    @staticmethod
+    async def notify_call_completed(
+        db: Session,
+        caregiver_ids: List[str],
+        elderly_name: str,
+        call_id: str
+    ) -> bool:
+        """
+        AI 전화 완료 알림 (보호자에게)
+        
+        Args:
+            db: DB 세션
+            caregiver_ids: 보호자 ID 리스트
+            elderly_name: 어르신 이름
+            call_id: 통화 ID
+        """
+        success = True
+        for caregiver_id in caregiver_ids:
+            result = await NotificationService.create_and_send_notification(
+                db=db,
+                user_id=caregiver_id,
+                notification_type=NotificationType.CALL_MISSED,
+                title="📞 AI 전화가 완료되었어요",
+                message=f"{elderly_name}님과의 오늘 통화가 완료되었습니다.",
+                related_id=call_id,
+                notification_type_key='call_completed'
+            )
+            if not result:
+                success = False
+        
+        return success
+    
+    @staticmethod
+    async def notify_connection_request(
+        db: Session,
+        elderly_id: str,
+        caregiver_name: str,
+        connection_id: str
+    ) -> bool:
+        """
+        연결 요청 알림 (어르신에게)
+        
+        Args:
+            db: DB 세션
+            elderly_id: 어르신 ID
+            caregiver_name: 보호자 이름
+            connection_id: 연결 ID
+        """
+        return await NotificationService.create_and_send_notification(
+            db=db,
+            user_id=elderly_id,
+            notification_type=NotificationType.CONNECTION_REQUEST,
+            title="👥 새로운 연결 요청",
+            message=f"{caregiver_name}님이 연결을 요청했습니다.",
+            related_id=connection_id,
+            notification_type_key='connection_request'
+        )
+    
+    @staticmethod
+    async def notify_connection_accepted(
+        db: Session,
+        caregiver_id: str,
+        elderly_name: str,
+        connection_id: str
+    ) -> bool:
+        """
+        연결 수락 알림 (보호자에게)
+        
+        Args:
+            db: DB 세션
+            caregiver_id: 보호자 ID
+            elderly_name: 어르신 이름
+            connection_id: 연결 ID
+        """
+        return await NotificationService.create_and_send_notification(
+            db=db,
+            user_id=caregiver_id,
+            notification_type=NotificationType.CONNECTION_ACCEPTED,
+            title="✅ 연결 요청이 수락되었어요",
+            message=f"{elderly_name}님이 연결 요청을 수락했습니다.",
+            related_id=connection_id,
+            notification_type_key='connection_accepted'
+        )
+

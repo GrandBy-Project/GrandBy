@@ -152,6 +152,14 @@ class UserSettings(Base):
     auto_diary_enabled = Column(Boolean, default=True)
     push_notification_enabled = Column(Boolean, default=True)
     
+    # 푸시 알림 세부 설정
+    push_todo_reminder_enabled = Column(Boolean, default=True)  # TODO 10분 전 리마인더
+    push_todo_incomplete_enabled = Column(Boolean, default=True)  # 미완료 TODO 알림
+    push_todo_created_enabled = Column(Boolean, default=True)  # 새 TODO 생성 알림
+    push_diary_enabled = Column(Boolean, default=True)  # 다이어리 생성 알림
+    push_call_enabled = Column(Boolean, default=True)  # AI 전화 알림
+    push_connection_enabled = Column(Boolean, default=True)  # 연결 요청/수락 알림
+    
     # 언어 설정
     language_preference = Column(String(10), default="ko")
     

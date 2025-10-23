@@ -138,3 +138,42 @@ class CallScheduleResponse(BaseModel):
     is_active: bool
     call_time: Optional[str] = None  # HH:MM 형식 (예: "14:30")
 
+
+# ==================== 사용자 설정 ====================
+class UserSettingsUpdate(BaseModel):
+    """사용자 설정 업데이트"""
+    auto_diary_enabled: Optional[bool] = None
+    push_notification_enabled: Optional[bool] = None
+    push_todo_reminder_enabled: Optional[bool] = None
+    push_todo_incomplete_enabled: Optional[bool] = None
+    push_todo_created_enabled: Optional[bool] = None
+    push_diary_enabled: Optional[bool] = None
+    push_call_enabled: Optional[bool] = None
+    push_connection_enabled: Optional[bool] = None
+    language_preference: Optional[str] = None
+
+
+class UserSettingsResponse(BaseModel):
+    """사용자 설정 응답"""
+    setting_id: str
+    user_id: str
+    auto_diary_enabled: bool
+    push_notification_enabled: bool
+    push_todo_reminder_enabled: bool
+    push_todo_incomplete_enabled: bool
+    push_todo_created_enabled: bool
+    push_diary_enabled: bool
+    push_call_enabled: bool
+    push_connection_enabled: bool
+    language_preference: str
+    updated_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+# ==================== 푸시 토큰 ====================
+class PushTokenUpdate(BaseModel):
+    """푸시 토큰 업데이트"""
+    push_token: str
+
