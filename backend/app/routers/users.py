@@ -17,7 +17,8 @@ from app.database import get_db
 from app.schemas.user import (
     ConnectionCreate, ConnectionResponse, UserResponse,
     ElderlySearchResult, ConnectionListResponse, ConnectionWithUserInfo,
-    ConnectionCancelRequest, CallScheduleUpdate, CallScheduleResponse
+    ConnectionCancelRequest, CallScheduleUpdate, CallScheduleResponse,
+    PushTokenUpdate, UserSettingsUpdate, UserSettingsResponse
 )
 from app.models.user import User, UserSettings, UserConnection, UserRole, ConnectionStatus, Gender
 from app.models.call import CallSettings
@@ -948,7 +949,7 @@ async def delete_account(
 # ==================== 푸시 토큰 업데이트 ====================
 @router.put("/push-token")
 async def update_push_token(
-    token_data: "PushTokenUpdate",
+    token_data: PushTokenUpdate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -958,7 +959,6 @@ async def update_push_token(
     - 앱 시작 시 자동으로 호출
     - Expo Push Token 저장
     """
-    from app.schemas.user import PushTokenUpdate
     
     if not token_data.push_token or not token_data.push_token.startswith('ExponentPushToken'):
         raise HTTPException(
@@ -981,7 +981,7 @@ async def update_push_token(
 
 
 # ==================== 사용자 설정 조회 ====================
-@router.get("/settings", response_model="UserSettingsResponse")
+@router.get("/settings", response_model=UserSettingsResponse)
 async def get_user_settings(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -989,7 +989,6 @@ async def get_user_settings(
     """
     사용자 설정 조회
     """
-    from app.schemas.user import UserSettingsResponse
     
     settings = db.query(UserSettings).filter(
         UserSettings.user_id == current_user.user_id
@@ -1009,9 +1008,9 @@ async def get_user_settings(
 
 
 # ==================== 사용자 설정 업데이트 ====================
-@router.put("/settings", response_model="UserSettingsResponse")
+@router.put("/settings", response_model=UserSettingsResponse)
 async def update_user_settings(
-    settings_data: "UserSettingsUpdate",
+    settings_data: UserSettingsUpdate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -1021,7 +1020,6 @@ async def update_user_settings(
     - 푸시 알림 세부 설정
     - 자동 다이어리 생성 설정
     """
-    from app.schemas.user import UserSettingsUpdate, UserSettingsResponse
     
     settings = db.query(UserSettings).filter(
         UserSettings.user_id == current_user.user_id

@@ -3,15 +3,67 @@
  */
 import React, { useEffect } from 'react';
 import { Stack } from 'expo-router';
+import * as Notifications from 'expo-notifications';
+import { registerPushToken } from '../src/api/auth';
 import { useAuthStore } from '../src/store/authStore';
 
+// 푸시 알림 설정
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+    shouldShowBanner: true,
+    shouldShowList: true,
+  }),
+});
+
 export default function RootLayout() {
-  const { loadUser } = useAuthStore();
+  const { loadUser, user } = useAuthStore();
 
   useEffect(() => {
     // 앱 시작 시 저장된 사용자 정보 로드
     loadUser();
   }, []);
+
+  useEffect(() => {
+    // 사용자가 로그인되어 있을 때만 푸시 토큰 등록
+    if (user) {
+      registerForPushNotifications();
+    }
+  }, [user]);
+
+  const registerForPushNotifications = async () => {
+    try {
+      // 권한 요청
+      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      let finalStatus = existingStatus;
+      
+      if (existingStatus !== 'granted') {
+        const { status } = await Notifications.requestPermissionsAsync();
+        finalStatus = status;
+      }
+      
+      if (finalStatus !== 'granted') {
+        console.log('푸시 알림 권한이 거부되었습니다.');
+        return;
+      }
+
+      // Expo Push Token 가져오기
+      const token = await Notifications.getExpoPushTokenAsync({
+        projectId: '8c549577-e069-461c-807f-3f64d823fe74',
+      });
+      
+      console.log('Expo Push Token:', token.data);
+      
+      // 서버에 토큰 등록
+      await registerPushToken(token.data);
+      console.log('푸시 토큰이 서버에 등록되었습니다.');
+      
+    } catch (error) {
+      console.error('푸시 알림 등록 실패:', error);
+    }
+  };
 
   return (
     <Stack
