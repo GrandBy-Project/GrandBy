@@ -1,0 +1,31 @@
+@echo off
+REM Sample LLM Test Runner
+
+echo 🚀 Sample LLM Prompt Test
+echo ================================
+
+REM Check if docker container is running
+docker ps | findstr "grandby_api" >nul
+if %errorlevel% neq 0 (
+    echo ❌ grandby_api container is not running.
+    echo    Please start containers with 'docker-compose up -d' first.
+    pause
+    exit /b 1
+)
+
+echo ✅ Docker container check completed
+
+REM Copy script to docker container
+echo 📁 Copying sample test script to container...
+docker cp backend/sample_llm_test.py grandby_api:/app/sample_llm_test.py
+
+REM Run script in docker container
+echo 🧪 Running sample LLM test...
+echo ================================
+
+docker exec grandby_api python /app/sample_llm_test.py
+
+echo ================================
+echo ✅ Sample test completed
+pause
+
