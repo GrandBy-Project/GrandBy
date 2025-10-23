@@ -600,135 +600,253 @@ async def process_streaming_response(
     audio_processor=None
 ) -> str:
     """
-    스트리밍 방식으로 LLM → TTS → Twilio 전송을 순차 처리
+    실시간 하이브리드 방식: LLM 스트리밍 중 문장 생성 즉시 TTS 시작, 전송은 순서 보장
     
-    ✅ 수정 사항 (2025.10.22): 병렬 처리 → 순차 처리로 변경
-    - 이유: 병렬 TTS로 인한 음성 순서 뒤바뀜 문제 해결
-    - 트레이드오프: 약 0.5~1초 응답 시간 증가, 순서 100% 보장
-    
-    동작 방식:
-    1. LLM 스트리밍: 문장 생성 시 리스트에 저장 (즉시 실행 안 함)
-    2. LLM 완료 후: 저장된 문장을 순서대로 TTS 변환 및 전송
-    3. 결과: 생성 순서대로 정확한 음성 출력
+    핵심 개선:
+    - 문장이 생성되는 즉시 TTS 시작 (대기 시간 없음)
+    - TTS는 병렬로 실행되지만 전송은 순서대로
+    - 첫 응답 시간 최소화 (가장 빠른 방식)
     
     Args:
         websocket: Twilio WebSocket 연결
         stream_sid: Twilio Stream SID  
         user_text: 사용자 발화 전체 텍스트
         conversation_history: 대화 기록
-        audio_processor: AudioProcessor 인스턴스 (에코 방지용)
+        audio_processor: AudioProcessor 인스턴스
     
     Returns:
         str: 생성된 전체 AI 응답
     """
     import re
     
-    # TTS 시작 알림 (에코 방지)
+    # 에코 방지
     if audio_processor:
         audio_processor.start_bot_speaking()
     
     try:
-        logger.info(f"\n{'='*60}")
-        logger.info(f"🚀 스트리밍 응답 파이프라인 시작 (순차 처리)")
-        logger.info(f"{'='*60}")
-        
+        # 전체 파이프라인 시작 시간
         pipeline_start = time.time()
         
-        # 문장 버퍼 및 전체 응답 저장
+        # 순서 관리 변수
+        completed_audio = {}  # {index: (mulaw_data, playback_duration)}
+        next_send_index = [0]  # 다음에 전송할 순서 (리스트로 감싸서 클로저에서 수정 가능)
+        send_lock = asyncio.Lock()  # 동시 전송 방지
+        sentence_index = [0]  # 현재 문장 인덱스
+        
+        # 문장 및 응답 저장
         sentence_buffer = ""
         full_response = []
-        sentence_list = []  # ✅ 변경: 순서 보장용 문장 리스트
+        tts_tasks = []  # TTS 태스크 추적
         
-        # ==================== 단계 1: LLM 스트리밍 & 문장 수집 ====================
-        logger.info("🤖 LLM 스트리밍 시작 (문장 수집 단계)")
+        logger.info(f"[발화 종료 +0.00초] 실시간 하이브리드 파이프라인 시작")
         
-        # LLM 스트리밍 시작 (비동기 생성기)
+        # LLM 스트리밍: 문장 생성 즉시 TTS 시작
         async for chunk in llm_service.generate_response_streaming(
-            user_text,
-            conversation_history
+            user_text, conversation_history
         ):
             sentence_buffer += chunk
             full_response.append(chunk)
             
-            # 문장 종료 감지: 마침표, 느낌표, 물음표
+            # 문장 종료 감지 (마침표, 느낌표, 물음표, 줄바꿈)
             if re.search(r'[.!?\n]', chunk):
-                # 완성된 문장 추출
                 sentences = re.split(r'([.!?\n]+)', sentence_buffer)
                 
-                # 문장과 구두점을 쌍으로 처리
                 for i in range(0, len(sentences)-1, 2):
                     sentence = sentences[i] + (sentences[i+1] if i+1 < len(sentences) else "")
                     sentence = sentence.strip()
                     
                     if sentence:
-                        logger.info(f"📝 문장 완성: {sentence}")
-                        # ✅ 변경: 리스트에 추가만 (즉시 실행 안 함)
-                        sentence_list.append(sentence)
+                        current_idx = sentence_index[0]
+                        elapsed = time.time() - pipeline_start
+                        
+                        logger.info(f"[+{elapsed:.2f}초] 문장[{current_idx}] 생성: {sentence[:40]}...")
+                        
+                        # 핵심: 즉시 TTS 태스크 시작 (대기하지 않음!)
+                        task = asyncio.create_task(
+                            process_tts_and_send(
+                                websocket, stream_sid,
+                                current_idx, sentence,
+                                completed_audio, next_send_index, send_lock,
+                                pipeline_start
+                            )
+                        )
+                        tts_tasks.append(task)
+                        sentence_index[0] += 1
                 
-                # 마지막 불완전한 문장은 버퍼에 유지
                 sentence_buffer = sentences[-1] if len(sentences) % 2 == 1 else ""
         
-        # 남은 버퍼 처리 (마지막 문장)
+        # 마지막 문장 처리
         if sentence_buffer.strip():
-            logger.info(f"📝 마지막 문장: {sentence_buffer}")
-            sentence_list.append(sentence_buffer)
-        
-        logger.info(f"\n{'='*60}")
-        logger.info(f"✅ LLM 스트리밍 완료")
-        logger.info(f"📊 수집된 문장: {len(sentence_list)}개")
-        logger.info(f"{'='*60}\n")
-        
-        # ==================== 단계 2: 순차 TTS 처리 ====================
-        logger.info("🔊 TTS 순차 처리 시작")
-        
-        total_playback_duration = 0.0
-        
-        # ✅ 핵심 변경: 순서대로 하나씩 처리
-        for idx, sentence in enumerate(sentence_list, 1):
-            logger.info(f"\n[{idx}/{len(sentence_list)}] 🎵 TTS 처리: {sentence[:50]}{'...' if len(sentence) > 50 else ''}")
+            current_idx = sentence_index[0]
+            elapsed = time.time() - pipeline_start
+            logger.info(f"[+{elapsed:.2f}초] 문장[{current_idx}] 생성(마지막): {sentence_buffer[:40]}...")
             
-            # await로 완료 대기 (순차 실행)
-            playback_duration = await convert_and_send_audio(
-                websocket, 
-                stream_sid, 
-                sentence
+            task = asyncio.create_task(
+                process_tts_and_send(
+                    websocket, stream_sid,
+                    current_idx, sentence_buffer,
+                    completed_audio, next_send_index, send_lock,
+                    pipeline_start
+                )
             )
-            
-            total_playback_duration += playback_duration
-            logger.info(f"[{idx}/{len(sentence_list)}] ✅ 전송 완료 (재생: {playback_duration:.2f}초)")
+            tts_tasks.append(task)
         
-        # ==================== 단계 3: 완료 처리 ====================
+        # 모든 TTS 완료 대기
+        results = await asyncio.gather(*tts_tasks, return_exceptions=True)
+        total_playback_duration = sum(r for r in results if isinstance(r, (int, float)))
+        
         pipeline_time = time.time() - pipeline_start
         final_text = "".join(full_response)
         
-        # ⭐ 중요: 실제 음성 재생이 완료될 때까지 대기
-        # 네트워크 지연 + 버퍼링을 고려하여 약간 더 대기 (20% 여유)
+        logger.info(f"[+{pipeline_time:.2f}초] 전체 완료 (재생시간: {total_playback_duration:.2f}초)")
+        
+        # 음성 재생 완료 대기
         actual_wait_time = total_playback_duration * 1.2
-        
-        logger.info(f"\n{'='*60}")
-        logger.info(f"✅ 스트리밍 파이프라인 완료")
-        logger.info(f"⏱️  총 소요 시간: {pipeline_time:.2f}초")
-        logger.info(f"🔊 총 재생 시간: {total_playback_duration:.2f}초")
-        logger.info(f"⏳ 추가 대기: {actual_wait_time:.2f}초 (재생 완료 보장)")
-        logger.info(f"📤 전체 응답: {final_text}")
-        logger.info(f"{'='*60}\n")
-        
-        # 음성 재생이 완전히 끝날 때까지 대기
         if actual_wait_time > 0:
             await asyncio.sleep(actual_wait_time)
-            logger.info(f"✅ 음성 재생 완료 대기 끝")
         
         return final_text
         
     except Exception as e:
-        logger.error(f"❌ 스트리밍 파이프라인 오류: {e}")
+        logger.error(f"실시간 하이브리드 오류: {e}")
         import traceback
         logger.error(traceback.format_exc())
         return ""
     finally:
-        # TTS 종료 알림 (에코 방지)
         if audio_processor:
             audio_processor.stop_bot_speaking()
+
+
+async def process_tts_and_send(
+    websocket: WebSocket,
+    stream_sid: str,
+    index: int,
+    sentence: str,
+    completed_audio: dict,
+    next_send_index: list,
+    send_lock: asyncio.Lock,
+    pipeline_start: float
+) -> float:
+    """
+    단일 문장을 TTS 변환하고 순서에 맞춰 전송
+    
+    동작:
+    1. TTS 변환 (병렬 실행)
+    2. 완료되면 completed_audio에 저장
+    3. 자신의 순서가 되면 즉시 전송
+    
+    Args:
+        index: 문장 순서 번호
+        sentence: 변환할 문장
+        completed_audio: 완료된 오디오 저장소
+        next_send_index: 다음 전송 순서
+        send_lock: 전송 동기화 락
+        pipeline_start: 파이프라인 시작 시간
+    
+    Returns:
+        float: 재생 시간
+    """
+    try:
+        import wave
+        import io
+        
+        tts_start = time.time()
+        elapsed_start = tts_start - pipeline_start
+        logger.info(f"[+{elapsed_start:.2f}초] 문장[{index}] TTS 시작")
+        
+        # TTS 변환 (이 부분이 병렬로 실행됨)
+        audio_data, tts_time = await tts_service.text_to_speech_sentence(sentence)
+        
+        if not audio_data:
+            logger.warning(f"문장[{index}] TTS 실패")
+            return 0.0
+        
+        elapsed_tts_done = time.time() - pipeline_start
+        logger.info(f"[+{elapsed_tts_done:.2f}초] 문장[{index}] TTS 완료 ({tts_time:.2f}초 소요)")
+        
+        # WAV → mulaw 변환
+        wav_io = io.BytesIO(audio_data)
+        with wave.open(wav_io, 'rb') as wav_file:
+            channels = wav_file.getnchannels()
+            sample_width = wav_file.getsampwidth()
+            framerate = wav_file.getframerate()
+            pcm_data = wav_file.readframes(wav_file.getnframes())
+        
+        # Stereo → Mono 변환 (필요 시)
+        if channels == 2:
+            pcm_data = audioop.tomono(pcm_data, sample_width, 1, 1)
+        
+        # 샘플레이트 변환: Twilio는 8kHz 요구
+        if framerate != 8000:
+            pcm_data, _ = audioop.ratecv(pcm_data, sample_width, 1, framerate, 8000, None)
+        
+        # PCM → mulaw 변환
+        mulaw_data = audioop.lin2ulaw(pcm_data, 2)
+        playback_duration = len(mulaw_data) / 8000.0
+        
+        # 완료된 오디오를 저장소에 저장
+        completed_audio[index] = (mulaw_data, playback_duration)
+        
+        # 순서에 맞춰 전송 시도
+        await try_send_in_order(
+            websocket, stream_sid,
+            completed_audio, next_send_index, send_lock,
+            pipeline_start
+        )
+        
+        return playback_duration
+        
+    except Exception as e:
+        logger.error(f"문장[{index}] 처리 오류: {e}")
+        return 0.0
+
+
+async def try_send_in_order(
+    websocket: WebSocket,
+    stream_sid: str,
+    completed_audio: dict,
+    next_send_index: list,
+    send_lock: asyncio.Lock,
+    pipeline_start: float
+):
+    """
+    다음 순서의 오디오가 준비되면 전송
+    
+    핵심: 순서를 건너뛰지 않고 차례대로만 전송
+    예: 1번 완료 → 전송, 3번 완료 → 대기, 2번 완료 → 2,3 연속 전송
+    """
+    async with send_lock:  # 동시 전송 방지
+        # 다음 순서가 준비될 때까지 계속 전송
+        while next_send_index[0] in completed_audio:
+            index = next_send_index[0]
+            mulaw_data, playback_duration = completed_audio[index]
+            
+            send_start = time.time()
+            elapsed_send_start = send_start - pipeline_start
+            logger.info(f"[+{elapsed_send_start:.2f}초] 문장[{index}] 전송 시작")
+            
+            # Base64 인코딩 및 청크 단위 전송
+            audio_base64 = base64.b64encode(mulaw_data).decode('utf-8')
+            
+            chunk_size = 8000  # 8KB 청크
+            for i in range(0, len(audio_base64), chunk_size):
+                chunk = audio_base64[i:i + chunk_size]
+                
+                message = {
+                    "event": "media",
+                    "streamSid": stream_sid,
+                    "media": {"payload": chunk}
+                }
+                
+                await websocket.send_text(json.dumps(message))
+                await asyncio.sleep(0.02)  # 부드러운 재생
+            
+            elapsed_send_done = time.time() - pipeline_start
+            logger.info(f"[+{elapsed_send_done:.2f}초] 문장[{index}] 전송 완료 (재생: {playback_duration:.2f}초)")
+            
+            # 정리 및 다음 순서로 이동
+            del completed_audio[index]
+            next_send_index[0] += 1
 
 
 async def send_audio_to_twilio_with_tts(websocket: WebSocket, stream_sid: str, text: str, audio_processor=None):
