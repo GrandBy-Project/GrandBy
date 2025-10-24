@@ -77,12 +77,15 @@ def send_todo_reminders():
     try:
         logger.info("⏰ TODO 리마인더 체크 시작")
         
-        now = datetime.now()
+        # KST 시간대 사용
+        import pytz
+        kst = pytz.timezone('Asia/Seoul')
+        now = datetime.now(kst)
         today = now.date()
         
-        # 10분 후 ~ 20분 후 시간대 (10분 주기로 실행되므로)
-        reminder_start = now + timedelta(minutes=10)
-        reminder_end = now + timedelta(minutes=20)
+        # 10분 전 리마인더 윈도우 (현재 시간 기준으로 10분 전 ~ 현재 시간)
+        reminder_start = now - timedelta(minutes=10)
+        reminder_end = now
         
         # 오늘 날짜의 PENDING 상태 TODO 조회
         upcoming_todos = db.query(Todo).filter(
@@ -91,13 +94,17 @@ def send_todo_reminders():
             Todo.due_time.isnot(None)
         ).all()
         
-        # 시간 필터링 (10~20분 사이)
+        # 시간 필터링 (현재 시간으로부터 10분 이내)
         filtered_todos = []
         for todo in upcoming_todos:
-            # due_date + due_time을 datetime으로 결합
-            todo_datetime = datetime.combine(todo.due_date, todo.due_time)
+            # due_date + due_time을 KST datetime으로 결합
+            todo_datetime = kst.localize(datetime.combine(todo.due_date, todo.due_time))
             
-            if reminder_start <= todo_datetime < reminder_end:
+            # TODO 시간이 현재 시간으로부터 10분 이내에 있으면 리마인더 발송
+            time_diff = todo_datetime - now
+            minutes_until_due = time_diff.total_seconds() / 60
+            
+            if 0 <= minutes_until_due <= 10:
                 filtered_todos.append(todo)
         
         upcoming_todos = filtered_todos
