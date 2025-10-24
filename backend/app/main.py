@@ -153,13 +153,14 @@ class AudioProcessor:
     
     def __init__(self, call_sid: str):
         self.call_sid = call_sid
-        self.audio_buffer = []  # 오디오 청크 버퍼
+        self.audio_buffer = []  # 오디오 청크 버퍼 (이제 PCM 데이터 저장)
         self.transcript_buffer = []  # 실시간 STT 결과 버퍼
         self.is_speaking = False  # 사용자가 말하고 있는지 여부
         
-        # ========== 동적 임계값 설정 ==========
-        self.base_silence_threshold = 20  # 기본 임계값 (fallback)
-        self.silence_threshold = 20  # 현재 임계값 (동적으로 변경됨)
+        # ========== PCM 기반 동적 임계값 설정 ==========
+        # PCM RMS 값은 μ-law보다 훨씬 큼 (16-bit vs 8-bit)
+        self.base_silence_threshold = 1000  # 기본 임계값 (PCM 16-bit 기준)
+        self.silence_threshold = 1000  # 현재 임계값 (동적으로 변경됨)
         
         # 배경 소음 측정
         self.noise_samples = []  # 배경 소음 RMS 샘플
@@ -167,14 +168,14 @@ class AudioProcessor:
         self.is_calibrated = False  # 보정 완료 여부
         self.background_noise_level = 0  # 측정된 배경 소음 레벨
         
-        # 적응형 조정 설정
-        self.noise_margin = 5  # 배경 소음 + 마진 = 임계값
-        self.min_threshold = 10  # 최소 임계값
-        self.max_threshold = 50  # 최대 임계값
+        # 적응형 조정 설정 (PCM 값에 맞게 조정)
+        self.noise_margin = 200  # 배경 소음 + 마진 = 임계값 (PCM 기준)
+        self.min_threshold = 500  # 최소 임계값 (PCM 기준)
+        self.max_threshold = 5000  # 최대 임계값 (PCM 기준)
         # ======================================
         
         self.silence_duration = 0  # 현재 침묵 지속 시간
-        self.max_silence = 1.0  # ⭐ 1초 침묵 후 STT 처리 (응답 속도 최적화)
+        self.max_silence = 0.5  # ⭐ 1.5초 침묵 후 STT 처리 (충분한 발화 수집)
 
         # 초기 노이즈 필터링
         self.warmup_chunks = 0  # 받은 청크 수
@@ -194,17 +195,17 @@ class AudioProcessor:
     
     def _calibrate_noise_level(self, rms: float):
         """
-        배경 소음 레벨 자동 보정
+        배경 소음 레벨 자동 보정 (PCM 기준)
         
         통화 시작 후 처음 1초 동안 수신한 RMS 값들의 평균을 
         배경 소음 레벨로 설정합니다.
         
         Args:
-            rms: 현재 청크의 RMS 값
+            rms: 현재 청크의 RMS 값 (PCM 16-bit)
         """
         if not self.is_calibrated:
-            # 비정상적으로 큰 값은 제외 (연결음 등)
-            if rms < 100:
+            # 비정상적으로 큰 값은 제외 (연결음 등) - PCM 기준으로 조정
+            if rms < 10000:  # PCM 16-bit 기준으로 조정
                 self.noise_samples.append(rms)
             
             # 충분한 샘플이 모이면 평균 계산
@@ -229,13 +230,13 @@ class AudioProcessor:
     
     def _update_threshold_adaptive(self, rms: float):
         """
-        실시간 적응형 임계값 조정 (선택적 기능)
+        실시간 적응형 임계값 조정 (PCM 기준)
         
         대화 중에도 RMS 통계를 기반으로 임계값을 미세 조정합니다.
         배경 소음이 변화하는 환경(예: 이동 중 통화)에 유용합니다.
         
         Args:
-            rms: 현재 청크의 RMS 값
+            rms: 현재 청크의 RMS 값 (PCM 16-bit)
         """
         # RMS 기록 저장
         self.rms_history.append(rms)
@@ -253,8 +254,8 @@ class AudioProcessor:
             new_threshold = estimated_noise + self.noise_margin
             new_threshold = max(self.min_threshold, min(self.max_threshold, new_threshold))
             
-            # 큰 변화가 있을 때만 업데이트 (±3 이상)
-            if abs(new_threshold - self.silence_threshold) > 3:
+            # 큰 변화가 있을 때만 업데이트 (±500 이상) - PCM 기준으로 조정
+            if abs(new_threshold - self.silence_threshold) > 500:
                 old_threshold = self.silence_threshold
                 self.silence_threshold = new_threshold
                 logger.info(f"🔄 임계값 적응: {old_threshold:.1f} → {new_threshold:.1f} (추정 소음: {estimated_noise:.1f})")
@@ -276,8 +277,14 @@ class AudioProcessor:
         }
 
     def add_audio_chunk(self, audio_data: bytes):
-        """오디오 청크 추가 및 음성 활동 감지 (동적 임계값 적용)"""
-        self.audio_buffer.append(audio_data)
+        """오디오 청크 추가 및 음성 활동 감지 (PCM 기반 동적 임계값 적용)"""
+        # μ-law → PCM 변환 (실시간)
+        try:
+            pcm_data = audioop.ulaw2lin(audio_data, 2)  # 16-bit PCM으로 변환
+            self.audio_buffer.append(pcm_data)
+        except Exception as e:
+            logger.error(f"❌ μ-law → PCM 변환 실패: {e}")
+            return
         
         # 워밍업: 초기 청크 무시 (연결 노이즈 방지)
         self.warmup_chunks += 1
@@ -294,8 +301,8 @@ class AudioProcessor:
                     logger.info("✅ AI 응답 종료 후 대기 완료, 사용자 입력 재개")
             return
         
-        # RMS 계산 (음량 측정)
-        rms = audioop.rms(audio_data, 1)
+        # RMS 계산 (PCM 16-bit 기준)
+        rms = audioop.rms(pcm_data, 2)  # 2바이트 샘플 폭
         
         # ========== 동적 임계값 기능 ==========
         # 1. 배경 소음 보정 (처음 1초)
@@ -307,8 +314,8 @@ class AudioProcessor:
         # self._update_threshold_adaptive(rms)
         # ======================================
         
-        # 비정상적으로 큰 RMS 값 필터링 (연결음, 에러 등)
-        if rms > 100:
+        # 비정상적으로 큰 RMS 값 필터링 (PCM 기준으로 조정)
+        if rms > 20000:  # PCM 16-bit 기준으로 조정
             logger.warning(f"⚠️  비정상적인 RMS 무시: {rms}")
             self.voice_chunks = 0
             return
@@ -349,7 +356,7 @@ class AudioProcessor:
         버퍼링된 오디오 가져오기 및 초기화
         
         Returns:
-            bytes: 병합된 오디오 데이터 (mulaw 포맷)
+            bytes: 병합된 오디오 데이터 (PCM 포맷)
         """
         audio = b''.join(self.audio_buffer)
         self.audio_buffer = []
@@ -394,17 +401,17 @@ class AudioProcessor:
     
     def remove_silence(self, audio_data: bytes) -> bytes:
         """
-        오디오 데이터에서 무음 구간 제거
+        오디오 데이터에서 무음 구간 제거 (PCM 기준)
         
         Args:
-            audio_data: mulaw 포맷 오디오 데이터
+            audio_data: PCM 포맷 오디오 데이터
         
         Returns:
             bytes: 무음이 제거된 오디오 데이터
         """
         try:
-            # 청크 크기 (20ms = 160 bytes at 8kHz mulaw)
-            chunk_size = 160
+            # 청크 크기 (20ms = 320 bytes at 8kHz PCM 16-bit)
+            chunk_size = 320  # 8kHz * 20ms * 2 bytes
             voice_chunks = []
             
             # 동적 임계값 사용 (calibration 완료 후)
@@ -418,9 +425,9 @@ class AudioProcessor:
                 if len(chunk) < chunk_size:
                     break
                 
-                # RMS 계산
+                # RMS 계산 (PCM 16-bit)
                 try:
-                    rms = audioop.rms(chunk, 1)
+                    rms = audioop.rms(chunk, 2)  # 2바이트 샘플 폭
                     
                     # 임계값보다 큰 경우에만 포함 (음성 구간)
                     if rms > threshold:
@@ -450,13 +457,12 @@ class AudioProcessor:
 
 async def transcribe_audio_realtime(audio_data: bytes, audio_processor=None) -> tuple[str, float]:
     """
-    실시간 오디오를 텍스트로 변환 (실시간 청크 기반 STT)
+    실시간 오디오를 텍스트로 변환 (PCM 기반)
     
-    Twilio mulaw 포맷을 WAV로 변환 후 실시간 STT 처리합니다.
-    새로운 transcribe_audio_chunk() 메서드를 사용하여 비동기로 처리합니다.
+    이제 audio_data는 이미 PCM 포맷이므로 추가 변환 불필요
     
     Args:
-        audio_data: Twilio에서 받은 mulaw 오디오 데이터
+        audio_data: PCM 오디오 데이터 (16-bit)
         audio_processor: AudioProcessor 인스턴스 (무음 제거용)
     
     Returns:
@@ -468,36 +474,48 @@ async def transcribe_audio_realtime(audio_data: bytes, audio_processor=None) -> 
         
         # ✅ 무음 제거 (AudioProcessor가 제공된 경우)
         if audio_processor:
-            audio_data = audio_processor.remove_silence(audio_data)
+            # audio_data = audio_processor.remove_silence(audio_data)
             
             # 무음 제거 후 데이터가 너무 짧으면 스킵
-            if len(audio_data) < 1600:  # 최소 0.2초 (160 bytes * 10)
+            if len(audio_data) < 1600:  # 최소 0.1초 (320 bytes * 5)
                 logger.debug("⏭️  오디오 데이터가 너무 짧음, STT 스킵")
                 return "", 0
         
-        # mulaw를 16-bit PCM으로 변환
+        # PCM 데이터를 WAV 포맷으로 변환 (메모리 내)
+        logger.info(f"🔍 [STT 디버그] PCM 데이터 크기: {len(audio_data)} bytes")
+        
         try:
-            pcm_data = audioop.ulaw2lin(audio_data, 2)
-        except Exception as conv_error:
-            logger.error(f"❌ mulaw 변환 오류: {conv_error}")
+            wav_io = io.BytesIO()
+            
+            with wave.open(wav_io, 'wb') as wav_file:
+                wav_file.setnchannels(1)      # Mono
+                wav_file.setsampwidth(2)      # 16-bit (2 bytes)
+                wav_file.setframerate(8000)   # 8kHz
+                wav_file.writeframes(audio_data)  # 이미 PCM 데이터
+            
+            wav_data = wav_io.getvalue()
+            logger.info(f"✅ [STT 디버그] WAV 변환 완료: {len(wav_data)} bytes")
+            
+        except Exception as wav_error:
+            logger.error(f"❌ [STT 디버그] WAV 변환 실패: {wav_error}")
+            logger.error(f"   - PCM 데이터 크기: {len(audio_data)}")
+            logger.error(f"   - PCM 데이터 타입: {type(audio_data)}")
             return "", 0
         
-        # PCM 데이터를 WAV 포맷으로 변환 (메모리 내)
-        wav_io = io.BytesIO()
-        with wave.open(wav_io, 'wb') as wav_file:
-            wav_file.setnchannels(1)      # Mono
-            wav_file.setsampwidth(2)      # 16-bit (2 bytes)
-            wav_file.setframerate(8000)   # 8kHz (Twilio 샘플레이트)
-            wav_file.writeframes(pcm_data)
-        
-        wav_data = wav_io.getvalue()
-        logger.debug(f"📝 WAV 변환 완료: {len(wav_data)} bytes")
-        
         # 실시간 STT 변환 (비동기 처리)
-        transcript, stt_time = await stt_service.transcribe_audio_chunk(
-            wav_data,
-            language="ko"
-        )
+        logger.info(f"🎤 [STT 디버그] STT 서비스 호출 시작...")
+        try:
+            transcript, stt_time = await stt_service.transcribe_audio_chunk(
+                wav_data,
+                language="ko"
+            )
+            logger.info(f"✅ [STT 디버그] STT 서비스 응답 완료: '{transcript[:50]}...' ({stt_time:.2f}초)")
+        except Exception as stt_error:
+            logger.error(f"❌ [STT 디버그] STT 서비스 호출 실패: {stt_error}")
+            logger.error(f"   - WAV 데이터 크기: {len(wav_data)}")
+            import traceback
+            logger.error(f"   - 상세 오류: {traceback.format_exc()}")
+            return "", 0
         
         return transcript, stt_time
         
@@ -600,135 +618,253 @@ async def process_streaming_response(
     audio_processor=None
 ) -> str:
     """
-    스트리밍 방식으로 LLM → TTS → Twilio 전송을 순차 처리
+    실시간 하이브리드 방식: LLM 스트리밍 중 문장 생성 즉시 TTS 시작, 전송은 순서 보장
     
-    ✅ 수정 사항 (2025.10.22): 병렬 처리 → 순차 처리로 변경
-    - 이유: 병렬 TTS로 인한 음성 순서 뒤바뀜 문제 해결
-    - 트레이드오프: 약 0.5~1초 응답 시간 증가, 순서 100% 보장
-    
-    동작 방식:
-    1. LLM 스트리밍: 문장 생성 시 리스트에 저장 (즉시 실행 안 함)
-    2. LLM 완료 후: 저장된 문장을 순서대로 TTS 변환 및 전송
-    3. 결과: 생성 순서대로 정확한 음성 출력
+    핵심 개선:
+    - 문장이 생성되는 즉시 TTS 시작 (대기 시간 없음)
+    - TTS는 병렬로 실행되지만 전송은 순서대로
+    - 첫 응답 시간 최소화 (가장 빠른 방식)
     
     Args:
         websocket: Twilio WebSocket 연결
         stream_sid: Twilio Stream SID  
         user_text: 사용자 발화 전체 텍스트
         conversation_history: 대화 기록
-        audio_processor: AudioProcessor 인스턴스 (에코 방지용)
+        audio_processor: AudioProcessor 인스턴스
     
     Returns:
         str: 생성된 전체 AI 응답
     """
     import re
     
-    # TTS 시작 알림 (에코 방지)
+    # 에코 방지
     if audio_processor:
         audio_processor.start_bot_speaking()
     
     try:
-        logger.info(f"\n{'='*60}")
-        logger.info(f"🚀 스트리밍 응답 파이프라인 시작 (순차 처리)")
-        logger.info(f"{'='*60}")
-        
+        # 전체 파이프라인 시작 시간
         pipeline_start = time.time()
         
-        # 문장 버퍼 및 전체 응답 저장
+        # 순서 관리 변수
+        completed_audio = {}  # {index: (mulaw_data, playback_duration)}
+        next_send_index = [0]  # 다음에 전송할 순서 (리스트로 감싸서 클로저에서 수정 가능)
+        send_lock = asyncio.Lock()  # 동시 전송 방지
+        sentence_index = [0]  # 현재 문장 인덱스
+        
+        # 문장 및 응답 저장
         sentence_buffer = ""
         full_response = []
-        sentence_list = []  # ✅ 변경: 순서 보장용 문장 리스트
+        tts_tasks = []  # TTS 태스크 추적
         
-        # ==================== 단계 1: LLM 스트리밍 & 문장 수집 ====================
-        logger.info("🤖 LLM 스트리밍 시작 (문장 수집 단계)")
+        logger.info(f"[발화 종료 +0.00초] 실시간 하이브리드 파이프라인 시작")
         
-        # LLM 스트리밍 시작 (비동기 생성기)
+        # LLM 스트리밍: 문장 생성 즉시 TTS 시작
         async for chunk in llm_service.generate_response_streaming(
-            user_text,
-            conversation_history
+            user_text, conversation_history
         ):
             sentence_buffer += chunk
             full_response.append(chunk)
             
-            # 문장 종료 감지: 마침표, 느낌표, 물음표
+            # 문장 종료 감지 (마침표, 느낌표, 물음표, 줄바꿈)
             if re.search(r'[.!?\n]', chunk):
-                # 완성된 문장 추출
                 sentences = re.split(r'([.!?\n]+)', sentence_buffer)
                 
-                # 문장과 구두점을 쌍으로 처리
                 for i in range(0, len(sentences)-1, 2):
                     sentence = sentences[i] + (sentences[i+1] if i+1 < len(sentences) else "")
                     sentence = sentence.strip()
                     
                     if sentence:
-                        logger.info(f"📝 문장 완성: {sentence}")
-                        # ✅ 변경: 리스트에 추가만 (즉시 실행 안 함)
-                        sentence_list.append(sentence)
+                        current_idx = sentence_index[0]
+                        elapsed = time.time() - pipeline_start
+                        
+                        logger.info(f"[+{elapsed:.2f}초] 문장[{current_idx}] 생성: {sentence[:40]}...")
+                        
+                        # 핵심: 즉시 TTS 태스크 시작 (대기하지 않음!)
+                        task = asyncio.create_task(
+                            process_tts_and_send(
+                                websocket, stream_sid,
+                                current_idx, sentence,
+                                completed_audio, next_send_index, send_lock,
+                                pipeline_start
+                            )
+                        )
+                        tts_tasks.append(task)
+                        sentence_index[0] += 1
                 
-                # 마지막 불완전한 문장은 버퍼에 유지
                 sentence_buffer = sentences[-1] if len(sentences) % 2 == 1 else ""
         
-        # 남은 버퍼 처리 (마지막 문장)
+        # 마지막 문장 처리
         if sentence_buffer.strip():
-            logger.info(f"📝 마지막 문장: {sentence_buffer}")
-            sentence_list.append(sentence_buffer)
-        
-        logger.info(f"\n{'='*60}")
-        logger.info(f"✅ LLM 스트리밍 완료")
-        logger.info(f"📊 수집된 문장: {len(sentence_list)}개")
-        logger.info(f"{'='*60}\n")
-        
-        # ==================== 단계 2: 순차 TTS 처리 ====================
-        logger.info("🔊 TTS 순차 처리 시작")
-        
-        total_playback_duration = 0.0
-        
-        # ✅ 핵심 변경: 순서대로 하나씩 처리
-        for idx, sentence in enumerate(sentence_list, 1):
-            logger.info(f"\n[{idx}/{len(sentence_list)}] 🎵 TTS 처리: {sentence[:50]}{'...' if len(sentence) > 50 else ''}")
+            current_idx = sentence_index[0]
+            elapsed = time.time() - pipeline_start
+            logger.info(f"[+{elapsed:.2f}초] 문장[{current_idx}] 생성(마지막): {sentence_buffer[:40]}...")
             
-            # await로 완료 대기 (순차 실행)
-            playback_duration = await convert_and_send_audio(
-                websocket, 
-                stream_sid, 
-                sentence
+            task = asyncio.create_task(
+                process_tts_and_send(
+                    websocket, stream_sid,
+                    current_idx, sentence_buffer,
+                    completed_audio, next_send_index, send_lock,
+                    pipeline_start
+                )
             )
-            
-            total_playback_duration += playback_duration
-            logger.info(f"[{idx}/{len(sentence_list)}] ✅ 전송 완료 (재생: {playback_duration:.2f}초)")
+            tts_tasks.append(task)
         
-        # ==================== 단계 3: 완료 처리 ====================
+        # 모든 TTS 완료 대기
+        results = await asyncio.gather(*tts_tasks, return_exceptions=True)
+        total_playback_duration = sum(r for r in results if isinstance(r, (int, float)))
+        
         pipeline_time = time.time() - pipeline_start
         final_text = "".join(full_response)
         
-        # ⭐ 중요: 실제 음성 재생이 완료될 때까지 대기
-        # 네트워크 지연 + 버퍼링을 고려하여 약간 더 대기 (20% 여유)
+        logger.info(f"[+{pipeline_time:.2f}초] 전체 완료 (재생시간: {total_playback_duration:.2f}초)")
+        
+        # 음성 재생 완료 대기
         actual_wait_time = total_playback_duration * 1.2
-        
-        logger.info(f"\n{'='*60}")
-        logger.info(f"✅ 스트리밍 파이프라인 완료")
-        logger.info(f"⏱️  총 소요 시간: {pipeline_time:.2f}초")
-        logger.info(f"🔊 총 재생 시간: {total_playback_duration:.2f}초")
-        logger.info(f"⏳ 추가 대기: {actual_wait_time:.2f}초 (재생 완료 보장)")
-        logger.info(f"📤 전체 응답: {final_text}")
-        logger.info(f"{'='*60}\n")
-        
-        # 음성 재생이 완전히 끝날 때까지 대기
         if actual_wait_time > 0:
             await asyncio.sleep(actual_wait_time)
-            logger.info(f"✅ 음성 재생 완료 대기 끝")
         
         return final_text
         
     except Exception as e:
-        logger.error(f"❌ 스트리밍 파이프라인 오류: {e}")
+        logger.error(f"실시간 하이브리드 오류: {e}")
         import traceback
         logger.error(traceback.format_exc())
         return ""
     finally:
-        # TTS 종료 알림 (에코 방지)
         if audio_processor:
             audio_processor.stop_bot_speaking()
+
+
+async def process_tts_and_send(
+    websocket: WebSocket,
+    stream_sid: str,
+    index: int,
+    sentence: str,
+    completed_audio: dict,
+    next_send_index: list,
+    send_lock: asyncio.Lock,
+    pipeline_start: float
+) -> float:
+    """
+    단일 문장을 TTS 변환하고 순서에 맞춰 전송
+    
+    동작:
+    1. TTS 변환 (병렬 실행)
+    2. 완료되면 completed_audio에 저장
+    3. 자신의 순서가 되면 즉시 전송
+    
+    Args:
+        index: 문장 순서 번호
+        sentence: 변환할 문장
+        completed_audio: 완료된 오디오 저장소
+        next_send_index: 다음 전송 순서
+        send_lock: 전송 동기화 락
+        pipeline_start: 파이프라인 시작 시간
+    
+    Returns:
+        float: 재생 시간
+    """
+    try:
+        import wave
+        import io
+        
+        tts_start = time.time()
+        elapsed_start = tts_start - pipeline_start
+        logger.info(f"[+{elapsed_start:.2f}초] 문장[{index}] TTS 시작")
+        
+        # TTS 변환 (이 부분이 병렬로 실행됨)
+        audio_data, tts_time = await tts_service.text_to_speech_sentence(sentence)
+        
+        if not audio_data:
+            logger.warning(f"문장[{index}] TTS 실패")
+            return 0.0
+        
+        elapsed_tts_done = time.time() - pipeline_start
+        logger.info(f"[+{elapsed_tts_done:.2f}초] 문장[{index}] TTS 완료 ({tts_time:.2f}초 소요)")
+        
+        # WAV → mulaw 변환
+        wav_io = io.BytesIO(audio_data)
+        with wave.open(wav_io, 'rb') as wav_file:
+            channels = wav_file.getnchannels()
+            sample_width = wav_file.getsampwidth()
+            framerate = wav_file.getframerate()
+            pcm_data = wav_file.readframes(wav_file.getnframes())
+        
+        # Stereo → Mono 변환 (필요 시)
+        if channels == 2:
+            pcm_data = audioop.tomono(pcm_data, sample_width, 1, 1)
+        
+        # 샘플레이트 변환: Twilio는 8kHz 요구
+        if framerate != 8000:
+            pcm_data, _ = audioop.ratecv(pcm_data, sample_width, 1, framerate, 8000, None)
+        
+        # PCM → mulaw 변환
+        mulaw_data = audioop.lin2ulaw(pcm_data, 2)
+        playback_duration = len(mulaw_data) / 8000.0
+        
+        # 완료된 오디오를 저장소에 저장
+        completed_audio[index] = (mulaw_data, playback_duration)
+        
+        # 순서에 맞춰 전송 시도
+        await try_send_in_order(
+            websocket, stream_sid,
+            completed_audio, next_send_index, send_lock,
+            pipeline_start
+        )
+        
+        return playback_duration
+        
+    except Exception as e:
+        logger.error(f"문장[{index}] 처리 오류: {e}")
+        return 0.0
+
+
+async def try_send_in_order(
+    websocket: WebSocket,
+    stream_sid: str,
+    completed_audio: dict,
+    next_send_index: list,
+    send_lock: asyncio.Lock,
+    pipeline_start: float
+):
+    """
+    다음 순서의 오디오가 준비되면 전송
+    
+    핵심: 순서를 건너뛰지 않고 차례대로만 전송
+    예: 1번 완료 → 전송, 3번 완료 → 대기, 2번 완료 → 2,3 연속 전송
+    """
+    async with send_lock:  # 동시 전송 방지
+        # 다음 순서가 준비될 때까지 계속 전송
+        while next_send_index[0] in completed_audio:
+            index = next_send_index[0]
+            mulaw_data, playback_duration = completed_audio[index]
+            
+            send_start = time.time()
+            elapsed_send_start = send_start - pipeline_start
+            logger.info(f"[+{elapsed_send_start:.2f}초] 문장[{index}] 전송 시작")
+            
+            # Base64 인코딩 및 청크 단위 전송
+            audio_base64 = base64.b64encode(mulaw_data).decode('utf-8')
+            
+            chunk_size = 8000  # 8KB 청크
+            for i in range(0, len(audio_base64), chunk_size):
+                chunk = audio_base64[i:i + chunk_size]
+                
+                message = {
+                    "event": "media",
+                    "streamSid": stream_sid,
+                    "media": {"payload": chunk}
+                }
+                
+                await websocket.send_text(json.dumps(message))
+                await asyncio.sleep(0.02)  # 부드러운 재생
+            
+            elapsed_send_done = time.time() - pipeline_start
+            logger.info(f"[+{elapsed_send_done:.2f}초] 문장[{index}] 전송 완료 (재생: {playback_duration:.2f}초)")
+            
+            # 정리 및 다음 순서로 이동
+            del completed_audio[index]
+            next_send_index[0] += 1
 
 
 async def send_audio_to_twilio_with_tts(websocket: WebSocket, stream_sid: str, text: str, audio_processor=None):
