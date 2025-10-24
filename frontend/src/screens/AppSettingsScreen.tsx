@@ -15,8 +15,9 @@ import {
 } from 'react-native';
 import { BottomNavigationBar, Header } from '../components';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { apiClient } from '../api/client';
+import apiClient from '../api/client';
 import { useAuthStore } from '../store/authStore';
+import { UserRole } from '../types';
 
 export const AppSettingsScreen = () => {
   const insets = useSafeAreaInsets();
@@ -62,25 +63,37 @@ export const AppSettingsScreen = () => {
           ...prev,
           ...response.data,
         }));
+        console.log('✅ 사용자 설정 로드 성공:', response.data);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('사용자 설정 로드 실패:', error);
+      // 에러가 발생해도 기본값으로 계속 진행
+      console.log('기본 설정값으로 계속 진행합니다.');
     }
   };
 
   const updateSetting = async (key: string, value: any) => {
+    // 먼저 로컬 상태 업데이트
     setSettings(prev => ({ ...prev, [key]: value }));
     
     // 백엔드에 설정 저장
     try {
-      await apiClient.put('/api/users/settings', {
+      const response = await apiClient.put('/api/users/settings', {
         [key]: value,
       });
-    } catch (error) {
+      console.log('✅ 설정 저장 성공:', key, value);
+    } catch (error: any) {
       console.error('설정 저장 실패:', error);
-      Alert.alert('오류', '설정 저장에 실패했습니다.');
+      
       // 실패 시 이전 값으로 되돌리기
       setSettings(prev => ({ ...prev, [key]: !value }));
+      
+      // 사용자에게 알림
+      Alert.alert(
+        '설정 저장 실패', 
+        '설정을 저장할 수 없습니다. 네트워크 연결을 확인해주세요.',
+        [{ text: '확인' }]
+      );
     }
   };
 
@@ -186,71 +199,88 @@ export const AppSettingsScreen = () => {
     },
   ];
 
-  // 알림 설정 (실제 구현된 기능들)
-  const notificationSettings = [
-    {
-      id: 'push_notification_enabled',
-      title: '푸시 알림 전체',
-      description: '모든 푸시 알림을 켜거나 끕니다',
-      type: 'switch',
-      value: settings.push_notification_enabled,
-    },
-    {
-      id: 'push_todo_reminder_enabled',
-      title: '할 일 리마인더',
-      description: '할 일 시작 10분 전 알림',
-      type: 'switch',
-      value: settings.push_todo_reminder_enabled,
-      disabled: !settings.push_notification_enabled,
-    },
-    {
-      id: 'push_todo_incomplete_enabled',
-      title: '미완료 할 일 알림',
-      description: '매일 밤 9시 미완료 할 일 알림',
-      type: 'switch',
-      value: settings.push_todo_incomplete_enabled,
-      disabled: !settings.push_notification_enabled,
-    },
-    {
-      id: 'push_todo_created_enabled',
-      title: '새 할 일 생성 알림',
-      description: '보호자가 새 할 일을 추가할 때 알림',
-      type: 'switch',
-      value: settings.push_todo_created_enabled,
-      disabled: !settings.push_notification_enabled,
-    },
-    {
-      id: 'push_diary_enabled',
-      title: '일기 생성 알림',
-      description: 'AI 전화 후 일기가 생성될 때 알림',
-      type: 'switch',
-      value: settings.push_diary_enabled,
-      disabled: !settings.push_notification_enabled,
-    },
-    {
-      id: 'push_call_enabled',
-      title: 'AI 전화 완료 알림',
-      description: 'AI 전화가 완료될 때 알림',
-      type: 'switch',
-      value: settings.push_call_enabled,
-      disabled: !settings.push_notification_enabled,
-    },
-    {
-      id: 'push_connection_enabled',
-      title: '연결 요청/수락 알림',
-      description: '보호자-어르신 연결 관련 알림',
-      type: 'switch',
-      value: settings.push_connection_enabled,
-      disabled: !settings.push_notification_enabled,
-    },
-    {
-      id: 'auto_diary_enabled',
-      title: '자동 일기 생성',
-      description: 'AI 전화 후 자동으로 일기 생성',
-      type: 'switch',
-      value: settings.auto_diary_enabled,
-    },
-  ];
+  // 사용자 역할에 따른 알림 설정 필터링
+  const getNotificationSettings = () => {
+    const allSettings = [
+      {
+        id: 'push_notification_enabled',
+        title: '푸시 알림 전체',
+        description: '모든 푸시 알림을 켜거나 끕니다',
+        type: 'switch',
+        value: settings.push_notification_enabled,
+        roles: [UserRole.ELDERLY, UserRole.CAREGIVER], // 모든 역할
+      },
+      {
+        id: 'push_todo_reminder_enabled',
+        title: '할 일 리마인더',
+        description: '할 일 시작 10분 전 알림',
+        type: 'switch',
+        value: settings.push_todo_reminder_enabled,
+        disabled: !settings.push_notification_enabled,
+        roles: [UserRole.ELDERLY], // 어르신만
+      },
+      {
+        id: 'push_todo_incomplete_enabled',
+        title: '미완료 할 일 알림',
+        description: '매일 밤 9시 미완료 할 일 알림',
+        type: 'switch',
+        value: settings.push_todo_incomplete_enabled,
+        disabled: !settings.push_notification_enabled,
+        roles: [UserRole.ELDERLY], // 어르신만
+      },
+      {
+        id: 'push_todo_created_enabled',
+        title: '새 할 일 생성 알림',
+        description: '보호자가 새 할 일을 추가할 때 알림',
+        type: 'switch',
+        value: settings.push_todo_created_enabled,
+        disabled: !settings.push_notification_enabled,
+        roles: [UserRole.ELDERLY], // 어르신만
+      },
+      {
+        id: 'push_diary_enabled',
+        title: '일기 생성 알림',
+        description: 'AI 전화 후 일기가 생성될 때 알림',
+        type: 'switch',
+        value: settings.push_diary_enabled,
+        disabled: !settings.push_notification_enabled,
+        roles: [UserRole.CAREGIVER], // 보호자만
+      },
+      {
+        id: 'push_call_enabled',
+        title: 'AI 전화 완료 알림',
+        description: 'AI 전화가 완료될 때 알림',
+        type: 'switch',
+        value: settings.push_call_enabled,
+        disabled: !settings.push_notification_enabled,
+        roles: [UserRole.ELDERLY], // 어르신만 (전화를 받는 사람)
+      },
+      {
+        id: 'push_connection_enabled',
+        title: '연결 요청/수락 알림',
+        description: '보호자-어르신 연결 관련 알림',
+        type: 'switch',
+        value: settings.push_connection_enabled,
+        disabled: !settings.push_notification_enabled,
+        roles: [UserRole.ELDERLY, UserRole.CAREGIVER], // 모든 역할
+      },
+      {
+        id: 'auto_diary_enabled',
+        title: '자동 일기 생성',
+        description: 'AI 전화 후 자동으로 일기 생성',
+        type: 'switch',
+        value: settings.auto_diary_enabled,
+        roles: [UserRole.ELDERLY], // 어르신만 (일기가 생성되는 대상)
+      },
+    ];
+
+    // 현재 사용자 역할에 맞는 설정만 필터링
+    return allSettings.filter(setting => 
+      setting.roles.includes(user?.role as UserRole)
+    );
+  };
+
+  const notificationSettings = getNotificationSettings();
 
   // 접근성 설정
   const accessibilitySettings = [
