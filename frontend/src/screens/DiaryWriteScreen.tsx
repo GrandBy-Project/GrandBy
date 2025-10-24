@@ -42,8 +42,10 @@ export const DiaryWriteScreen = () => {
   const searchParams = useLocalSearchParams();
   const fromCall = searchParams.fromCall === 'true';
   const callSid = searchParams.callSid as string | undefined;
+  const fromBanner = searchParams.fromBanner === 'true'; // 상단 배너에서 온 경우 파라미터 추가
   const diaryId = searchParams.diaryId as string | undefined; // 수정 모드용
-  const isEditMode = !!diaryId; // 수정 모드 여부
+  const givenDiaryId = searchParams.givenDiaryId as string | undefined; // 기존 다이어리 ID
+  const isEditMode = !!(diaryId || givenDiaryId); // 수정 모드 여부
 
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]); // YYYY-MM-DD
   const [title, setTitle] = useState('');
@@ -80,10 +82,10 @@ export const DiaryWriteScreen = () => {
    */
   useEffect(() => {
     const loadDiary = async () => {
-      if (isEditMode && diaryId) {
+      if (isEditMode && (diaryId || givenDiaryId)) {
         try {
           setIsLoadingSummary(true);
-          const diary = await getDiary(diaryId);
+          const diary = await getDiary(diaryId || givenDiaryId!);
           setExistingDiary(diary);
           
           // 폼에 기존 데이터 채우기
@@ -106,57 +108,82 @@ export const DiaryWriteScreen = () => {
     };
 
     loadDiary();
-  }, [isEditMode, diaryId]);
+  }, [isEditMode, diaryId, givenDiaryId]);
 
   /**
    * 통화 요약 및 TODO 불러오기 (컴포넌트 마운트 시)
    */
   useEffect(() => {
     const loadCallData = async () => {
-      // 통화에서 온 경우이고 callSid가 있을 때만 실행
-      if (fromCall && callSid && !isEditMode) {
+      // ✅ 통화에서 온 경우 또는 상단 배너를 통해 온 경우 실행
+      if (fromCall || fromBanner) {
         try {
           setIsLoadingSummary(true);
-          console.log('📞 통화 데이터 불러오기 시작:', callSid);
+          console.log('📞 통화 데이터 불러오기 시작');
           
-          // 1. 통화 기록 가져오기 (일기 내용)
-          const callLog = await getCallLog(callSid);
-          console.log('✅ 통화 기록 조회 완료:', callLog);
+          let callSidToUse = callSid;
           
-          // conversation_summary가 있으면 content에 자동 입력
-          if (callLog.conversation_summary) {
-            setContent(callLog.conversation_summary);
-            setTitle('AI와의 대화 기록');
-            console.log('✅ 통화 요약 자동 입력 완료');
-          }
-          
-          // 2. TODO 자동 추출
-          const extractedTodos = await getExtractedTodos(callSid);
-          console.log('📋 추출된 TODO:', extractedTodos);
-          
-          if (extractedTodos.length > 0) {
-            setSuggestedTodos(extractedTodos);
+          // ✅ callSid가 없으면 최근 통화 기록에서 찾기 (상단 배너에서 온 경우)
+          if (!callSidToUse) {
+            console.log('📞 최근 통화 기록에서 callSid 찾기');
+            const { getCallLogs } = await import('../api/call');
+            const calls = await getCallLogs({ limit: 10 });
             
-            // 사용자에게 피드백
-            Alert.alert(
-              '💡 일정 발견!',
-              `대화에서 ${extractedTodos.length}개의 일정을 발견했습니다.\n아래에서 등록할 일정을 선택해주세요!`,
-              [{ text: '확인' }]
-            );
-          } else if (callLog.conversation_summary) {
-            // TODO는 없지만 일기는 있는 경우
-            Alert.alert(
-              '자동 완성',
-              'AI와의 대화 내용이 자동으로 입력되었습니다.\n수정 후 저장해주세요!',
-              [{ text: '확인' }]
-            );
+            // 최근 24시간 내 완료된 통화 기록 찾기
+            const now = new Date();
+            const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+            
+            const recentCall = calls.find((call: any) => {
+              const callDate = new Date(call.created_at);
+              return callDate > oneDayAgo && call.call_status === 'completed';
+            });
+            
+            if (recentCall) {
+              callSidToUse = recentCall.call_id;
+              console.log('✅ 최근 통화 기록 발견:', callSidToUse);
+            }
           }
           
+          if (callSidToUse) {
+            // 통화 기록 가져오기 (일기 내용)
+            const callLog = await getCallLog(callSidToUse);
+            console.log('✅ 통화 기록 조회 완료:', callLog);
+            
+            // conversation_summary가 있으면 content에 자동 입력
+            if (callLog.conversation_summary) {
+              setContent(callLog.conversation_summary);
+              setTitle('AI와의 대화 기록');
+              console.log('✅ 통화 요약 자동 입력 완료');
+            }
+            
+            // TODO 자동 추출
+            const extractedTodos = await getExtractedTodos(callSidToUse);
+            console.log('📋 추출된 TODO:', extractedTodos);
+            
+            if (extractedTodos.length > 0) {
+              setSuggestedTodos(extractedTodos);
+              
+              // 사용자에게 피드백
+              Alert.alert(
+                '💡 일정 발견!',
+                `대화에서 ${extractedTodos.length}개의 일정을 발견했습니다.\n아래에서 등록할 일정을 선택해주세요!`,
+                [{ text: '확인' }]
+              );
+            } else if (callLog.conversation_summary) {
+              // TODO는 없지만 일기는 있는 경우
+              Alert.alert(
+                '자동 완성',
+                'AI와의 대화 내용이 자동으로 입력되었습니다.\n수정 후 저장해주세요!',
+                [{ text: '확인' }]
+              );
+            }
+          }
         } catch (error) {
-          console.error('❌ 통화 데이터 불러오기 실패:', error);
+          console.error('❌ 통화 데이터 로딩 실패:', error);
           Alert.alert(
-            '알림',
-            '통화 내용을 불러오지 못했습니다.\n직접 작성해주세요.'
+            '오류',
+            '통화 데이터를 불러올 수 없습니다.',
+            [{ text: '확인' }]
           );
         } finally {
           setIsLoadingSummary(false);
@@ -165,7 +192,7 @@ export const DiaryWriteScreen = () => {
     };
 
     loadCallData();
-  }, [fromCall, callSid, isEditMode]);
+  }, [fromCall, fromBanner, callSid]); // fromBanner 의존성 추가
 
   /**
    * 카테고리 아이콘 반환
@@ -270,9 +297,9 @@ export const DiaryWriteScreen = () => {
     try {
       setIsSubmitting(true);
 
-      if (isEditMode && diaryId) {
+      if (isEditMode && (diaryId || givenDiaryId)) {
         // 수정 모드
-        await updateDiary(diaryId, {
+        await updateDiary(diaryId || givenDiaryId!, {
           title: title.trim() || undefined,
           content: content.trim(),
           mood: selectedMood || undefined,

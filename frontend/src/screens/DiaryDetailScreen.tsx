@@ -55,7 +55,11 @@ export const DiaryDetailScreen = () => {
       if (data.status === 'draft') {
         router.replace({
           pathname: '/diary-write',
-          params: { diaryId: data.diary_id },
+          params: { 
+            diaryId: data.diary_id,
+            callSid: data.call_id || '',
+            fromCall: 'true'
+          },
         });
         return;
       }

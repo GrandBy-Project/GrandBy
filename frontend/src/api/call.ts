@@ -111,6 +111,22 @@ export const getCallLog = async (callId: string): Promise<CallLog> => {
   return response.data;
 };
 
+/**
+ * 통화 기록 목록 조회
+ * 
+ * @param params - 조회 파라미터
+ * @returns 통화 기록 목록
+ */
+export const getCallLogs = async (params?: { limit?: number; elderly_id?: string }): Promise<CallLog[]> => {
+  try {
+    const response = await apiClient.get<CallLog[]>(`/api/calls/`, { params });
+    return response.data || [];
+  } catch (error) {
+    console.error('통화 기록 목록 조회 실패:', error);
+    return [];
+  }
+};
+
 // ==================== TODO 자동 추출 ====================
 
 export interface ExtractedTodo {

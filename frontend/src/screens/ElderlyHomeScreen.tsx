@@ -13,6 +13,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../store/authStore';
 import { useRouter } from 'expo-router';
 import { BottomNavigationBar, Header } from '../components';
@@ -243,6 +244,10 @@ export const ElderlyHomeScreen = () => {
 
   // 임시저장 다이어리 관련 state
   const [draftDiaries, setDraftDiaries] = useState<Diary[]>([]);
+  // 자동 전화 통화기록 확인용 state
+  const [hasRecentCall, setHasRecentCall] = useState(false);
+  // 오늘 다이어리 작성 여부 확인용 state
+  const [hasWrittenDiaryFromCall, setHasWrittenDiaryFromCall] = useState(false);
 
   // 날씨 정보 state
   const [weather, setWeather] = useState<{
@@ -263,6 +268,7 @@ export const ElderlyHomeScreen = () => {
       loadPendingConnections();
       loadDraftDiaries();
       loadWeather();
+      checkRecentCalls();
     }, [])
   );
 
@@ -351,6 +357,49 @@ export const ElderlyHomeScreen = () => {
       setDraftDiaries(drafts);
     } catch (error) {
       console.error('임시저장 다이어리 불러오기 실패:', error);
+    }
+  };
+
+  // ✅ 최근 통화 기록 확인 함수
+  const checkRecentCalls = async () => {
+    try {
+      const { getCallLogs } = await import('../api/call');
+      const { getDiaries } = await import('../api/diary');
+      
+      // 통화 기록 조회
+      const calls = await getCallLogs({ 
+        limit: 10, 
+        elderly_id: user?.user_id 
+      });
+      
+      // 오늘 다이어리 작성 여부 확인
+      const diaries = await getDiaries({ limit: 10 });
+      const today = new Date().toISOString().split('T')[0];
+      const hasTodayDiary = diaries.some(diary => 
+        diary.date === today && diary.status === 'published'
+      );
+      
+      // 최근 24시간 내 통화 기록이 있는지 확인
+      const now = new Date();
+      const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      
+      const recentCalls = calls.filter((call: any) => {
+        const callDate = new Date(call.created_at);
+        return callDate > oneDayAgo && call.call_status === 'completed';
+      });
+      
+      // 통화가 있고 오늘 다이어리가 없을 때만 배너 표시
+      const hasRecent = recentCalls.length > 0 && !hasTodayDiary;
+      setHasRecentCall(hasRecent);
+      setHasWrittenDiaryFromCall(hasTodayDiary);
+      
+      console.log(`📞 최근 통화 기록 확인: ${hasRecent ? '있음' : '없음'} (${recentCalls.length}건) - 오늘 다이어리: ${hasTodayDiary ? '작성됨' : '없음'} - 사용자: ${user?.user_id}`);
+      return hasRecent;
+    } catch (error) {
+      console.error('최근 통화 기록 확인 실패:', error);
+      setHasRecentCall(false);
+      setHasWrittenDiaryFromCall(false);
+      return false;
     }
   };
 
@@ -530,7 +579,7 @@ export const ElderlyHomeScreen = () => {
           activeOpacity={0.8}
         >
           <View style={styles.bannerContent}>
-            <Text style={styles.bannerIcon}>🔔</Text>
+            <Ionicons name="notifications" size={24} color="#FF9500" style={styles.bannerIcon} />
             <View style={styles.bannerText}>
               <Text style={[styles.bannerTitle, fontSizeLevel >= 1 && { fontSize: 18 }, fontSizeLevel >= 2 && { fontSize: 22 }]}>
                 새로운 연결 요청 ({pendingConnections.length})
@@ -544,24 +593,29 @@ export const ElderlyHomeScreen = () => {
         </TouchableOpacity>
       )}
 
-      {/* 임시저장 다이어리 알림 배너 */}
-      {draftDiaries.length > 0 && (
+      {/* 자동 전화 통화기록이 있으면 일기 작성 알림 배너 */}
+      {hasRecentCall && (
         <TouchableOpacity
           style={styles.draftNotificationBanner}
           onPress={() => {
-            // 첫 번째 임시저장 다이어리로 이동
-            router.push(`/diary-detail?diaryId=${draftDiaries[0].diary_id}`);
+            router.push({
+              pathname: '/diary-write',
+              params: {
+                fromCall: 'true',
+                fromBanner: 'true', 
+              },
+            });
           }}
           activeOpacity={0.8}
         >
           <View style={styles.bannerContent}>
-            <Text style={styles.bannerIcon}>✍️</Text>
+            <Ionicons name="call" size={24} color="#F57C00" style={styles.bannerIcon} />
             <View style={styles.bannerText}>
               <Text style={[styles.bannerTitle, fontSizeLevel >= 1 && { fontSize: 18 }, fontSizeLevel >= 2 && { fontSize: 22 }]}>
-                작성 중인 일기가 있어요! ({draftDiaries.length})
+                AI 통화 완료! 일기를 작성해보세요
               </Text>
               <Text style={[styles.bannerSubtitle, fontSizeLevel >= 1 && { fontSize: 16 }, fontSizeLevel >= 2 && { fontSize: 18 }]}>
-                임시저장된 일기를 확인해보세요
+                대화를 바탕으로 일기를 작성할 수 있어요
               </Text>
             </View>
             <Text style={styles.bannerArrow}>›</Text>
@@ -868,7 +922,7 @@ export const ElderlyHomeScreen = () => {
                 <Text style={[styles.modalTitle, fontSizeLevel >= 1 && { fontSize: 24 }]}>연결 요청</Text>
                 
                 <View style={styles.modalProfileSection}>
-                  <Text style={styles.modalProfileIcon}>👨‍💼</Text>
+                  <Ionicons name="person" size={48} color="#34B79F" style={styles.modalProfileIcon} />
                   <Text style={[styles.modalProfileName, fontSizeLevel >= 1 && { fontSize: 24 }]}>
                     {selectedConnection.name}님이
                   </Text>
@@ -879,14 +933,14 @@ export const ElderlyHomeScreen = () => {
 
                 <View style={styles.modalInfoSection}>
                   <View style={styles.modalInfoRow}>
-                    <Text style={[styles.modalInfoLabel, fontSizeLevel >= 1 && { fontSize: 16 }]}>📧</Text>
+                    <Ionicons name="mail" size={16} color="#666" style={[styles.modalInfoLabel, fontSizeLevel >= 1 && { fontSize: 16 }]} />
                     <Text style={[styles.modalInfoText, fontSizeLevel >= 1 && { fontSize: 16 }]}>
                       {selectedConnection.email}
                     </Text>
                   </View>
                   {selectedConnection.phone_number && (
                     <View style={styles.modalInfoRow}>
-                      <Text style={[styles.modalInfoLabel, fontSizeLevel >= 1 && { fontSize: 16 }]}>📞</Text>
+                      <Ionicons name="call" size={16} color="#666" style={[styles.modalInfoLabel, fontSizeLevel >= 1 && { fontSize: 16 }]} />
                       <Text style={[styles.modalInfoText, fontSizeLevel >= 1 && { fontSize: 16 }]}>
                         {selectedConnection.phone_number}
                       </Text>
@@ -895,9 +949,12 @@ export const ElderlyHomeScreen = () => {
                 </View>
 
                 <View style={styles.modalPermissionSection}>
-                  <Text style={[styles.modalPermissionTitle, fontSizeLevel >= 1 && { fontSize: 16 }]}>
-                    ℹ️ 연결하시면 다음을 공유합니다:
-                  </Text>
+                  <View style={styles.modalPermissionTitleRow}>
+                    <Ionicons name="information-circle" size={16} color="#34B79F" />
+                    <Text style={[styles.modalPermissionTitle, fontSizeLevel >= 1 && { fontSize: 16 }]}>
+                      연결하시면 다음을 공유합니다:
+                    </Text>
+                  </View>
                   <Text style={[styles.modalPermissionItem, fontSizeLevel >= 1 && { fontSize: 16 }]}>
                     • 할일 관리
                   </Text>
@@ -1369,7 +1426,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   bannerIcon: {
-    fontSize: 24,
     marginRight: 12,
   },
   bannerText: {
@@ -1425,7 +1481,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   modalProfileIcon: {
-    fontSize: 48,
     marginBottom: 12,
   },
   modalProfileName: {
@@ -1447,7 +1502,6 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   modalInfoLabel: {
-    fontSize: 14,
     marginRight: 8,
     width: 24,
   },
@@ -1462,11 +1516,16 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 24,
   },
+  modalPermissionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
   modalPermissionTitle: {
     fontSize: 14,
     fontWeight: '600',
     color: '#333',
-    marginBottom: 12,
+    marginLeft: 6,
   },
   modalPermissionItem: {
     fontSize: 14,

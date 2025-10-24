@@ -68,7 +68,9 @@ export interface Diary {
   diary_id: string;
   user_id: string;
   author_id: string;
+  call_id?: string;  // 통화 ID 추가
   date: string;
+  title?: string;  // 제목 추가
   content: string;
   author_type: 'elderly' | 'caregiver' | 'ai';
   is_auto_generated: boolean;
