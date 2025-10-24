@@ -146,6 +146,7 @@ services:
       S3_BUCKET_NAME: ${S3_BUCKET_NAME:-grandby-audio-files}
     volumes:
       - ./backend/app:/app/app
+      - ./backend/credentials:/app/credentials
     networks:
       - grandby_network
     restart: unless-stopped
@@ -179,6 +180,7 @@ services:
       S3_BUCKET_NAME: ${S3_BUCKET_NAME:-grandby-audio-files}
     volumes:
       - ./backend/app:/app/app
+      - ./backend/credentials:/app/credentials
     networks:
       - grandby_network
     restart: unless-stopped

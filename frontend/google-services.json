@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "61529653825",
+    "project_id": "grandby-cec42",
+    "storage_bucket": "grandby-cec42.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:61529653825:android:8323f485eeb49288b3fcc0",
+        "android_client_info": {
+          "package_name": "com.parad327.grandby"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBIIfdU1fI5FeCRhtrJv7s4RNifo9TxByY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

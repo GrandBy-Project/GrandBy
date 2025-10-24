@@ -1,7 +1,7 @@
 /**
  * 앱 설정 화면
  */
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -15,9 +15,13 @@ import {
 } from 'react-native';
 import { BottomNavigationBar, Header } from '../components';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import apiClient from '../api/client';
+import { useAuthStore } from '../store/authStore';
+import { UserRole } from '../types';
 
 export const AppSettingsScreen = () => {
   const insets = useSafeAreaInsets();
+  const { user } = useAuthStore();
 
   // 설정 상태 관리
   const [settings, setSettings] = useState({
@@ -27,12 +31,15 @@ export const AppSettingsScreen = () => {
     theme: 'light', // light, dark, highContrast
     language: 'ko', // ko, en
 
-    // 알림 설정
-    pushNotifications: true,
-    medicineReminder: true,
-    diaryReminder: true,
-    soundEnabled: true,
-    vibrationEnabled: true,
+    // 실제 구현된 알림 설정
+    push_notification_enabled: true, // 전체 푸시 알림
+    push_todo_reminder_enabled: true, // TODO 10분 전 리마인더
+    push_todo_incomplete_enabled: true, // 미완료 TODO 알림
+    push_todo_created_enabled: true, // 새 TODO 생성 알림
+    push_diary_enabled: true, // 다이어리 생성 알림
+    push_call_enabled: true, // AI 전화 완료 알림
+    push_connection_enabled: true, // 연결 요청/수락 알림
+    auto_diary_enabled: true, // 자동 다이어리 생성
 
     // 접근성 설정
     touchDelay: 'normal', // fast, normal, slow
@@ -41,8 +48,53 @@ export const AppSettingsScreen = () => {
     highContrast: false,
   });
 
-  const updateSetting = (key: string, value: any) => {
+  const [isLoading, setIsLoading] = useState(false);
+
+  // 사용자 설정 로드
+  useEffect(() => {
+    loadUserSettings();
+  }, []);
+
+  const loadUserSettings = async () => {
+    try {
+      const response = await apiClient.get('/api/users/settings');
+      if (response.data) {
+        setSettings(prev => ({
+          ...prev,
+          ...response.data,
+        }));
+        console.log('✅ 사용자 설정 로드 성공:', response.data);
+      }
+    } catch (error: any) {
+      console.error('사용자 설정 로드 실패:', error);
+      // 에러가 발생해도 기본값으로 계속 진행
+      console.log('기본 설정값으로 계속 진행합니다.');
+    }
+  };
+
+  const updateSetting = async (key: string, value: any) => {
+    // 먼저 로컬 상태 업데이트
     setSettings(prev => ({ ...prev, [key]: value }));
+    
+    // 백엔드에 설정 저장
+    try {
+      const response = await apiClient.put('/api/users/settings', {
+        [key]: value,
+      });
+      console.log('✅ 설정 저장 성공:', key, value);
+    } catch (error: any) {
+      console.error('설정 저장 실패:', error);
+      
+      // 실패 시 이전 값으로 되돌리기
+      setSettings(prev => ({ ...prev, [key]: !value }));
+      
+      // 사용자에게 알림
+      Alert.alert(
+        '설정 저장 실패', 
+        '설정을 저장할 수 없습니다. 네트워크 연결을 확인해주세요.',
+        [{ text: '확인' }]
+      );
+    }
   };
 
   const handleCacheClear = () => {
@@ -147,39 +199,88 @@ export const AppSettingsScreen = () => {
     },
   ];
 
-  // 알림 설정
-  const notificationSettings = [
-    {
-      id: 'pushNotifications',
-      title: '푸시 알림',
-      type: 'switch',
-      value: settings.pushNotifications,
-    },
-    {
-      id: 'medicineReminder',
-      title: '약 복용 알림',
-      type: 'switch',
-      value: settings.medicineReminder,
-    },
-    {
-      id: 'diaryReminder',
-      title: '일기 작성 알림',
-      type: 'switch',
-      value: settings.diaryReminder,
-    },
-    {
-      id: 'soundEnabled',
-      title: '알림 소리',
-      type: 'switch',
-      value: settings.soundEnabled,
-    },
-    {
-      id: 'vibrationEnabled',
-      title: '알림 진동',
-      type: 'switch',
-      value: settings.vibrationEnabled,
-    },
-  ];
+  // 사용자 역할에 따른 알림 설정 필터링
+  const getNotificationSettings = () => {
+    const allSettings = [
+      {
+        id: 'push_notification_enabled',
+        title: '푸시 알림 전체',
+        description: '모든 푸시 알림을 켜거나 끕니다',
+        type: 'switch',
+        value: settings.push_notification_enabled,
+        roles: [UserRole.ELDERLY, UserRole.CAREGIVER], // 모든 역할
+      },
+      {
+        id: 'push_todo_reminder_enabled',
+        title: '할 일 리마인더',
+        description: '할 일 시작 10분 전 알림',
+        type: 'switch',
+        value: settings.push_todo_reminder_enabled,
+        disabled: !settings.push_notification_enabled,
+        roles: [UserRole.ELDERLY], // 어르신만
+      },
+      {
+        id: 'push_todo_incomplete_enabled',
+        title: '미완료 할 일 알림',
+        description: '매일 밤 9시 미완료 할 일 알림',
+        type: 'switch',
+        value: settings.push_todo_incomplete_enabled,
+        disabled: !settings.push_notification_enabled,
+        roles: [UserRole.ELDERLY], // 어르신만
+      },
+      {
+        id: 'push_todo_created_enabled',
+        title: '새 할 일 생성 알림',
+        description: '보호자가 새 할 일을 추가할 때 알림',
+        type: 'switch',
+        value: settings.push_todo_created_enabled,
+        disabled: !settings.push_notification_enabled,
+        roles: [UserRole.ELDERLY], // 어르신만
+      },
+      {
+        id: 'push_diary_enabled',
+        title: '일기 생성 알림',
+        description: 'AI 전화 후 일기가 생성될 때 알림',
+        type: 'switch',
+        value: settings.push_diary_enabled,
+        disabled: !settings.push_notification_enabled,
+        roles: [UserRole.CAREGIVER], // 보호자만
+      },
+      {
+        id: 'push_call_enabled',
+        title: 'AI 전화 완료 알림',
+        description: 'AI 전화가 완료될 때 알림',
+        type: 'switch',
+        value: settings.push_call_enabled,
+        disabled: !settings.push_notification_enabled,
+        roles: [UserRole.ELDERLY], // 어르신만 (전화를 받는 사람)
+      },
+      {
+        id: 'push_connection_enabled',
+        title: '연결 요청/수락 알림',
+        description: '보호자-어르신 연결 관련 알림',
+        type: 'switch',
+        value: settings.push_connection_enabled,
+        disabled: !settings.push_notification_enabled,
+        roles: [UserRole.ELDERLY, UserRole.CAREGIVER], // 모든 역할
+      },
+      {
+        id: 'auto_diary_enabled',
+        title: '자동 일기 생성',
+        description: 'AI 전화 후 자동으로 일기 생성',
+        type: 'switch',
+        value: settings.auto_diary_enabled,
+        roles: [UserRole.ELDERLY], // 어르신만 (일기가 생성되는 대상)
+      },
+    ];
+
+    // 현재 사용자 역할에 맞는 설정만 필터링
+    return allSettings.filter(setting => 
+      setting.roles.includes(user?.role as UserRole)
+    );
+  };
+
+  const notificationSettings = getNotificationSettings();
 
   // 접근성 설정
   const accessibilitySettings = [
@@ -224,13 +325,27 @@ export const AppSettingsScreen = () => {
       return (
         <View key={setting.id} style={styles.settingItem}>
           <View style={styles.settingLeft}>
-            <Text style={styles.settingTitle}>{setting.title}</Text>
+            <Text style={[
+              styles.settingTitle,
+              setting.disabled && styles.disabledText
+            ]}>
+              {setting.title}
+            </Text>
+            {setting.description && (
+              <Text style={[
+                styles.settingDescription,
+                setting.disabled && styles.disabledText
+              ]}>
+                {setting.description}
+              </Text>
+            )}
           </View>
           <Switch
             value={setting.value}
             onValueChange={(value) => updateSetting(setting.id, value)}
             trackColor={{ false: '#E5E5E7', true: '#34B79F' }}
             thumbColor={setting.value ? '#FFFFFF' : '#FFFFFF'}
+            disabled={setting.disabled}
           />
         </View>
       );
@@ -429,6 +544,15 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#333333',
+  },
+  settingDescription: {
+    fontSize: 14,
+    color: '#666666',
+    marginTop: 4,
+    lineHeight: 18,
+  },
+  disabledText: {
+    color: '#999999',
   },
   settingRight: {
     flexDirection: 'row',
