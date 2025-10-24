@@ -101,16 +101,15 @@ def generate_diary_from_call(call_id: str):
                     )
                     logger.info(f"📤 다이어리 생성 알림 전송 완료: {len(caregiver_ids)}명")
                     
-                    # AI 전화 완료 알림
+                    # AI 전화 완료 알림 (어르신에게)
                     run_async(
                         NotificationService.notify_call_completed(
                             db=db,
-                            caregiver_ids=caregiver_ids,
-                            elderly_name=elderly.name,
+                            elderly_id=elderly.user_id,
                             call_id=call.call_id
                         )
                     )
-                    logger.info(f"📤 AI 전화 완료 알림 전송 완료: {len(caregiver_ids)}명")
+                    logger.info(f"📤 AI 전화 완료 알림 전송 완료: 어르신({elderly.name})")
         
         except Exception as notify_error:
             logger.error(f"⚠️ 알림 전송 실패: {str(notify_error)}")

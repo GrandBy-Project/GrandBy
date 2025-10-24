@@ -394,34 +394,26 @@ class NotificationService:
     @staticmethod
     async def notify_call_completed(
         db: Session,
-        caregiver_ids: List[str],
-        elderly_name: str,
+        elderly_id: str,
         call_id: str
     ) -> bool:
         """
-        AI 전화 완료 알림 (보호자에게)
+        AI 전화 완료 알림 (어르신에게)
         
         Args:
             db: DB 세션
-            caregiver_ids: 보호자 ID 리스트
-            elderly_name: 어르신 이름
+            elderly_id: 어르신 ID
             call_id: 통화 ID
         """
-        success = True
-        for caregiver_id in caregiver_ids:
-            result = await NotificationService.create_and_send_notification(
-                db=db,
-                user_id=caregiver_id,
-                notification_type=NotificationType.CALL_MISSED,
-                title="📞 AI 전화가 완료되었어요",
-                message=f"{elderly_name}님과의 오늘 통화가 완료되었습니다.",
-                related_id=call_id,
-                notification_type_key='call_completed'
-            )
-            if not result:
-                success = False
-        
-        return success
+        return await NotificationService.create_and_send_notification(
+            db=db,
+            user_id=elderly_id,
+            notification_type=NotificationType.CALL_MISSED,
+            title="📞 AI 전화가 완료되었어요",
+            message="오늘의 AI 전화가 완료되었습니다.",
+            related_id=call_id,
+            notification_type_key='call_completed'
+        )
     
     @staticmethod
     async def notify_connection_request(
