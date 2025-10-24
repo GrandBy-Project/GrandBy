@@ -81,4 +81,14 @@ export const refreshToken = async (refreshToken: string) => {
 };
 
 
+/**
+ * 푸시 토큰 등록
+ */
+export const registerPushToken = async (pushToken: string) => {
+  const response = await apiClient.put('/api/users/push-token', {
+    push_token: pushToken
+  });
+  return response.data;
+};
+
 

@@ -168,7 +168,7 @@ JSON 형식으로 응답:
             stream = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                max_tokens=500,
+                max_tokens=100,
                 temperature=0.8,
                 stream=True  # ⭐ 핵심: 스트리밍 활성화
             )
@@ -230,7 +230,7 @@ JSON 형식으로 응답:
     
     def summarize_call_conversation(self, conversation_history: list):
         """
-        통화 내용을 어르신의 1인칭 일기로 변환
+        통화 내용을 어르신의 1인칭 일기로 변환 (자연스러움과 정확성 균형)
         
         Args:
             conversation_history: 대화 기록 [{"role": "user", "content": "..."}, ...]
@@ -247,16 +247,20 @@ JSON 형식으로 응답:
             
             prompt = f"""
 다음은 어르신과 AI 비서의 통화 내용입니다. 
-이 대화를 바탕으로 어르신의 1인칭 시점에서 자연스럽고 따뜻한 일기를 작성해주세요.
+이 대화를 바탕으로 어르신이 직접 쓴 것 같은 자연스러운 일기를 작성해주세요.
+
+⚠️ 필수 준수사항:
+- 대화에서 실제로 언급된 내용만 사용하세요 (추측, 가정, 창작 금지)
+- 대화에 없는 행동, 감정, 계획을 추가하지 마세요
+- AI의 질문이나 반응은 일기에 포함하지 마세요 (어르신의 말만 사용)
 
 작성 가이드:
-- 1인칭 시점으로 작성 ("나는", "오늘은", "내가" 등)
-- 자연스럽고 따뜻한 구어체 사용 (반말 또는 편안한 말투)
-- 대화에서 언급된 활동, 감정, 생각을 모두 포함
-- 건강 상태(식사, 약, 통증 등), 기분, 계획 등을 자연스럽게 녹이기
-- 5-10문장 정도의 편안한 일기 형식
-- 문장은 짧고 간결하게, 하지만 감정은 풍부하게
-- 마치 어르신이 직접 작성한 것처럼 자연스럽게
+- "오늘은", "오늘" 등으로 자연스럽게 시작 ("안녕하세요" 금지)
+- 1인칭 구어체 사용 ("~했어", "~거야", "~네" 등)
+- 대화 순서대로 자연스럽게 연결
+- 문장은 간결하게, 하지만 감정은 진솔하게
+- 5-8문장 정도로 작성
+- 마치 손으로 직접 쓴 일기처럼 자연스럽게
 
 통화 내용:
 {conversation_text}
@@ -266,16 +270,16 @@ JSON 형식으로 응답:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=500,  # 충분한 길이 확보
-                temperature=0.8,  # 자연스럽고 다양한 표현
+                max_tokens=400, # 적정 길이로 조정
+                temperature=0.5, # 자연스러움과 정확성의 균형
             )
             
-            diary = response.choices[0].message.content
-            logger.info(f"✅ 어르신 일기 생성 완료")
-            return diary
+            summary = response.choices[0].message.content
+            logger.info(f"✅ 통화 일기기 생성 완료")
+            return summary
         except Exception as e:
-            logger.error(f"❌ 일기 생성 실패: {e}")
-            return "일기 생성에 실패했습니다."
+            logger.error(f"❌ 통화 일기 생성 실패: {e}")
+            return "일기 생성 실패"
     
     def extract_schedule_from_conversation(self, conversation_text: str):
         """

@@ -55,22 +55,96 @@ def generate_daily_recurring_todos():
 @shared_task(name="app.tasks.todo_scheduler.send_todo_reminders")
 def send_todo_reminders():
     """
-    다가오는 TODO 리마인더 알림 전송 (30분 전)
-    매 30분마다 실행
-    
-    TODO: 알림 시스템 구현 후 활성화
+    다가오는 TODO 리마인더 알림 전송 (10분 전)
+    매 10분마다 실행
     """
+    from app.models.todo import Todo, TodoStatus
+    from app.models.user import User
+    from app.services.notification_service import NotificationService
+    from datetime import datetime, timedelta
+    import asyncio
+    
+    def run_async(coro):
+        """비동기 함수를 동기적으로 실행"""
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        return loop.run_until_complete(coro)
+    
     db: Session = SessionLocal()
     try:
         logger.info("⏰ TODO 리마인더 체크 시작")
         
-        # TODO: NotificationService 구현 후 추가
-        # - 현재 시간 + 30분 이내의 TODO 조회
-        # - 해당 어르신에게 푸시 알림 전송
+        # KST 시간대 사용
+        import pytz
+        kst = pytz.timezone('Asia/Seoul')
+        now = datetime.now(kst)
+        today = now.date()
         
-        logger.info("✅ TODO 리마인더 체크 완료")
+        # 10분 전 리마인더 윈도우 (현재 시간 기준으로 10분 전 ~ 현재 시간)
+        reminder_start = now - timedelta(minutes=10)
+        reminder_end = now
         
-        return {"status": "success", "message": "리마인더 전송 완료"}
+        # 오늘 날짜의 PENDING 상태 TODO 조회
+        upcoming_todos = db.query(Todo).filter(
+            Todo.status == TodoStatus.PENDING,
+            Todo.due_date == today,
+            Todo.due_time.isnot(None)
+        ).all()
+        
+        # 시간 필터링 (현재 시간으로부터 10분 이내)
+        filtered_todos = []
+        for todo in upcoming_todos:
+            # due_date + due_time을 KST datetime으로 결합
+            todo_datetime = kst.localize(datetime.combine(todo.due_date, todo.due_time))
+            
+            # TODO 시간이 현재 시간으로부터 10분 이내에 있으면 리마인더 발송
+            time_diff = todo_datetime - now
+            minutes_until_due = time_diff.total_seconds() / 60
+            
+            if 0 <= minutes_until_due <= 10:
+                filtered_todos.append(todo)
+        
+        upcoming_todos = filtered_todos
+        
+        logger.info(f"📋 알림 대상 TODO: {len(upcoming_todos)}개")
+        
+        sent_count = 0
+        for todo in upcoming_todos:
+            try:
+                # 어르신 정보 조회
+                elderly = db.query(User).filter(User.user_id == todo.elderly_id).first()
+                if not elderly:
+                    continue
+                
+                # 리마인더 알림 전송
+                success = run_async(
+                    NotificationService.notify_todo_reminder(
+                        db=db,
+                        user_id=todo.elderly_id,
+                        todo_title=todo.title,
+                        todo_id=todo.todo_id,
+                        minutes_before=10
+                    )
+                )
+                
+                if success:
+                    sent_count += 1
+                    logger.info(f"✅ 리마인더 전송 완료: {todo.title} → {elderly.name}")
+            
+            except Exception as e:
+                logger.error(f"Failed to send reminder for todo {todo.todo_id}: {str(e)}")
+                continue
+        
+        logger.info(f"✅ TODO 리마인더 전송 완료: {sent_count}/{len(upcoming_todos)}개")
+        
+        return {
+            "status": "success",
+            "total": len(upcoming_todos),
+            "sent": sent_count
+        }
     
     except Exception as e:
         logger.error(f"❌ TODO 리마인더 실패: {str(e)}")
@@ -85,21 +159,75 @@ def check_overdue_todos():
     """
     미완료 TODO 체크 및 알림 전송
     매일 밤 9시 실행
-    
-    TODO: 알림 시스템 구현 후 활성화
     """
+    from app.models.todo import Todo, TodoStatus
+    from app.models.user import User
+    from app.services.notification_service import NotificationService
+    from datetime import datetime
+    import asyncio
+    
+    def run_async(coro):
+        """비동기 함수를 동기적으로 실행"""
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        return loop.run_until_complete(coro)
+    
     db: Session = SessionLocal()
     try:
         today = date.today()
         logger.info(f"🔔 미완료 TODO 체크 시작: {today}")
         
-        # TODO: NotificationService 구현 후 추가
-        # - 오늘 날짜의 PENDING 상태 TODO 조회
-        # - 보호자에게 알림 전송
+        # 오늘 날짜의 PENDING 상태 TODO를 어르신별로 그룹화
+        incomplete_todos = db.query(Todo).filter(
+            Todo.status == TodoStatus.PENDING,
+            Todo.due_date == today
+        ).all()
         
-        logger.info("✅ 미완료 TODO 체크 완료")
+        logger.info(f"📋 미완료 TODO: {len(incomplete_todos)}개")
         
-        return {"status": "success", "message": "미완료 체크 완료"}
+        # 어르신별로 미완료 TODO 개수 집계
+        elderly_todo_counts = {}
+        for todo in incomplete_todos:
+            if todo.elderly_id not in elderly_todo_counts:
+                elderly_todo_counts[todo.elderly_id] = 0
+            elderly_todo_counts[todo.elderly_id] += 1
+        
+        # 각 어르신에게 알림 전송
+        sent_count = 0
+        for elderly_id, count in elderly_todo_counts.items():
+            try:
+                elderly = db.query(User).filter(User.user_id == elderly_id).first()
+                if not elderly:
+                    continue
+                
+                # 미완료 알림 전송
+                success = run_async(
+                    NotificationService.notify_todo_incomplete(
+                        db=db,
+                        user_id=elderly_id,
+                        incomplete_count=count
+                    )
+                )
+                
+                if success:
+                    sent_count += 1
+                    logger.info(f"✅ 미완료 알림 전송: {elderly.name} ({count}개)")
+            
+            except Exception as e:
+                logger.error(f"Failed to send incomplete notification to {elderly_id}: {str(e)}")
+                continue
+        
+        logger.info(f"✅ 미완료 TODO 체크 완료: {sent_count}/{len(elderly_todo_counts)}명")
+        
+        return {
+            "status": "success",
+            "total_users": len(elderly_todo_counts),
+            "sent": sent_count,
+            "total_todos": len(incomplete_todos)
+        }
     
     except Exception as e:
         logger.error(f"❌ 미완료 TODO 체크 실패: {str(e)}")

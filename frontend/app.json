@@ -3,7 +3,7 @@
     "name": "Grandby",
     "slug": "frontend",
     "version": "1.0.0",
-    "owner": "grandby",
+    "owner": "grandby2",
     "orientation": "portrait",
     "platforms": [
       "ios",
@@ -27,8 +27,18 @@
         "backgroundColor": "#ffffff"
       },
       "package": "com.parad327.grandby",
+      "googleServicesFile": "./google-services.json",
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_CONTACTS",
+        "android.permission.WRITE_CONTACTS",
+        "android.permission.POST_NOTIFICATIONS"
+      ]
     },
     "plugins": [
       "expo-router",
@@ -40,13 +50,44 @@
         {
           "locationAlwaysAndWhenInUsePermission": "날씨 정보를 제공하기 위해 위치 권한이 필요합니다."
         }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#ffffff",
+          "sounds": [],
+          "modes": [
+            "production",
+            "development"
+          ],
+          "notificationPermission": "알림을 받기 위해 권한이 필요합니다."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "프로필 사진 촬영을 위해 카메라 권한이 필요합니다."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "프로필 사진 선택을 위해 사진 접근 권한이 필요합니다."
+        }
+      ],
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "연락처 접근을 위해 권한이 필요합니다."
+        }
       ]
     ],
     "extra": {
+      "router": {},
       "eas": {
-        "projectId": "8c549577-e069-461c-807f-3f64d823fe74"
-      },
-      "router": {}
+        "projectId": "034ee5d2-677f-46a1-95f6-a022d63f5874"
+      }
     }
   }
 }

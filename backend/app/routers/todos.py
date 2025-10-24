@@ -218,6 +218,7 @@ async def create_todo(
     - **recurring_type**: daily, weekly, monthly
     """
     import logging
+    from app.services.notification_service import NotificationService
     logger = logging.getLogger(__name__)
     
     logger.info(f"📥 TODO 생성 요청 - 사용자: {current_user.user_id}, 역할: {current_user.role}")
@@ -231,6 +232,20 @@ async def create_todo(
         )
         
         logger.info(f"✅ TODO 생성 성공 - ID: {todo.todo_id}")
+        
+        # 🔔 새 TODO 생성 알림 전송 (비동기)
+        try:
+            await NotificationService.notify_todo_created(
+                db=db,
+                user_id=todo_data.elderly_id,
+                todo_title=todo_data.title,
+                todo_id=todo.todo_id,
+                creator_name=current_user.name
+            )
+            logger.info(f"📤 TODO 생성 알림 전송 완료")
+        except Exception as notify_error:
+            logger.error(f"⚠️ TODO 생성 알림 전송 실패 (TODO는 생성됨): {str(notify_error)}")
+        
         return todo
         
     except Exception as e:
