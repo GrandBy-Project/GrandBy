@@ -20,20 +20,44 @@ class LLMService:
         # GPT-4o-mini 모델 사용 (빠르고 경제적)
         self.model = "gpt-4o-mini"
         
-        # 어르신을 위한 기본 시스템 프롬프트
-        self.elderly_care_prompt = """당신은 어르신들의 외로움을 달래주는 따뜻한 AI 친구입니다.
-다음 역할을 수행합니다:
-1. 친근하고 존댓말을 사용하여 대화합니다
-2. 어르신의 감정을 이해하고 공감합니다
-3. 약 복용, 식사, 운동 등 건강 상태를 자연스럽게 확인합니다
-4. 대화는 짧고 명확하게, 한 번에 하나의 질문만 합니다
-5. 긍정적이고 따뜻한 분위기를 유지합니다
+        # Gridspace Grace 방식 적용 프롬프트
+        self.elderly_care_prompt = """당신은 어르신의 웰빙을 돌보는 공감적 AI 동반자입니다.
 
-대화 예시:
-- "오늘은 어떻게 지내셨어요?"
-- "점심은 맛있게 드셨나요?"
-- "오늘 아침 약은 드셨나요?"
-- "날씨가 좋으니 잠깐 산책하시는 건 어떠세요?"
+핵심 역할:
+- 어르신의 신체적/정신적 웰빙을 자연스럽게 확인
+- 공감적이고 따뜻한 대화 제공
+- 존댓말로 친근하게 소통
+- 가족에게 필요한 정보 전달
+
+Grace 방식 대화 원칙:
+1. 공감적이고 명확한 질문만 하세요
+2. 질문보다는 공감과 지지 표현을 우선하세요
+3. 어르신이 먼저 이야기할 때까지 기다리세요
+4. 이미 답변한 내용을 다시 묻지 마세요
+5. 자연스러운 대화 흐름을 유지하세요
+
+대화 스타일:
+- 공감적이고 따뜻한 톤
+- 간결하고 명확한 표현
+- 어르신의 말에 진심으로 관심
+- 불필요한 질문 최소화
+
+적절한 응답 예시:
+- "그렇군요, 많이 힘드시겠어요"
+- "그런 일이 있으셨군요"
+- "정말 좋으시겠어요"
+- "조심히 지내세요"
+- "그러면 다행이에요"
+
+부적절한 응답 (피해야 할 것):
+- "어떤 일이 있었나요?" (과도한 질문)
+- "더 자세히 들려주세요" (질문 유도)
+- "혹시 ~하셨나요?" (반복 질문)
+
+웰빙 확인:
+- 어르신이 먼저 언급할 때만 공감하세요
+- 건강 상태를 적극적으로 묻지 마세요
+- 기분과 일상에 더 관심을 보이세요
 """
     
     def generate_response(self, user_message: str, conversation_history: list = None):
@@ -358,4 +382,67 @@ JSON 형식으로 응답 (일정 없으면 빈 배열):
         except Exception as e:
             logger.error(f"❌ 일정 추출 실패: {e}")
             return '{"schedules": []}'
+    
+    def test_conversation_quality(self, test_messages: list):
+        """
+        대화 품질 테스트 함수 (개선 전후 비교용)
+        
+        Args:
+            test_messages: 테스트할 사용자 메시지 리스트
+        
+        Returns:
+            dict: 테스트 결과 (존댓말 준수율, 응답 적절성, 응답 속도)
+        """
+        results = {
+            "total_tests": len(test_messages),
+            "polite_responses": 0,
+            "appropriate_responses": 0,
+            "response_times": [],
+            "responses": []
+        }
+        
+        for i, message in enumerate(test_messages):
+            logger.info(f"🧪 테스트 {i+1}/{len(test_messages)}: {message}")
+            
+            # 응답 생성 및 시간 측정
+            response, elapsed_time = self.generate_response(message)
+            results["response_times"].append(elapsed_time)
+            
+            # 존댓말 체크 (한국어 존댓말 패턴)
+            polite_patterns = ["습니다", "세요", "시어요", "시지요", "시죠", "세요", "시네요", "시구나"]
+            is_polite = any(pattern in response for pattern in polite_patterns)
+            if is_polite:
+                results["polite_responses"] += 1
+            
+            # 응답 적절성 체크 (간단한 키워드 기반)
+            appropriate_keywords = ["어르신", "건강", "약", "식사", "운동", "날씨", "안녕", "어떻게", "지내"]
+            is_appropriate = any(keyword in response for keyword in appropriate_keywords)
+            if is_appropriate:
+                results["appropriate_responses"] += 1
+            
+            results["responses"].append({
+                "input": message,
+                "output": response,
+                "is_polite": is_polite,
+                "is_appropriate": is_appropriate,
+                "response_time": elapsed_time
+            })
+            
+            logger.info(f"📝 응답: {response}")
+            logger.info(f"⏱️ 응답 시간: {elapsed_time:.2f}초")
+            logger.info(f"🙏 존댓말 사용: {'✅' if is_polite else '❌'}")
+            logger.info(f"💬 적절한 응답: {'✅' if is_appropriate else '❌'}")
+            logger.info("-" * 50)
+        
+        # 최종 결과 계산
+        results["polite_rate"] = (results["polite_responses"] / results["total_tests"]) * 100
+        results["appropriate_rate"] = (results["appropriate_responses"] / results["total_tests"]) * 100
+        results["avg_response_time"] = sum(results["response_times"]) / len(results["response_times"])
+        
+        logger.info(f"📊 테스트 결과 요약:")
+        logger.info(f"   존댓말 준수율: {results['polite_rate']:.1f}%")
+        logger.info(f"   응답 적절성: {results['appropriate_rate']:.1f}%")
+        logger.info(f"   평균 응답 시간: {results['avg_response_time']:.2f}초")
+        
+        return results
 
