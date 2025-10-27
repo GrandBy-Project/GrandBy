@@ -98,11 +98,19 @@ services:
       # Auto Seed (자동 더미 데이터 생성)
       AUTO_SEED: ${AUTO_SEED:-true}
 
-      # google cloud speech-to-text
-      STT_PROVIDER: ${STT_PROVIDER:-google}
+      # Speech-to-Text (STT)
+      STT_PROVIDER: ${STT_PROVIDER:-rtzr}
       GOOGLE_APPLICATION_CREDENTIALS: /app/credentials/google-cloud-stt.json
       GOOGLE_STT_LANGUAGE_CODE: ${GOOGLE_STT_LANGUAGE_CODE:-ko-KR}
       GOOGLE_STT_MODEL: ${GOOGLE_STT_MODEL:-phone_call}
+      
+      # RTZR WebSocket STT
+      RTZR_CLIENT_ID: ${RTZR_CLIENT_ID}
+      RTZR_CLIENT_SECRET: ${RTZR_CLIENT_SECRET}
+      RTZR_API_BASE: ${RTZR_API_BASE:-https://openapi.vito.ai}
+      RTZR_USE_ITN: ${RTZR_USE_ITN:-true}
+      RTZR_USE_DISFLUENCY_FILTER: ${RTZR_USE_DISFLUENCY_FILTER:-true}
+      RTZR_USE_PROFANITY_FILTER: ${RTZR_USE_PROFANITY_FILTER:-false}
       
     ports:
       - "8000:8000"

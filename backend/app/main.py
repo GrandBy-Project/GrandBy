@@ -167,7 +167,7 @@ class AudioProcessor:
         # ======================================
         
         self.silence_duration = 0  # 현재 침묵 지속 시간
-        self.max_silence = 0.5  # ⭐ 1.5초 침묵 후 STT 처리 (충분한 발화 수집)
+        self.max_silence = 0.5  # 침묵 후 STT 처리 시간
 
         # 초기 노이즈 필터링
         self.warmup_chunks = 0  # 받은 청크 수
@@ -1363,7 +1363,16 @@ async def media_stream_handler(
                 custom_params = data['start'].get('customParameters', {})
                 elderly_id = custom_params.get('elderly_id', 'unknown')
                 
+                # ⭐ RTZR 사용 시 침묵 감지 시간 제거 (완전 실시간)
+                use_rtzr = stt_service.provider == "rtzr"
+                
                 audio_processor = AudioProcessor(call_sid)
+                
+                # RTZR 사용 시 침묵 감지 시간 조정 (적절한 대기)
+                if use_rtzr:
+                    audio_processor.max_silence = 0.3  # 1.5초로 증가 (발화 완료 대기)
+                    audio_processor.silence_threshold = 200.0  # RMS 임계값 낮춤 (소음 제거)
+                    logger.info("🚀 [RTZR] 실시간 스트리밍 모드: 침묵 감지 1.5초")
                 active_connections[call_sid] = websocket
                 
                 # 대화 세션 초기화 (LLM 대화 히스토리 관리)
@@ -1423,7 +1432,20 @@ async def media_stream_handler(
                         
                         # 1️⃣ STT: 오디오 → 텍스트 변환 (실시간 청크 기반 + 무음 제거)
                         audio_data = audio_processor.get_audio()
-                        user_text, stt_time = await transcribe_audio_realtime(audio_data, audio_processor)
+                        
+                        # ⭐ 중간 결과 콜백 (병렬 처리 가능)
+                        llm_started = False
+                        async def intermediate_handler(partial_text: str):
+                            nonlocal llm_started
+                            if not llm_started and partial_text.strip():
+                                llm_started = True
+                                logger.info(f"🚀 [RTZR] 중간 결과로 LLM 사전 호출 시작: '{partial_text}'")
+                        
+                        user_text, stt_time = await stt_service.transcribe_audio_chunk(
+                            audio_data,
+                            language="ko",
+                            intermediate_callback=intermediate_handler if use_rtzr else None
+                        )
                         
                         if user_text and user_text.strip():
                             logger.info(f"✅ STT 완료 ({stt_time:.2f}초)")
@@ -1529,6 +1551,16 @@ async def media_stream_handler(
                 logger.info(f"🔄 Finally 블록에서 DB 저장 완료: {call_sid}")
             except Exception as e:
                 logger.error(f"❌ Finally 블록 DB 저장 실패: {e}")
+        
+        # ⭐ RTZR WebSocket 연결 정리 (통화 종료 시에만)
+        # 주의: 발화마다 닫지 않고 통화 전체에 걸쳐 재사용!
+        if stt_service.provider == "rtzr":
+            try:
+                # 통화가 완전히 종료될 때만 닫기 (지금은 정리 안 함, 다음 통화까지 유지)
+                # await stt_service.close_rtzr_websocket()  # ⚠️ 주석 처리 - 재사용 위해
+                logger.info("🔄 [RTZR] 통화 종료 - WebSocket 연결은 다음 통화까지 유지")
+            except Exception as e:
+                logger.error(f"❌ [RTZR] WebSocket 정리 실패: {e}")
         
         # 정리 작업 (메모리에서 제거)
         if call_sid and call_sid in active_connections:

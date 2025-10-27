@@ -1,6 +1,6 @@
 """
 STT (Speech-to-Text) 서비스
-Google Cloud Speech-to-Text + OpenAI Whisper API 지원
+Google Cloud Speech-to-Text + OpenAI Whisper + RTZR WebSocket STT 지원
 """
 
 from openai import OpenAI
@@ -13,12 +13,15 @@ import tempfile
 import os
 import asyncio
 import io
+import json
+import requests
+import base64
 
 logger = logging.getLogger(__name__)
 
 
 class STTService:
-    """음성을 텍스트로 변환하는 서비스 (Google Cloud & OpenAI 지원)"""
+    """음성을 텍스트로 변환하는 서비스 (Google, OpenAI, RTZR 지원)"""
     
     def __init__(self):
         # STT 제공자 설정 (환경 변수에서 읽기, 기본값: google)
@@ -28,6 +31,9 @@ class STTService:
         if self.provider == "google":
             logger.info(f"🔍 [STT Service] Google Cloud STT 초기화 중...")
             self._init_google_stt()
+        elif self.provider == "rtzr":
+            logger.info(f"🔍 [STT Service] RTZR 스트리밍 STT 초기화 중...")
+            self._init_rtzr_stt()
         else:  # openai
             logger.info(f"🔍 [STT Service] OpenAI Whisper 초기화 중...")
             self._init_openai_whisper()
@@ -73,6 +79,30 @@ class STTService:
         self.min_chunk_size = 8000 * 2 * 0.5  # 8kHz, 16bit, 최소 0.5초
         logger.info("✅ OpenAI Whisper 초기화 완료")
     
+    def _init_rtzr_stt(self):
+        """RTZR 스트리밍 STT 초기화"""
+        try:
+            self.rtzr_client_id = settings.RTZR_CLIENT_ID
+            self.rtzr_client_secret = settings.RTZR_CLIENT_SECRET
+            self.rtzr_api_base = settings.RTZR_API_BASE
+            
+            if not self.rtzr_client_id or not self.rtzr_client_secret:
+                raise ValueError("RTZR_CLIENT_ID와 RTZR_CLIENT_SECRET이 설정되지 않았습니다")
+            
+            # ⭐ 토큰 캐싱 변수 초기화
+            self._cached_token = None
+            self._token_expires_at = 0
+            
+            # ⭐ WebSocket 연결 풀 초기화
+            self._rtzr_ws = None
+            self._rtzr_ws_lock = asyncio.Lock()
+            
+            logger.info(f"✅ RTZR STT 초기화 완료")
+            logger.info(f"   - API Base: {self.rtzr_api_base}")
+        except Exception as e:
+            logger.error(f"❌ RTZR STT 초기화 실패: {e}")
+            raise
+    
     def transcribe_audio(self, audio_file_path: str, language: str = "ko"):
         """
         음성 파일을 텍스트로 변환 (실행 시간 측정 포함)
@@ -107,15 +137,17 @@ class STTService:
             logger.error(f"❌ STT 변환 실패: {e}")
             raise
     
-    async def transcribe_audio_chunk(self, audio_chunk: bytes, language: str = "ko"):
+    async def transcribe_audio_chunk(self, audio_chunk: bytes, language: str = "ko", intermediate_callback=None):
         """
         오디오 청크를 실시간으로 텍스트 변환 (비동기 처리)
         
-        제공자에 따라 Google Cloud 또는 OpenAI Whisper 사용
+        제공자에 따라 Google Cloud, OpenAI Whisper, 또는 RTZR 사용
+        RTZR 사용 시 중간 결과 콜백 지원
         
         Args:
             audio_chunk: 오디오 데이터 청크 (바이트 형식, WAV 권장)
             language: 언어 코드 (기본값: "ko" - 한국어)
+            intermediate_callback: 중간 결과 콜백 (RTZR 전용, optional)
         
         Returns:
             tuple: (변환된 텍스트, 실행 시간)
@@ -129,6 +161,9 @@ class STTService:
         if self.provider == "google":
             logger.info(f"🔍 [STT Service] Google Cloud STT로 라우팅")
             return await self._transcribe_google(audio_chunk, language)
+        elif self.provider == "rtzr":
+            logger.info(f"🔍 [STT Service] RTZR WebSocket STT로 라우팅")
+            return await self._transcribe_rtzr(audio_chunk, language, intermediate_callback)
         else:
             logger.info(f"🔍 [STT Service] OpenAI Whisper로 라우팅")
             return await self._transcribe_openai(audio_chunk, language)
@@ -385,4 +420,205 @@ class STTService:
         except Exception as e:
             logger.error(f"Failed to transcribe with timestamps: {e}")
             raise
+    
+    async def _get_rtzr_token(self):
+        """RTZR 토큰 가져오기 (캐싱)"""
+        # 캐시된 토큰 유효성 검사
+        if self._cached_token and self._token_expires_at > time.time():
+            logger.debug("♻️ 캐시된 토큰 재사용")
+            return self._cached_token
+        
+        # 새 토큰 발급
+        logger.info("🔐 [RTZR] 새 토큰 발급 중...")
+        auth_response = requests.post(
+            f"{self.rtzr_api_base}/v1/authenticate",
+            data={
+                "client_id": self.rtzr_client_id,
+                "client_secret": self.rtzr_client_secret
+            }
+        )
+        
+        if auth_response.status_code != 200:
+            raise Exception(f"RTZR 인증 실패: {auth_response.status_code}")
+        
+        token = auth_response.json()["access_token"]
+        
+        # 캐시 (1시간 유효)
+        self._cached_token = token
+        self._token_expires_at = time.time() + 3600
+        
+        logger.info("✅ [RTZR] 토큰 발급 및 캐시 완료")
+        return token
+    
+    async def _get_rtzr_websocket(self, token: str):
+        """WebSocket 연결 가져오기 - RTZR은 발화마다 새 연결 필요"""
+        async with self._rtzr_ws_lock:
+            # RTZR 특성상 EOS 전송 시 연결이 종료되므로 매번 새로 연결
+            if self._rtzr_ws:
+                try:
+                    await self._rtzr_ws.close()
+                except:
+                    pass
+                self._rtzr_ws = None
+            
+            # 새로 연결
+            logger.info("🌐 [RTZR] 새 WebSocket 연결 중...")
+            import websockets
+            
+            ws_url = "wss://openapi.vito.ai/v1/transcribe:streaming"
+            params = {
+                "sample_rate": "8000",
+                "encoding": "LINEAR16",
+                "use_itn": str(settings.RTZR_USE_ITN).lower(),
+                "use_disfluency_filter": str(settings.RTZR_USE_DISFLUENCY_FILTER).lower(),
+                "use_profanity_filter": str(settings.RTZR_USE_PROFANITY_FILTER).lower()
+            }
+            query_string = "&".join([f"{k}={v}" for k, v in params.items()])
+            
+            headers = {"Authorization": f"Bearer {token}"}
+            
+            self._rtzr_ws = await websockets.connect(
+                f"{ws_url}?{query_string}",
+                additional_headers=headers,
+                ping_interval=None
+            )
+            
+            logger.info("✅ [RTZR] WebSocket 연결 완료 (재사용 가능)")
+            return self._rtzr_ws
+    
+    async def close_rtzr_websocket(self):
+        """통화 종료 시 WebSocket 연결 닫기"""
+        async with self._rtzr_ws_lock:
+            if self._rtzr_ws:
+                try:
+                    await self._rtzr_ws.close()
+                    logger.info("🔄 [RTZR] WebSocket 연결 종료")
+                except:
+                    pass
+                self._rtzr_ws = None
+    
+    async def _transcribe_rtzr(self, audio_chunk: bytes, language: str = "ko", intermediate_callback=None):
+        """
+        RTZR WebSocket STT로 변환 (토큰 캐싱 + 연결 재사용 + 중간 결과 활용)
+        
+        Args:
+            audio_chunk: 오디오 데이터
+            language: 언어 코드
+            intermediate_callback: 중간 결과 콜백 함수 (optional)
+        """
+        try:
+            start_time = time.time()
+            logger.info(f"🔍 [RTZR STT] 시작 - 청크 크기: {len(audio_chunk)} bytes")
+            
+            # WAV 헤더 제거 및 PCM 추출
+            import wave
+            pcm_data = audio_chunk
+            
+            if audio_chunk[:4] == b'RIFF':
+                logger.info("🔍 [RTZR STT] WAV 헤더 제거 중...")
+                wav_io = io.BytesIO(audio_chunk)
+                with wave.open(wav_io, 'rb') as wav_file:
+                    pcm_data = wav_file.readframes(wav_file.getnframes())
+                    logger.info(f"✅ WAV 헤더 제거: {len(pcm_data)} bytes")
+            
+            # ⭐ 토큰 가져오기 (캐시)
+            token = await self._get_rtzr_token()
+            
+            # ⭐ WebSocket 가져오기 (재사용)
+            ws = await self._get_rtzr_websocket(token)
+            
+            # 오디오 데이터 전송
+            logger.info(f"📤 [RTZR STT] 오디오 데이터 전송 중... ({len(pcm_data)} bytes)")
+            
+            # 청크 단위로 전송
+            chunk_size = 16000  # 1초 분량
+            for i in range(0, len(pcm_data), chunk_size):
+                chunk = pcm_data[i:i + chunk_size]
+                await ws.send(chunk)
+                await asyncio.sleep(0.01)
+            
+            # 종료 신호 전송
+            await ws.send("EOS")
+            logger.info("📤 [RTZR STT] EOS 전송 완료")
+            
+            # 결과 수신
+            result_text = ""
+            results_received = []
+            intermediate_text = ""
+            final_received = False
+            
+            try:
+                # ⭐ 여러 응답 수신 (최종 결과까지)
+                max_attempts = 3  # 최대 3번까지 응답 받기
+                for attempt in range(max_attempts):
+                    try:
+                        response = await asyncio.wait_for(ws.recv(), timeout=2.0)
+                        if isinstance(response, bytes):
+                            continue
+                        
+                        result = json.loads(response)
+                        results_received.append(result)
+                        logger.info(f"📥 [RTZR STT] 응답 수신 [{attempt+1}]: {json.dumps(result, ensure_ascii=False)}")
+                        
+                        # alternatives에서 텍스트 추출
+                        if "alternatives" in result and len(result["alternatives"]) > 0:
+                            text = result["alternatives"][0].get("text", "")
+                            is_final = result.get("final", False)
+                            
+                            if is_final:
+                                result_text = text
+                                final_received = True
+                                logger.info(f"✅ [RTZR STT] 최종 결과: '{text}'")
+                                break  # 최종 결과 받았으므로 종료
+                            else:
+                                # ⭐ 중간 결과 활용
+                                intermediate_text = text
+                                logger.info(f"🔄 [RTZR STT] 중간 결과: '{text}'")
+                                
+                                # ⭐ 콜백이 있으면 중간 결과를 즉시 전달 (병렬 처리 가능)
+                                if intermediate_callback and text and text.strip():
+                                    try:
+                                        await intermediate_callback(text)
+                                        logger.info(f"📤 [RTZR STT] 중간 결과 콜백 실행: '{text}'")
+                                    except Exception as callback_error:
+                                        logger.error(f"❌ 중간 결과 콜백 오류: {callback_error}")
+                            
+                            # 중간 결과로도 최종 결과 설정 (final이 없을 수 있음)
+                            if not final_received and text:
+                                result_text = text
+                                
+                    except asyncio.TimeoutError:
+                        logger.debug(f"🔄 [RTZR STT] 응답 타임아웃 [{attempt+1}]")
+                        if result_text:  # 이미 결과가 있으면 종료
+                            break
+                        continue
+                            
+            except Exception as close_error:
+                logger.debug(f"WebSocket 종료: {close_error}")
+                if results_received:
+                    for r in reversed(results_received):
+                        if "alternatives" in r and len(r["alternatives"]) > 0:
+                            result_text = r["alternatives"][0].get("text", "")
+                            if r.get("final", False):
+                                break
+            
+            # ⭐ WebSocket 종료하지 않음! (다음 발화를 위해 재사용)
+            elapsed_time = time.time() - start_time
+            logger.info(f"✅ [RTZR STT] 완료 ({elapsed_time:.2f}초): '{result_text}'")
+            
+            return result_text, elapsed_time
+            
+        except Exception as e:
+            logger.error(f"❌ RTZR STT 변환 실패: {e}")
+            # 에러 발생 시 연결 초기화
+            async with self._rtzr_ws_lock:
+                if self._rtzr_ws:
+                    try:
+                        await self._rtzr_ws.close()
+                    except:
+                        pass
+                    self._rtzr_ws = None
+            import traceback
+            logger.error(traceback.format_exc())
+            return "", 0
 

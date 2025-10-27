@@ -37,13 +37,21 @@ class Settings(BaseSettings):
     OPENAI_TTS_VOICE: str = "nova"
     
     # ==================== Speech-to-Text ====================
-    # STT 제공자 선택: "google" 또는 "openai"
-    STT_PROVIDER: str = "google"
+    # STT 제공자 선택: "google", "openai", "rtzr"
+    STT_PROVIDER: str = "rtzr"  # RTZR 스트리밍 STT 사용
     
     # Google Cloud STT 설정
     GOOGLE_APPLICATION_CREDENTIALS: str = "credentials/google-cloud-stt.json"
     GOOGLE_STT_LANGUAGE_CODE: str = "ko-KR"
     GOOGLE_STT_MODEL: str = "latest_short"  # phone_call, latest_short, latest_long
+    
+    # RTZR 스트리밍 STT 설정
+    RTZR_CLIENT_ID: str = ""
+    RTZR_CLIENT_SECRET: str = ""
+    RTZR_API_BASE: str = "https://openapi.vito.ai"
+    RTZR_USE_ITN: bool = True  # 역텍스트 정규화 (숫자 등)
+    RTZR_USE_DISFLUENCY_FILTER: bool = True  # 더듬음 필터
+    RTZR_USE_PROFANITY_FILTER: bool = False  # 비속어 필터
     
     # ==================== Twilio ====================
     TWILIO_ACCOUNT_SID: str
