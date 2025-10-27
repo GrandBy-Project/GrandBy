@@ -39,11 +39,19 @@ class Settings(BaseSettings):
     # ==================== Speech-to-Text ====================
     # STT 제공자 선택: "google" 또는 "openai"
     STT_PROVIDER: str = "google"
-    
+
+    # STT 모드 선택: "streaming" 또는 "chunk" (기존 방식)
+    STT_MODE: str = "streaming"
+
     # Google Cloud STT 설정
     GOOGLE_APPLICATION_CREDENTIALS: str = "credentials/google-cloud-stt.json"
     GOOGLE_STT_LANGUAGE_CODE: str = "ko-KR"
-    GOOGLE_STT_MODEL: str = "latest_short"  # phone_call, latest_short, latest_long
+    GOOGLE_STT_MODEL: str = "latest_short"  # latest_short (한국어 지원), latest_long, default
+
+    # Google Cloud Streaming 설정
+    GOOGLE_STT_INTERIM_RESULTS: bool = True
+    GOOGLE_STT_SINGLE_UTTERANCE: bool = False
+    GOOGLE_STT_MAX_ALTERNATIVES: int = 1
     
     # ==================== Twilio ====================
     TWILIO_ACCOUNT_SID: str

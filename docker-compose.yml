@@ -98,11 +98,15 @@ services:
       # Auto Seed (자동 더미 데이터 생성)
       AUTO_SEED: ${AUTO_SEED:-true}
 
-      # google cloud speech-to-text
+      # Google Cloud Speech-to-Text (Streaming STT)
       STT_PROVIDER: ${STT_PROVIDER:-google}
+      STT_MODE: ${STT_MODE:-streaming}
       GOOGLE_APPLICATION_CREDENTIALS: /app/credentials/google-cloud-stt.json
       GOOGLE_STT_LANGUAGE_CODE: ${GOOGLE_STT_LANGUAGE_CODE:-ko-KR}
-      GOOGLE_STT_MODEL: ${GOOGLE_STT_MODEL:-phone_call}
+      GOOGLE_STT_MODEL: ${GOOGLE_STT_MODEL:-latest_short}
+      GOOGLE_STT_INTERIM_RESULTS: ${GOOGLE_STT_INTERIM_RESULTS:-true}
+      GOOGLE_STT_SINGLE_UTTERANCE: ${GOOGLE_STT_SINGLE_UTTERANCE:-false}
+      GOOGLE_STT_MAX_ALTERNATIVES: ${GOOGLE_STT_MAX_ALTERNATIVES:-1}
       
     ports:
       - "8000:8000"
@@ -144,9 +148,12 @@ services:
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
       AWS_REGION: ${AWS_REGION:-ap-northeast-2}
       S3_BUCKET_NAME: ${S3_BUCKET_NAME:-grandby-audio-files}
+      # Streaming STT 설정 추가
+      STT_MODE: ${STT_MODE:-streaming}
+      GOOGLE_APPLICATION_CREDENTIALS: /app/credentials/google-cloud-stt.json
     volumes:
       - ./backend/app:/app/app
-      - ./backend/credentials:/app/credentials
+      - ./backend/credentials:/app/credentials:ro
     networks:
       - grandby_network
     restart: unless-stopped
@@ -178,9 +185,12 @@ services:
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
       AWS_REGION: ${AWS_REGION:-ap-northeast-2}
       S3_BUCKET_NAME: ${S3_BUCKET_NAME:-grandby-audio-files}
+      # Streaming STT 설정 추가
+      STT_MODE: ${STT_MODE:-streaming}
+      GOOGLE_APPLICATION_CREDENTIALS: /app/credentials/google-cloud-stt.json
     volumes:
       - ./backend/app:/app/app
-      - ./backend/credentials:/app/credentials
+      - ./backend/credentials:/app/credentials:ro
     networks:
       - grandby_network
     restart: unless-stopped

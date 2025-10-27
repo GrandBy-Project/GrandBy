@@ -1367,29 +1367,17 @@ async def media_stream_handler(
     db: Session = Depends(get_db)
 ):
     """
-    Twilio Media Streams WebSocket 핸들러
-
-    STT_MODE에 따라 다른 처리 방식 사용:
-    - streaming: Google Cloud Streaming STT (실시간)
-    - chunk: 기존 침묵 감지 방식
+    Twilio Media Streams WebSocket 핸들러 (실시간 STT 적용)
+    
+    실시간 오디오 데이터 양방향 처리:
+    1. 오디오 청크 수신 및 버퍼링
+    2. 침묵 감지 시 실시간 STT 변환
+    3. 변환된 텍스트를 실시간으로 누적
+    4. 각 발화마다 즉시 AI 응답 생성 및 TTS 재생
+    5. 통화 종료 시 전체 대화 내용 저장
+    
+    실시간 STT → LLM → TTS 파이프라인
     """
-
-    if settings.STT_MODE == "streaming":
-        # 새로운 Streaming 방식
-        from app.services.ai_call.streaming_websocket_handler import StreamingWebSocketHandler
-
-        handler = StreamingWebSocketHandler(
-            tts_service=tts_service,
-            llm_service=llm_service,
-            active_connections=active_connections,
-            conversation_sessions=conversation_sessions,
-            saved_calls=saved_calls
-        )
-
-        await handler.handle_connection(websocket, db)
-        return
-
-    # ========== 기존 Chunk 방식 (아래 코드 유지) ==========
     await websocket.accept()
     logger.info("📞 Twilio WebSocket 연결됨")
     
