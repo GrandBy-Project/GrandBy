@@ -282,80 +282,72 @@ JSON 형식으로 응답:
             return "일기 생성 실패"
     
     def extract_schedule_from_conversation(self, conversation_text: str):
-        """
-        통화 내용에서 일정 정보 추출 (개선 버전)
-        
-        Args:
-            conversation_text: 전체 통화 내용
-        
-        Returns:
-            str: JSON 형식의 일정 목록
-        """
-        try:
-            from datetime import datetime, timedelta
-            
-            # 오늘 날짜를 기준으로 상대 날짜 해석
-            today = datetime.now()
-            tomorrow = today + timedelta(days=1)
-            day_after_tomorrow = today + timedelta(days=2)
-            
-            # 요일 계산
-            weekdays_kr = ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일']
-            current_weekday = weekdays_kr[today.weekday()]
-            
-            prompt = f"""
-다음 대화에서 미래의 일정과 약속을 추출해주세요.
-
-📅 오늘 날짜: {today.strftime('%Y년 %m월 %d일')} ({current_weekday})
-📅 내일: {tomorrow.strftime('%Y-%m-%d')}
-📅 모레: {day_after_tomorrow.strftime('%Y-%m-%d')}
-
-대화:
-{conversation_text}
-
-추출 규칙:
-1. 미래 일정만 추출 (과거나 완료된 것은 제외)
-2. "내일", "모레", "다음주", "월요일" 등 상대 날짜를 절대 날짜로 변환
-3. 시간이 명시되면 due_time에 포함 (HH:MM 24시간 형식)
-4. 시간이 없으면 due_time은 null
-5. 카테고리 자동 분류:
-   - MEDICINE: 약, 복용, 약국
-   - HOSPITAL: 병원, 진료, 검사, 치료
-   - EXERCISE: 운동, 산책, 체조
-   - MEAL: 식사, 밥, 약속, 만남
-   - OTHER: 기타
-6. 불확실하거나 막연한 표현은 제외 (예: "언젠가", "나중에")
-7. 최대 5개까지만 추출 (중요도 높은 순서)
-
-JSON 형식으로 응답 (일정 없으면 빈 배열):
-{{
-  "schedules": [
+            """
+            통화 내용에서 일정 정보 추출 (버전 7: 영어 프롬프트, 한국어 응답)
+            """
+            try:
+                from datetime import datetime, timedelta
+                
+                # 오늘 날짜를 기준으로 상대 날짜 해석
+                today = datetime.now()
+                tomorrow = today + timedelta(days=1)
+                day_after_tomorrow = today + timedelta(days=2)
+                
+                # 요일 계산
+                weekdays_kr = ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일']
+                current_weekday = weekdays_kr[today.weekday()]
+                
+                # 현재 시간을 프롬프트에 제공하여 시간 해석 오류 최소화
+                current_time = datetime.now().strftime('%H:%M') 
+                
+                prompt = f"""
+    Extract confirmed future schedules from the following conversation and return them in JSON format. The response MUST be in KOREAN.
+    Current Time: {today.strftime('%Y-%m-%d')} ({current_weekday}) {current_time}
+    Tomorrow: {tomorrow.strftime('%Y-%m-%d')}
+    
+    Conversation:
+    {conversation_text}
+    
+    Extraction Rules:
+    1. Extract only **confirmed and specific future schedules**. (Exclude past events, completed actions, 'about to do' actions, and vague/uncertain expressions).
+    2. Convert relative dates (e.g., 'tomorrow') to **absolute dates** (YYYY-MM-DD format).
+    3. If time is specified, include it in due_time as **HH:MM 24-hour format**.
+       - **Time Inference:** If AM/PM is missing, infer the time based on the schedule's nature (e.g., hospital, meal) and the current time (e.g., '7 o'clock' is inferred as 07:00 or 19:00 based on context).
+       - If no time, use **null**.
+    4. **Category:** Choose one of MEDICINE, HOSPITAL, EXERCISE, MEAL, OTHER.
+    5. **Title/Description:** Use only information found in the conversation. Write in **concise noun phrases or action-oriented verb phrases**. DO NOT use narrative sentence endings (~했다, ~받는다, ~있어요, etc.) or hallucinations.
+    6. Extract a maximum of 5 schedules (in order of importance).
+    
+    Respond in the following JSON format (use an empty array if no schedules are found):
     {{
-      "title": "병원 가기",
-      "description": "정형외과 무릎 검사",
-      "category": "HOSPITAL",
-      "due_date": "{tomorrow.strftime('%Y-%m-%d')}",
-      "due_time": "15:00"
+      "schedules": [
+        {{
+          "title": "가족과의 저녁 식사",
+          "description": "가족들과 함께 저녁 식사하기", 
+          "category": "MEAL", 
+          "due_date": "{tomorrow.strftime('%Y-%m-%d')}",
+          "due_time": "18:30"
+        }}
+      ]
     }}
-  ]
-}}
-
-주의: schedules 배열 안에 일정을 넣어주세요. 일정이 없으면 {{"schedules": []}}를 반환하세요.
-"""
-            
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=800,  # 여러 일정 추출 가능하도록 증가
-                temperature=0.2,  # 정확한 추출을 위해 낮게 설정
-                response_format={"type": "json_object"}
-            )
-            
-            result = response.choices[0].message.content
-            logger.info(f"✅ 일정 추출 완료")
-            return result
-            
-        except Exception as e:
-            logger.error(f"❌ 일정 추출 실패: {e}")
-            return '{"schedules": []}'
-
+    
+    Note: Put schedules inside the 'schedules' array. If no schedules, return {{"schedules": []}}.
+    """
+                
+                # (나머지 실행 로직은 동일하게 유지)
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=800,
+                    temperature=0.2, 
+                    response_format={"type": "json_object"}
+                )
+                
+                # 응답이 한국어로 오도록 프롬프트에 'The response MUST be in KOREAN.' 명시
+                result = response.choices[0].message.content
+                logger.info(f"✅ 일정 추출 완료 ")
+                return result
+                
+            except Exception as e:
+                logger.error(f"❌ 일정 추출 실패: {e}")
+                return '{"schedules": []}'
