@@ -55,6 +55,8 @@ class DiaryCommentResponse(BaseModel):
     content: str
     is_read: bool
     created_at: datetime
+    user_name: str  # 유저 이름 추가
+    user_role: str  # 유저 역할 추가
     
     class Config:
         from_attributes = True

@@ -24,12 +24,35 @@ router = APIRouter()
 
 
 @router.get("/", response_model=List[CallLogResponse])
-async def get_call_logs(db: Session = Depends(get_db)):
+async def get_call_logs(
+    limit: int = 10,
+    elderly_id: str = None,  # TODO: JWT 토큰에서 가져오도록 수정
+    db: Session = Depends(get_db)
+):
     """
     통화 기록 목록 조회
-    TODO: 현재 사용자의 통화 기록 반환
+    
+    Query Parameters:
+    - limit: 조회할 최대 개수 (기본값: 10)
+    - elderly_id: 어르신 사용자 ID (선택사항)
     """
-    return []
+    try:
+        # 기본적으로 모든 통화 기록 조회 (최신순)
+        query = db.query(CallLog).order_by(CallLog.created_at.desc())
+        
+        # 특정 사용자의 통화 기록만 조회하는 경우
+        if elderly_id:
+            query = query.filter(CallLog.elderly_id == elderly_id)
+        
+        # 개수 제한
+        call_logs = query.limit(limit).all()
+        
+        logger.info(f"📞 통화 기록 조회: {len(call_logs)}건 (limit: {limit})")
+        return call_logs
+        
+    except Exception as e:
+        logger.error(f"❌ 통화 기록 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/{call_id}", response_model=CallLogResponse)

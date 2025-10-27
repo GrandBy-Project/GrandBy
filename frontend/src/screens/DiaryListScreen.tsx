@@ -177,7 +177,7 @@ export const DiaryListScreen = () => {
       happy: { name: 'happy', color: '#FFD700' },
       excited: { name: 'sparkles', color: '#FF6B6B' },
       calm: { name: 'leaf', color: '#4ECDC4' },
-      sad: { name: 'sad', color: '#95A5A6' },
+      sad: { name: 'sad', color: '#5499C7' },
       angry: { name: 'thunderstorm', color: '#E74C3C' },
       tired: { name: 'moon', color: '#9B59B6' },
     };
@@ -381,6 +381,7 @@ export const DiaryListScreen = () => {
         <Calendar
           markedDates={getMarkedDates()}
           onDayPress={handleDayPress}
+          monthFormat={'yyyy년 M월'}
           theme={{
             backgroundColor: '#FFFFFF',
             calendarBackground: '#FFFFFF',

@@ -21,7 +21,7 @@ def check_and_make_calls():
     현재 시간에 전화를 걸어야 하는 어르신 확인 후 전화 발신
     
     main.py의 /api/twilio/call 엔드포인트와 동일한 로직으로 실시간 AI 대화 통화 발신
-    통화 상태 변화(answered, completed)는 /api/twilio/call-status 콜백이 자동 처리
+    WebSocket 기반으로 실시간 대화 처리하여 일기 자동 생성까지 진행
     """
     logger.info("📞 자동 통화 스케줄러 시작...")
     
@@ -62,18 +62,6 @@ def check_and_make_calls():
             
             # 정확히 설정한 시간에만 전화 (0분 차이)
             if time_diff == 0:
-                # 오늘 이미 전화했는지 확인 (중복 방지)
-                # today_start = current_datetime.replace(hour=0, minute=0, second=0, microsecond=0)
-                # existing_call = db.query(CallLog).filter(
-                #     CallLog.elderly_id == setting.elderly_id,
-                #     CallLog.created_at >= today_start,
-                #     CallLog.call_status.in_([CallStatus.INITIATED, CallStatus.ANSWERED, CallStatus.COMPLETED])
-                # ).first()
-                
-                # if existing_call:
-                #     logger.info(f"⏭️  오늘 이미 통화함: {setting.elderly_id}")
-                #     continue
-                
                 settings_to_call.append(setting)
                 logger.info(f"📞 예약 통화 대상: {setting.elderly_id} ({call_hour:02d}:{call_minute:02d})")
         
@@ -110,13 +98,13 @@ def check_and_make_calls():
                 # 전화번호 국제 형식으로 변환
                 normalized_phone = normalize_phone_number(elderly.phone_number)
                 
-                # TwiML URL 생성 (실시간 AI 대화 WebSocket)
+                # ✅ 수동 통화와 동일한 설정 사용
                 api_base_url = settings.API_BASE_URL
-                voice_url = f"https://{api_base_url}/api/twilio/voice"
+                voice_url = f"https://{api_base_url}/api/twilio/voice"  # WebSocket 시작 엔드포인트
                 status_callback_url = f"https://{api_base_url}/api/twilio/call-status"
                 
                 logger.info(f"┌{'─'*58}┐")
-                logger.info(f"│ 📞 실시간 AI 대화 통화 발신                             │")
+                logger.info(f"│ 📞 실시간 AI 대화 통화 발신 (자동 스케줄)             │")
                 logger.info(f"│ 이름: {elderly.name:47} │")
                 logger.info(f"│ 전화번호: {elderly.phone_number:43} │")
                 logger.info(f"│ 정규화: {normalized_phone:45} │")
@@ -125,16 +113,16 @@ def check_and_make_calls():
                 logger.info(f"🔗 Voice URL (WebSocket): {voice_url}")
                 logger.info(f"🔗 Status Callback: {status_callback_url}")
                 
-                # 전화 발신 (main.py /api/twilio/call과 동일한 로직)
+                # ✅ 수동 통화와 동일한 방식으로 전화 발신
                 call_sid = twilio_service.make_call(
                     to_number=normalized_phone,
                     voice_url=voice_url,
                     status_callback_url=status_callback_url
                 )
                 
-                # ✅ main.py와 동일한 CallLog 생성 (call_id 필드 포함)
+                # ✅ 수동 통화와 동일한 방식으로 CallLog 생성
                 new_call = CallLog(
-                    call_id=call_sid,  # ⭐ 필수: main.py와 동일
+                    call_id=call_sid,
                     elderly_id=elderly.user_id,
                     call_status=CallStatus.INITIATED,
                     twilio_call_sid=call_sid,
@@ -146,7 +134,8 @@ def check_and_make_calls():
                 
                 calls_made += 1
                 logger.info(f"✅ 통화 발신 성공: {elderly.name} (Call SID: {call_sid})")
-                logger.info(f"💾 통화 기록 저장 완료 (ID: {new_call.id})")
+                logger.info(f"💾 통화 기록 저장 완료 (ID: {call_sid})")
+                logger.info(f"🌐 WebSocket 연결 대기 중... (사용자가 전화 받으면 자동 연결)")
                 logger.info("")
                 
             except Exception as e:
@@ -164,11 +153,11 @@ def check_and_make_calls():
             "datetime": current_datetime.isoformat()
         }
         
-        logger.info(f"┌{'─'*58}┐")
+        logger.info(f"┌{'─'*50}┐")
         logger.info(f"│ ✅ 자동 통화 스케줄러 완료                               │")
         logger.info(f"│ 성공: {calls_made:2}건 / 실패: {failed_calls:2}건                                  │")
         logger.info(f"│ 시간: {current_hour:02d}:{current_minute:02d}                                          │")
-        logger.info(f"└{'─'*58}┘")
+        logger.info(f"└{'─'*50}┘")
         
         return result
     
@@ -201,6 +190,6 @@ def process_call_result(call_id: str):
     # 6. 알림 발송
     
     # 일기 자동 생성 작업 호출
-    from app.tasks.diary_generator import generate_diary_from_call
-    generate_diary_from_call.delay(call_id)
+    # from app.tasks.diary_generator import generate_diary_from_call
+    # generate_diary_from_call.delay(call_id)
 

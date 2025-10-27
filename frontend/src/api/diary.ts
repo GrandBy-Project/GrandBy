@@ -9,6 +9,7 @@ export interface Diary {
   diary_id: string;
   user_id: string;
   author_id: string;
+  call_id?: string | null;  // 통화 ID 추가
   date: string; // YYYY-MM-DD 형식
   title?: string | null;
   content: string;
@@ -94,6 +95,57 @@ export const updateDiary = async (diaryId: string, data: DiaryUpdate): Promise<D
  */
 export const deleteDiary = async (diaryId: string): Promise<{ message: string }> => {
   const response = await apiClient.delete<{ message: string }>(`/api/diaries/${diaryId}`);
+  return response.data;
+};
+
+// ==================== 댓글 API ====================
+
+export interface DiaryComment {
+  comment_id: string;
+  user_id: string;
+  content: string;
+  is_read: boolean;
+  created_at: string;
+  user_name: string;
+  user_role: string;
+}
+
+export interface CommentCreateRequest {
+  content: string;
+}
+
+/**
+ * 댓글 목록 조회
+ * 
+ * @param diaryId - 다이어리 ID
+ * @returns 댓글 목록
+ */
+export const getComments = async (diaryId: string): Promise<DiaryComment[]> => {
+  const response = await apiClient.get<DiaryComment[]>(`/api/diaries/${diaryId}/comments`);
+  return response.data;
+};
+
+/**
+ * 댓글 작성
+ * 
+ * @param diaryId - 다이어리 ID
+ * @param data - 댓글 내용
+ * @returns 생성된 댓글
+ */
+export const createComment = async (diaryId: string, data: CommentCreateRequest): Promise<DiaryComment> => {
+  const response = await apiClient.post<DiaryComment>(`/api/diaries/${diaryId}/comments`, data);
+  return response.data;
+};
+
+/**
+ * 댓글 삭제
+ * 
+ * @param diaryId - 다이어리 ID
+ * @param commentId - 댓글 ID
+ * @returns 삭제 결과 메시지
+ */
+export const deleteComment = async (diaryId: string, commentId: string): Promise<{ message: string }> => {
+  const response = await apiClient.delete<{ message: string }>(`/api/diaries/${diaryId}/comments/${commentId}`);
   return response.data;
 };
 

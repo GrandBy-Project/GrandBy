@@ -48,13 +48,6 @@ export interface RegisterRequest {
   auth_provider?: string;
 }
 
-// 전화번호 인증 정보
-export interface PhoneVerification {
-  required: boolean;
-  message: string;
-  validation_code: string;
-  phone_number: string;
-}
 
 // 인증 응답
 export interface AuthResponse {
@@ -62,7 +55,6 @@ export interface AuthResponse {
   refresh_token: string;
   token_type: string;
   user: User;
-  phone_verification?: PhoneVerification;
 }
 
 // API 에러 응답
@@ -76,13 +68,31 @@ export interface Diary {
   diary_id: string;
   user_id: string;
   author_id: string;
+  call_id?: string;  // 통화 ID 추가
   date: string;
+  title?: string;  // 제목 추가
   content: string;
   author_type: 'elderly' | 'caregiver' | 'ai';
   is_auto_generated: boolean;
   status: 'draft' | 'published';
   created_at: string;
   updated_at: string;
+}
+
+// 다이어리 댓글
+export interface DiaryComment {
+  comment_id: string;
+  user_id: string;
+  content: string;
+  is_read: boolean;
+  created_at: string;
+  user_name: string;
+  user_role: string;
+}
+
+// 댓글 작성 요청
+export interface CommentCreateRequest {
+  content: string;
 }
 
 // TODO

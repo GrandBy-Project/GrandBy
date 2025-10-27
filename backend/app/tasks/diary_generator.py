@@ -45,16 +45,22 @@ def generate_diary_from_call(call_id: str):
         
         # LLM으로 일기 생성
         llm_service = LLMService()
-        diary_content = llm_service.summarize_conversation_to_diary(conversation_text)
+
+        conversation_history = [
+            {"role": "user" if t.speaker == "ELDERLY" else "assistant", "content": t.text}
+             for t in transcripts
+        ]
+        diary_content = llm_service.summarize_call_conversation(conversation_history)
         
-        # 다이어리 저장 (Draft 상태)
+        # 다이어리 저장
         new_diary = Diary(
             user_id=call.elderly_id,
             author_id=call.elderly_id,
             call_id=call.call_id,
             date=date.today(),
+            title="AI와의 대화 기록",
             content=diary_content,
-            author_type=AuthorType.AI,
+            author_type=AuthorType.ELDERLY,
             is_auto_generated=True,
             status=DiaryStatus.DRAFT,
         )

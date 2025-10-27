@@ -9,8 +9,8 @@ from sqlalchemy import and_
 from typing import List, Optional
 from datetime import date as date_type
 from app.database import get_db
-from app.schemas.diary import DiaryCreate, DiaryUpdate, DiaryResponse, DiaryCommentCreate
-from app.models.diary import Diary, AuthorType
+from app.schemas.diary import DiaryCreate, DiaryUpdate, DiaryResponse, DiaryCommentCreate, DiaryCommentResponse
+from app.models.diary import Diary, AuthorType, DiaryComment
 from app.routers.auth import get_current_user
 from app.models.user import User, UserRole, UserConnection, ConnectionStatus
 
@@ -245,7 +245,65 @@ async def delete_diary(
     return {"message": "일기가 삭제되었습니다."}
 
 
-@router.post("/{diary_id}/comments")
+@router.get("/{diary_id}/comments", response_model=List[DiaryCommentResponse])
+async def get_comments(
+    diary_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    댓글 목록 조회
+    특정 일기의 댓글 목록 조회
+    """
+    # 일기 존재 여부 확인
+    diary = db.query(Diary).filter(Diary.diary_id == diary_id).first()
+    
+    if not diary:
+        raise HTTPException(status_code=404, detail="일기를 찾을 수 없습니다.")
+    
+    # 권한 확인 (본인의 일기 또는 연결된 어르신의 일기)
+    has_permission = False
+    
+    if diary.user_id == current_user.user_id:
+        has_permission = True
+    elif current_user.role == UserRole.CAREGIVER:
+        connection = db.query(UserConnection).filter(
+            and_(
+                UserConnection.caregiver_id == current_user.user_id,
+                UserConnection.elderly_id == diary.user_id,
+                UserConnection.status == ConnectionStatus.ACTIVE
+            )
+        ).first()
+        if connection:
+            has_permission = True
+    
+    if not has_permission:
+        raise HTTPException(status_code=403, detail="댓글을 조회할 권한이 없습니다.")
+    
+    # 댓글 조회 (유저 정보 포함)
+    comments = db.query(DiaryComment, User).join(
+        User, DiaryComment.user_id == User.user_id
+    ).filter(
+        DiaryComment.diary_id == diary_id
+    ).order_by(DiaryComment.created_at.asc()).all()
+    
+    # 응답 데이터 구성
+    result = []
+    for comment, user in comments:
+        result.append({
+            "comment_id": comment.comment_id,
+            "user_id": comment.user_id,
+            "content": comment.content,
+            "is_read": comment.is_read,
+            "created_at": comment.created_at,
+            "user_name": user.name,
+            "user_role": user.role.value
+        })
+    
+    return result
+
+
+@router.post("/{diary_id}/comments", response_model=DiaryCommentResponse)
 async def create_comment(
     diary_id: str,
     comment_data: DiaryCommentCreate,
@@ -256,5 +314,81 @@ async def create_comment(
     댓글 작성
     일기에 댓글 추가
     """
-    # TODO: DiaryComment 모델 임포트 및 구현
-    return {"message": "Not Implemented Yet"}
+    # 일기 존재 여부 확인
+    diary = db.query(Diary).filter(Diary.diary_id == diary_id).first()
+    
+    if not diary:
+        raise HTTPException(status_code=404, detail="일기를 찾을 수 없습니다.")
+    
+    # 권한 확인 (본인의 일기 또는 연결된 어르신의 일기)
+    has_permission = False
+    
+    if diary.user_id == current_user.user_id:
+        has_permission = True
+    elif current_user.role == UserRole.CAREGIVER:
+        connection = db.query(UserConnection).filter(
+            and_(
+                UserConnection.caregiver_id == current_user.user_id,
+                UserConnection.elderly_id == diary.user_id,
+                UserConnection.status == ConnectionStatus.ACTIVE
+            )
+        ).first()
+        if connection:
+            has_permission = True
+    
+    if not has_permission:
+        raise HTTPException(status_code=403, detail="댓글을 작성할 권한이 없습니다.")
+    
+    # 댓글 생성
+    new_comment = DiaryComment(
+        diary_id=diary_id,
+        user_id=current_user.user_id,
+        content=comment_data.content,
+        is_read=False
+    )
+    
+    db.add(new_comment)
+    db.commit()
+    db.refresh(new_comment)
+    
+    # 유저 정보 조회
+    user = db.query(User).filter(User.user_id == current_user.user_id).first()
+    
+    return {
+        "comment_id": new_comment.comment_id,
+        "user_id": new_comment.user_id,
+        "content": new_comment.content,
+        "is_read": new_comment.is_read,
+        "created_at": new_comment.created_at,
+        "user_name": user.name,
+        "user_role": user.role.value
+    }
+
+
+@router.delete("/{diary_id}/comments/{comment_id}")
+async def delete_comment(
+    diary_id: str,
+    comment_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    댓글 삭제
+    본인이 작성한 댓글만 삭제 가능
+    """
+    comment = db.query(DiaryComment).filter(
+        DiaryComment.comment_id == comment_id,
+        DiaryComment.diary_id == diary_id
+    ).first()
+    
+    if not comment:
+        raise HTTPException(status_code=404, detail="댓글을 찾을 수 없습니다.")
+    
+    # 본인이 작성한 댓글만 삭제 가능
+    if comment.user_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="본인이 작성한 댓글만 삭제할 수 있습니다.")
+    
+    db.delete(comment)
+    db.commit()
+    
+    return {"message": "댓글이 삭제되었습니다."}

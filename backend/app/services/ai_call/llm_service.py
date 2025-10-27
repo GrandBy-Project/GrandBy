@@ -36,51 +36,6 @@ class LLMService:
 - "날씨가 좋으니 잠깐 산책하시는 건 어떠세요?"
 """
     
-    def generate_response(self, user_message: str, conversation_history: list = None):
-        """
-        어르신과의 대화 응답 생성 (실행 시간 측정 포함)
-        
-        Args:
-            user_message: 사용자(어르신)의 메시지
-            conversation_history: 이전 대화 기록 (옵션)
-        
-        Returns:
-            tuple: (AI 응답, 실행 시간)
-        """
-        try:
-            start_time = time.time()  # 시작 시간 기록
-            logger.info(f"🤖 LLM 응답 생성 시작")
-            logger.info(f"📥 사용자 입력: {user_message}")
-            
-            # 메시지 구성
-            messages = [{"role": "system", "content": self.elderly_care_prompt}]
-            
-            # 대화 기록이 있으면 추가 (최근 5개만)
-            if conversation_history:
-                messages.extend(conversation_history[-5:])
-            
-            # 현재 사용자 메시지 추가
-            messages.append({"role": "user", "content": user_message})
-            
-            # GPT-4o-mini로 응답 생성
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                max_tokens=200,  # 짧고 명확한 응답
-                temperature=0.8,  # 자연스럽고 다양한 응답
-            )
-            
-            ai_response = response.choices[0].message.content
-            elapsed_time = time.time() - start_time  # 소요 시간 계산
-            
-            logger.info(f"✅ LLM 응답 생성 완료 (소요 시간: {elapsed_time:.2f}초)")
-            logger.info(f"📤 AI 응답: {ai_response}")
-            
-            return ai_response, elapsed_time
-        except Exception as e:
-            logger.error(f"❌ LLM 응답 생성 실패: {e}")
-            raise
-    
     def analyze_emotion(self, user_message: str):
         """
         사용자 메시지의 감정 분석 (실행 시간 측정 포함)
@@ -192,41 +147,6 @@ JSON 형식으로 응답:
         except Exception as e:
             logger.error(f"❌ LLM 스트리밍 실패: {e}")
             yield "죄송합니다. 응답 생성 중 오류가 발생했습니다."
-    
-    def summarize_conversation_to_diary(self, conversation_text: str):
-        """
-        통화 내용을 1인칭 일기로 변환
-        
-        Args:
-            conversation_text: 전체 통화 내용
-        
-        Returns:
-            str: 1인칭 일기
-        """
-        try:
-            prompt = f"""
-다음은 어르신과 AI 비서의 통화 내용입니다. 
-이 대화를 바탕으로 어르신의 1인칭 시점에서 자연스러운 일기를 작성해주세요.
-일기는 따뜻하고 친근한 말투로, 하루의 주요 내용과 감정을 담아주세요.
-
-통화 내용:
-{conversation_text}
-
-일기 (1인칭):
-"""
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=500,
-                temperature=0.8,
-            )
-            
-            diary = response.choices[0].message.content
-            logger.info("Generated diary from conversation")
-            return diary
-        except Exception as e:
-            logger.error(f"Failed to generate diary: {e}")
-            raise
     
     def summarize_call_conversation(self, conversation_history: list):
         """
