@@ -45,18 +45,29 @@ class STTService:
             
             self.google_client = speech.SpeechClient()
             
-            # 기본 인식 설정
+            # 🔧 STT 속도 최적화 설정
+            # 불필요한 기능 제거 → 응답 시간 단축
             self.google_config = speech.RecognitionConfig(
                 encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
                 sample_rate_hertz=8000,
                 language_code="ko-KR",
-                model="latest_short",  # 전화 통화 최적화
-                enable_automatic_punctuation=True,
-                use_enhanced=True,
+                model="latest_short",  # 전화 통화 최적화 모델 유지
+                
+                # ⚡ 속도 향상: 불필요한 기능 비활성화
+                enable_automatic_punctuation=False,  # 문장 부호 제거 → 응답 시간 단축
+                use_enhanced=False,  # Enhanced 모델은 느림 → 기본 모델 사용
+                
                 audio_channel_count=1,
-                enable_word_time_offsets=True,  # 단어별 시간 정보
-                enable_word_confidence=True,    # 단어별 신뢰도
-                max_alternatives=1,             # 최대 대안 수
+                
+                # ❌ 제거: 불필요한 기능 (속도 저하)
+                # enable_word_time_offsets=False,  # 단어별 시간 정보 불필요
+                # enable_word_confidence=False,    # 단어별 신뢰도 불필요
+                
+                max_alternatives=1,
+                
+                # ⚡ 추가: 응답 시간 단축 옵션
+                enable_spoken_punctuation=False,
+                enable_spoken_emojis=False,
             )
             
             logger.info("✅ Google Cloud STT 초기화 완료")

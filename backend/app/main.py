@@ -31,6 +31,7 @@ from app.services.ai_call.stt_service import STTService
 from app.services.ai_call.tts_service import TTSService
 from app.services.ai_call.llm_service import LLMService
 from app.services.ai_call.twilio_service import TwilioService
+from app.services.ai_call.google_stt_streaming import GoogleSTTStreamingSession
 
 # 로거 설정 (시간 포함)
 logging.basicConfig(
@@ -149,6 +150,12 @@ class AudioProcessor:
         self.transcript_buffer = []  # 실시간 STT 결과 버퍼
         self.is_speaking = False  # 사용자가 말하고 있는지 여부
         
+        # ========== 🔧 개선: 버퍼 최적화 추가 ==========
+        self.converted_buffer_size = 0  # 변환된 버퍼 크기 추적 (bytes)
+        self.max_buffer_bytes = 5 * 8000 * 2  # 최대 5초 버퍼링 (8kHz, 16-bit)
+        self.buffer_overflow_warned = False  # 버퍼 초과 경고 플래그 (한 번만 출력)
+        # ===============================================
+        
         # ========== PCM 기반 동적 임계값 설정 ==========
         # PCM RMS 값은 μ-law보다 훨씬 큼 (16-bit vs 8-bit)
         self.base_silence_threshold = 1000  # 기본 임계값 (PCM 16-bit 기준)
@@ -167,7 +174,7 @@ class AudioProcessor:
         # ======================================
         
         self.silence_duration = 0  # 현재 침묵 지속 시간
-        self.max_silence = 0.5  # ⭐ 1.5초 침묵 후 STT 처리 (충분한 발화 수집)
+        self.max_silence = 0.3  # ⭐ 0.3초 침묵 후 STT 처리 (빠른 응답!)
 
         # 초기 노이즈 필터링
         self.warmup_chunks = 0  # 받은 청크 수
@@ -269,11 +276,25 @@ class AudioProcessor:
         }
 
     def add_audio_chunk(self, audio_data: bytes):
-        """오디오 청크 추가 및 음성 활동 감지 (PCM 기반 동적 임계값 적용)"""
+        """오디오 청크 추가 및 음성 활동 감지 (🔧 개선: 버퍼 최적화 + 적응형 침묵 감지 활성화)"""
         # μ-law → PCM 변환 (실시간)
         try:
             pcm_data = audioop.ulaw2lin(audio_data, 2)  # 16-bit PCM으로 변환
+            
+            # 🔧 버퍼 크기 검증 및 자동 정리
+            # 버퍼가 넘치면 오래된 데이터 자동 제거 (FIFO 방식)
+            while self.converted_buffer_size >= self.max_buffer_bytes and len(self.audio_buffer) > 0:
+                removed_chunk = self.audio_buffer.pop(0)
+                self.converted_buffer_size -= len(removed_chunk)
+                
+                # 경고는 한 번만 출력
+                if not self.buffer_overflow_warned:
+                    logger.warning(f"⚠️ 버퍼 초과: 오래된 오디오 청크 제거 (최대 5초 유지)")
+                    self.buffer_overflow_warned = True
+            
             self.audio_buffer.append(pcm_data)
+            self.converted_buffer_size += len(pcm_data)
+            
         except Exception as e:
             logger.error(f"❌ μ-law → PCM 변환 실패: {e}")
             return
@@ -302,8 +323,8 @@ class AudioProcessor:
             self._calibrate_noise_level(rms)
             return  # 보정 완료 전까지는 음성 감지 안함
         
-        # 2. 실시간 적응형 조정 (선택적, 주석 해제하여 활성화)
-        # self._update_threshold_adaptive(rms)
+        # 🔧 2. 실시간 적응형 조정 (활성화!)
+        self._update_threshold_adaptive(rms)
         # ======================================
         
         # 비정상적으로 큰 RMS 값 필터링 (PCM 기준으로 조정)
@@ -345,15 +366,21 @@ class AudioProcessor:
     
     def get_audio(self) -> bytes:
         """
-        버퍼링된 오디오 가져오기 및 초기화
+        버퍼링된 오디오 가져오기 및 초기화 (🔧 개선: 버퍼 크기 추적 리셋)
         
         Returns:
             bytes: 병합된 오디오 데이터 (PCM 포맷)
         """
         audio = b''.join(self.audio_buffer)
+        
+        # 🔧 버퍼 초기화 시 추적 변수도 리셋
         self.audio_buffer = []
+        self.converted_buffer_size = 0
+        self.buffer_overflow_warned = False  # 경고 플래그 리셋
         self.is_speaking = False
         self.silence_duration = 0
+        
+        logger.info(f"📊 버퍼 병합 완료: {len(audio)} bytes")
         return audio
     
     def add_transcript(self, text: str):
