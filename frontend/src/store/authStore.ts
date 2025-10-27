@@ -56,8 +56,10 @@ export const useAuthStore = create<AuthState>((set) => ({
   logout: async () => {
     try {
       set({ isLoading: true });
+      // 먼저 사용자 정보를 즉시 null로 설정
+      set({ user: null });
       await authApi.logout();
-      set({ user: null, isLoading: false, error: null });
+      set({ isLoading: false, error: null });
     } catch (error) {
       set({ isLoading: false });
       throw error;

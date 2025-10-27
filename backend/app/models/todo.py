@@ -2,7 +2,7 @@
 TODO 관리 데이터베이스 모델
 """
 
-from sqlalchemy import Column, String, Date, Time, DateTime, ForeignKey, Text, Boolean, Enum as SQLEnum
+from sqlalchemy import Column, String, Date, Time, DateTime, ForeignKey, Text, Boolean, Enum as SQLEnum, Integer, ARRAY
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
@@ -25,6 +25,22 @@ class TodoStatus(str, enum.Enum):
     CANCELLED = "cancelled"  # 취소됨
 
 
+class TodoCategory(str, enum.Enum):
+    """TODO 카테고리"""
+    MEDICINE = "MEDICINE"  # 복약
+    EXERCISE = "EXERCISE"  # 운동
+    MEAL = "MEAL"  # 식사
+    HOSPITAL = "HOSPITAL"  # 병원
+    OTHER = "OTHER"  # 기타
+
+
+class RecurringType(str, enum.Enum):
+    """반복 유형"""
+    DAILY = "DAILY"  # 매일
+    WEEKLY = "WEEKLY"  # 매주
+    MONTHLY = "MONTHLY"  # 매월
+
+
 class Todo(Base):
     """TODO 모델"""
     __tablename__ = "todos"
@@ -40,13 +56,32 @@ class Todo(Base):
     # 내용
     title = Column(String(200), nullable=False)
     description = Column(Text, nullable=True)
+    category = Column(SQLEnum(TodoCategory), nullable=True)  # 카테고리
     
     # 일정
     due_date = Column(Date, nullable=False)
     due_time = Column(Time, nullable=True)
     
+    # 반복 일정 설정
+    is_recurring = Column(Boolean, default=False)  # 반복 여부
+    recurring_type = Column(SQLEnum(RecurringType), nullable=True)  # 반복 유형
+    recurring_interval = Column(Integer, default=1)  # 반복 간격 (예: 2일마다, 3주마다)
+    recurring_days = Column(ARRAY(Integer), nullable=True)  # 주간 반복 요일: [0,1,2,3,4,5,6] (월~일)
+    recurring_day_of_month = Column(Integer, nullable=True)  # 월간 반복 날짜: 1~31
+    recurring_start_date = Column(Date, nullable=True)  # 반복 시작일
+    recurring_end_date = Column(Date, nullable=True)  # 반복 종료일 (None이면 무한)
+    parent_recurring_id = Column(String(36), ForeignKey("todos.todo_id"), nullable=True)  # 원본 반복 TODO ID
+    
     # 생성 정보
     creator_type = Column(SQLEnum(CreatorType), nullable=False)
+    
+    # 공유 설정
+    is_shared_with_caregiver = Column(
+        Boolean, 
+        default=True,
+        nullable=False,
+        comment="보호자와 공유 여부 (True: 공유, False: 어르신만)"
+    )
     
     # 상태
     status = Column(SQLEnum(TodoStatus), default=TodoStatus.PENDING)

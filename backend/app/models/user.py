@@ -3,7 +3,7 @@
 User, UserConnection, UserSettings
 """
 
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Enum as SQLEnum, Integer
+from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Enum as SQLEnum, Integer, Date
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
@@ -26,6 +26,12 @@ class AuthProvider(str, enum.Enum):
     KAKAO = "kakao"  # Kakao OAuth
 
 
+class Gender(str, enum.Enum):
+    """성별"""
+    MALE = "male"  # 남성
+    FEMALE = "female"  # 여성
+
+
 class ConnectionStatus(str, enum.Enum):
     """연결 상태"""
     PENDING = "pending"  # 대기 중
@@ -45,10 +51,19 @@ class User(Base):
     password_hash = Column(String(255), nullable=True)  # 소셜 로그인은 NULL 가능
     name = Column(String(100), nullable=False)
     phone_number = Column(String(20), nullable=True)
+    birth_date = Column(Date, nullable=True)  # 생년월일
+    gender = Column(SQLEnum(Gender), nullable=True)  # 성별
     
     # 역할 및 인증
     role = Column(SQLEnum(UserRole), nullable=False)
     auth_provider = Column(SQLEnum(AuthProvider), default=AuthProvider.EMAIL)
+    
+    # 프로필
+    profile_image_url = Column(String(500), nullable=True)  # 프로필 이미지
+    
+    # 푸시 알림
+    push_token = Column(String(255), nullable=True, index=True)
+    push_token_updated_at = Column(DateTime, nullable=True)
     
     # 계정 상태
     is_active = Column(Boolean, default=True)
@@ -58,6 +73,7 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     last_login_at = Column(DateTime, nullable=True)
+    deleted_at = Column(DateTime, nullable=True)  # Soft Delete용
     
     # Relationships
     # 보호자로서의 연결 (caregiver -> elderly)
@@ -135,6 +151,14 @@ class UserSettings(Base):
     # 기능 활성화
     auto_diary_enabled = Column(Boolean, default=True)
     push_notification_enabled = Column(Boolean, default=True)
+    
+    # 푸시 알림 세부 설정
+    push_todo_reminder_enabled = Column(Boolean, default=True)  # TODO 10분 전 리마인더
+    push_todo_incomplete_enabled = Column(Boolean, default=True)  # 미완료 TODO 알림
+    push_todo_created_enabled = Column(Boolean, default=True)  # 새 TODO 생성 알림
+    push_diary_enabled = Column(Boolean, default=True)  # 다이어리 생성 알림
+    push_call_enabled = Column(Boolean, default=True)  # AI 전화 알림
+    push_connection_enabled = Column(Boolean, default=True)  # 연결 요청/수락 알림
     
     # 언어 설정
     language_preference = Column(String(10), default="ko")

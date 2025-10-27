@@ -1,7 +1,7 @@
 /**
- * 어르신 할일 목록 화면
+ * 어르신 할일 목록 화면 - 리디자인 버전
  */
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,10 +10,14 @@ import {
   TouchableOpacity,
   Alert,
   Animated,
+  ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Header, BottomNavigationBar } from '../components';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Colors } from '../constants/Colors';
+import * as todoApi from '../api/todo';
+import { TokenManager } from '../api/client';
 
 interface TodoItem {
   id: string;
@@ -22,8 +26,10 @@ interface TodoItem {
   time: string;
   isCompleted: boolean;
   priority: 'high' | 'medium' | 'low';
-  category: 'medicine' | 'hospital' | 'daily' | 'other';
+  category: 'medicine' | 'hospital' | 'daily' | 'other' | 'exercise' | 'meal';
 }
+
+type DateFilter = 'yesterday' | 'today' | 'tomorrow';
 
 export const TodoListScreen = () => {
   const router = useRouter();
@@ -31,109 +37,206 @@ export const TodoListScreen = () => {
   const [showSuccessAnimation, setShowSuccessAnimation] = useState(false);
   const [completedTodoTitle, setCompletedTodoTitle] = useState('');
   const [fadeAnim] = useState(new Animated.Value(0));
-  const [todos, setTodos] = useState<TodoItem[]>([
-    {
-      id: '1',
-      title: '혈압약 복용',
-      description: '아침 식사 후 혈압약 복용',
-      time: '오전 8시',
-      isCompleted: false,
-      priority: 'high',
-      category: 'medicine',
-    },
-    {
-      id: '2',
-      title: '정형외과 진료',
-      description: '무릎 관절 진료 예약',
-      time: '오후 2시',
-      isCompleted: false,
-      priority: 'high',
-      category: 'hospital',
-    },
-    {
-      id: '3',
-      title: '산책하기',
-      description: '공원에서 30분 산책',
-      time: '오후 4시',
-      isCompleted: true,
-      priority: 'medium',
-      category: 'daily',
-    },
-    {
-      id: '4',
-      title: '물 마시기',
-      description: '하루 8잔 물 마시기',
-      time: '하루 종일',
-      isCompleted: false,
-      priority: 'medium',
-      category: 'daily',
-    },
-    {
-      id: '5',
-      title: '가족과 통화',
-      description: '딸과 전화 통화',
-      time: '오후 7시',
-      isCompleted: false,
-      priority: 'low',
-      category: 'other',
-    },
-  ]);
+  const [expandedTodoId, setExpandedTodoId] = useState<string | null>(null);
+  const [expandAnim] = useState(new Animated.Value(0));
+  const [selectedDate, setSelectedDate] = useState<DateFilter>('today');
+  const [todos, setTodos] = useState<TodoItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const handleCompletePress = (id: string) => {
-    const todo = todos.find(t => t.id === id);
-    if (!todo) return;
-
-    if (todo.isCompleted) {
-      // 완료된 할일을 누르면 미완료로 변경
-      setTodos(prevTodos =>
-        prevTodos.map(t => 
-          t.id === id ? { ...t, isCompleted: false } : t
-        )
-      );
-    } else {
-      // 미완료 할일을 누르면 완료 처리
-      setTodos(prevTodos =>
-        prevTodos.map(t => 
-          t.id === id ? { ...t, isCompleted: true } : t
-        )
-      );
+  // TODO 목록 불러오기
+  const loadTodos = async () => {
+    try {
+      setIsRefreshing(true);
       
-      // 성공 애니메이션 표시
-      setCompletedTodoTitle(todo.title);
-      setShowSuccessAnimation(true);
+      // 디버깅: 토큰 확인
+      // const { TokenManager } = await import('../api/client');
+      const tokens = await TokenManager.getTokens();
+      console.log('🔑 토큰 상태:', tokens ? '있음' : '없음');
       
-      // Fade in 애니메이션
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 500,
-        useNativeDriver: true,
-      }).start();
-
-      // 2.5초 후 fade out 애니메이션
-      setTimeout(() => {
-        Animated.timing(fadeAnim, {
-          toValue: 0,
-          duration: 500,
-          useNativeDriver: true,
-        }).start(() => {
-          setShowSuccessAnimation(false);
-        });
-      }, 2000);
+      const apiTodos = await todoApi.getTodos(selectedDate);
+      
+      // API 데이터를 화면 형식에 맞게 변환
+      const mappedTodos: TodoItem[] = apiTodos.map(todo => ({
+        id: todo.todo_id,
+        title: todo.title,
+        description: todo.description || '',
+        time: todo.due_time ? formatTime(todo.due_time) : '시간 미정',
+        isCompleted: todo.status === 'completed',
+        priority: getPriority(todo.category),
+        category: mapCategory(todo.category),
+      }));
+      
+      setTodos(mappedTodos);
+    } catch (error: any) {
+      console.error('TODO 목록 불러오기 실패:', error);
+      Alert.alert('오류', '할 일 목록을 불러오지 못했습니다.');
+    } finally {
+      setIsLoading(false);
+      setIsRefreshing(false);
     }
   };
 
-  const getCategoryIcon = (category: string) => {
+  // 시간 포맷 변환 (HH:MM -> 오전/오후 H시)
+  const formatTime = (time: string): string => {
+    const [hours, minutes] = time.split(':').map(Number);
+    const period = hours < 12 ? '오전' : '오후';
+    const displayHours = hours % 12 || 12;
+    return `${period} ${displayHours}시${minutes > 0 ? ` ${minutes}분` : ''}`;
+  };
+
+  // 카테고리 우선순위 매핑
+  const getPriority = (category: string | null): 'high' | 'medium' | 'low' => {
+    if (category === 'medicine' || category === 'hospital') return 'high';
+    if (category === 'exercise' || category === 'meal') return 'medium';
+    return 'low';
+  };
+
+  // 카테고리 매핑
+  const mapCategory = (category: string | null): 'medicine' | 'hospital' | 'daily' | 'other' | 'exercise' | 'meal' => {
+    if (!category) return 'other';
+    if (category === 'medicine') return 'medicine';
+    if (category === 'hospital') return 'hospital';
+    if (category === 'exercise') return 'exercise';
+    if (category === 'meal') return 'meal';
+    return 'daily';
+  };
+
+  // 날짜 변경 시 TODO 목록 다시 불러오기
+  useEffect(() => {
+    loadTodos();
+  }, [selectedDate]);
+
+  // 초기 로딩
+  useEffect(() => {
+    loadTodos();
+  }, []);
+
+  const handleCompletePress = async (id: string) => {
+    const todo = todos.find(t => t.id === id);
+    if (!todo) return;
+
+    try {
+      if (todo.isCompleted) {
+        // 완료된 할일을 누르면 미완료로 변경 (완료 취소)
+        await todoApi.cancelTodo(id);
+        
+        // 로컬 상태 업데이트
+        setTodos(prevTodos =>
+          prevTodos.map(t => 
+            t.id === id ? { ...t, isCompleted: false } : t
+          )
+        );
+      } else {
+        // 미완료 할일을 누르면 완료 처리
+        await todoApi.completeTodo(id);
+        
+        // 로컬 상태 업데이트
+        setTodos(prevTodos =>
+          prevTodos.map(t => 
+            t.id === id ? { ...t, isCompleted: true } : t
+          )
+        );
+        
+        // 성공 애니메이션 표시
+        setCompletedTodoTitle(todo.title);
+        setShowSuccessAnimation(true);
+        
+        // Fade in 애니메이션
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 500,
+          useNativeDriver: true,
+        }).start();
+
+        // 2.5초 후 fade out 애니메이션
+        setTimeout(() => {
+          Animated.timing(fadeAnim, {
+            toValue: 0,
+            duration: 500,
+            useNativeDriver: true,
+          }).start(() => {
+            setShowSuccessAnimation(false);
+          });
+        }, 2000);
+      }
+    } catch (error: any) {
+      console.error('TODO 상태 변경 실패:', error);
+      Alert.alert('오류', '할 일 상태를 변경하지 못했습니다.');
+    }
+  };
+
+  // 카테고리별 아이콘 컴포넌트
+  const CategoryIcon = ({ category, size = 24 }: { category: string; size?: number }) => {
+    const iconStyle = {
+      width: size,
+      height: size,
+      borderRadius: size / 2,
+      justifyContent: 'center' as const,
+      alignItems: 'center' as const,
+    };
+
     switch (category) {
       case 'medicine':
-        return '💊';
+        return (
+          <View style={[iconStyle, { backgroundColor: '#FF6B6B' }]}>
+            <View style={{
+              width: size * 0.6,
+              height: size * 0.6,
+              backgroundColor: 'white',
+              borderRadius: 2,
+            }} />
+          </View>
+        );
       case 'hospital':
-        return '🏥';
+        return (
+          <View style={[iconStyle, { backgroundColor: '#4ECDC4' }]}>
+            <View style={{
+              width: size * 0.4,
+              height: size * 0.6,
+              backgroundColor: 'white',
+            }} />
+            <View style={{
+              position: 'absolute',
+              width: size * 0.6,
+              height: size * 0.4,
+              backgroundColor: 'white',
+            }} />
+          </View>
+        );
       case 'daily':
-        return '🏃';
-      case 'other':
-        return '📞';
+        return (
+          <View style={[iconStyle, { backgroundColor: '#45B7D1' }]}>
+            <View style={{
+              width: size * 0.5,
+              height: size * 0.5,
+              borderRadius: size * 0.25,
+              backgroundColor: 'white',
+            }} />
+          </View>
+        );
       default:
-        return '📝';
+        return (
+          <View style={[iconStyle, { backgroundColor: '#96CEB4' }]}>
+            <View style={{
+              width: size * 0.6,
+              height: 2,
+              backgroundColor: 'white',
+              marginBottom: 2,
+            }} />
+            <View style={{
+              width: size * 0.4,
+              height: 2,
+              backgroundColor: 'white',
+              marginBottom: 2,
+            }} />
+            <View style={{
+              width: size * 0.5,
+              height: 2,
+              backgroundColor: 'white',
+            }} />
+          </View>
+        );
     }
   };
 
@@ -153,28 +256,56 @@ export const TodoListScreen = () => {
   const completedTodos = todos.filter(todo => todo.isCompleted);
   const pendingTodos = todos.filter(todo => !todo.isCompleted);
 
-  // 성공 애니메이션 컴포넌트
+  // 성공 애니메이션 컴포넌트 - 시니어 친화적 버전
   const SuccessAnimation = () => {
     if (!showSuccessAnimation) return null;
 
     return (
       <Animated.View style={[styles.successOverlay, { opacity: fadeAnim }]}>
         <View style={styles.successCard}>
-          <Text style={styles.successTitle}>완료되었습니다</Text>
+          {/* 민트 컬러 체크 아이콘 */}
+          <View style={styles.checkContainer}>
+            <View style={styles.checkCircle}>
+              <View style={styles.checkIcon} />
+            </View>
+          </View>
+          
+          {/* 친근한 메시지 */}
+          <View style={styles.messageContainer}>
+            <Text style={styles.successTitle}>완료했어요!</Text>
           <Text style={styles.successMessage}>
             "{completedTodoTitle}"
           </Text>
-          <Text style={styles.successSubMessage}>
-            고생 많으셨어요
+            <Text style={styles.successSubtitle}>
+              오늘 {completedTodos.length}개 완료
           </Text>
+          </View>
         </View>
       </Animated.View>
     );
   };
 
   const handleCardPress = (todoId: string) => {
-    // 카드 터치 시 상세 보기로 이동
-    router.push(`/todo-detail?id=${todoId}`);
+    const isCurrentlyExpanded = expandedTodoId === todoId;
+    
+    if (isCurrentlyExpanded) {
+      // 닫기 애니메이션
+      Animated.timing(expandAnim, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: false,
+      }).start(() => {
+        setExpandedTodoId(null);
+      });
+    } else {
+      // 열기
+      setExpandedTodoId(todoId);
+      Animated.timing(expandAnim, {
+        toValue: 1,
+        duration: 250,
+        useNativeDriver: false,
+      }).start();
+    }
   };
 
   const handleAddTodo = () => {
@@ -182,29 +313,23 @@ export const TodoListScreen = () => {
   };
 
   const TodoCard = ({ todo }: { todo: TodoItem }) => {
+    const isExpanded = expandedTodoId === todo.id;
+    
     return (
-      <View style={[
+      <TouchableOpacity
+        style={[
         styles.todoCard,
         todo.isCompleted && styles.completedCard,
-      ]}>
-        {/* 완료된 항목에 대한 배지 */}
-        {todo.isCompleted && (
-          <View style={styles.completedBadge}>
-            <Text style={styles.completedBadgeText}>완료</Text>
-          </View>
-        )}
-        
-        {/* 카드 전체 터치 영역 - 상세보기로 이동 */}
-        <TouchableOpacity
-          style={styles.cardTouchArea}
+        ]}
           onPress={() => handleCardPress(todo.id)}
-          activeOpacity={0.7}
+        activeOpacity={0.95}
         >
-          <View style={styles.todoHeader}>
+        {/* 기본 카드 내용 */}
+        <View style={styles.cardContent}>
             <View style={styles.todoLeft}>
-              <Text style={styles.categoryIcon}>
-                {getCategoryIcon(todo.category)}
-              </Text>
+            <View style={styles.categoryIconContainer}>
+              <CategoryIcon category={todo.category} size={28} />
+            </View>
               <View style={styles.todoInfo}>
                 <Text
                   style={[
@@ -226,7 +351,9 @@ export const TodoListScreen = () => {
                   styles.timeContainer,
                   todo.isCompleted && styles.completedTimeContainer,
                 ]}>
-                  <Text style={styles.timeIcon}>🕐</Text>
+                <View style={styles.timeIconContainer}>
+                  <View style={styles.clockIcon} />
+                </View>
                   <Text
                     style={[
                       styles.todoTime,
@@ -239,10 +366,13 @@ export const TodoListScreen = () => {
               </View>
             </View>
             
-            {/* 완료 버튼만 남김 */}
+          {/* 완료 버튼 */}
             <TouchableOpacity 
               style={styles.completeButtonContainer}
-              onPress={() => handleCompletePress(todo.id)}
+            onPress={(e) => {
+              e.stopPropagation(); // 카드 클릭 이벤트 방지
+              handleCompletePress(todo.id);
+            }}
               activeOpacity={0.7}
             >
               <View style={[
@@ -257,10 +387,57 @@ export const TodoListScreen = () => {
               </View>
             </TouchableOpacity>
           </View>
+
+        {/* 확장된 내용 - 부드러운 opacity 애니메이션 */}
+        {isExpanded && (
+          <Animated.View style={[
+            styles.expandedContent,
+            {
+              opacity: expandAnim,
+            }
+          ]}>
+            <View style={styles.detailDivider} />
+            <Text style={styles.expandedLabel}>더 자세한 정보</Text>
+            <Text style={styles.expandedDescription}>
+              이 할일에 대한 추가 정보나 메모가 여기에 표시됩니다.
+            </Text>
+          </Animated.View>
+        )}
         </TouchableOpacity>
-      </View>
     );
   };
+
+  // 날짜 정보 계산
+  const getDateInfo = (dateType: DateFilter) => {
+    const today = new Date();
+    let targetDate: Date;
+    
+    switch (dateType) {
+      case 'yesterday':
+        targetDate = new Date(today);
+        targetDate.setDate(today.getDate() - 1);
+        break;
+      case 'tomorrow':
+        targetDate = new Date(today);
+        targetDate.setDate(today.getDate() + 1);
+        break;
+      default:
+        targetDate = today;
+    }
+    
+    const days = ['일', '월', '화', '수', '목', '금', '토'];
+    const month = targetDate.getMonth() + 1;
+    const date = targetDate.getDate();
+    const day = days[targetDate.getDay()];
+    
+    return {
+      dateString: `${month}월 ${date}일`,
+      dayString: `${day}요일`,
+      fullDate: targetDate,
+    };
+  };
+
+  const dateInfo = getDateInfo(selectedDate);
 
   return (
     <View style={styles.container}>
@@ -268,18 +445,69 @@ export const TodoListScreen = () => {
       <Header 
         title="할 일" 
         showBackButton 
-        rightButton={
-          <TouchableOpacity onPress={handleAddTodo} style={styles.addButton}>
-            <Text style={styles.addButtonText}>+</Text>
-          </TouchableOpacity>
-        }
       />
 
+      {/* 날짜 탭 네비게이션 */}
+      <View style={styles.dateTabContainer}>
+        <TouchableOpacity 
+          style={[styles.dateTab, selectedDate === 'yesterday' && styles.dateTabActive]}
+          onPress={() => setSelectedDate('yesterday')}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.dateTabText, selectedDate === 'yesterday' && styles.dateTabTextActive]}>
+            어제
+          </Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={[styles.dateTab, selectedDate === 'today' && styles.dateTabActive]}
+          onPress={() => setSelectedDate('today')}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.dateTabText, selectedDate === 'today' && styles.dateTabTextActive]}>
+            오늘
+          </Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={[styles.dateTab, selectedDate === 'tomorrow' && styles.dateTabActive]}
+          onPress={() => setSelectedDate('tomorrow')}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.dateTabText, selectedDate === 'tomorrow' && styles.dateTabTextActive]}>
+            내일
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* 선택된 날짜 정보 */}
+      <View style={styles.dateInfoCard}>
+        <Text style={styles.dateInfoText}>
+          {dateInfo.dateString}
+        </Text>
+        <Text style={styles.dateInfoDay}>
+          {dateInfo.dayString}
+        </Text>
+      </View>
+
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        {/* 로딩 상태 */}
+        {isLoading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={Colors.primary} />
+            <Text style={styles.loadingText}>할 일을 불러오는 중...</Text>
+          </View>
+        ) : (
+          <>
         {/* 오늘의 할일 요약 */}
         <View style={styles.summaryCard}>
           <View style={styles.summaryHeader}>
-            <Text style={styles.summaryIcon}>📅</Text>
+            <View style={styles.calendarIconContainer}>
+              <View style={styles.calendarIcon}>
+                <View style={styles.calendarTop} />
+                <View style={styles.calendarBody} />
+              </View>
+            </View>
             <Text style={styles.summaryTitle}>오늘의 할일</Text>
           </View>
           <View style={styles.summaryStats}>
@@ -336,7 +564,12 @@ export const TodoListScreen = () => {
         {/* 할일이 없는 경우 */}
         {todos.length === 0 && (
           <View style={styles.emptyState}>
-            <Text style={styles.emptyIcon}>✅</Text>
+            <View style={styles.emptyIconContainer}>
+              <View style={styles.checkmarkIcon}>
+                <View style={styles.checkmarkLine1} />
+                <View style={styles.checkmarkLine2} />
+              </View>
+            </View>
             <Text style={styles.emptyTitle}>오늘 할일이 없습니다</Text>
             <Text style={styles.emptyDescription}>
               보호자가 설정한 할일이 여기에 표시됩니다
@@ -346,6 +579,8 @@ export const TodoListScreen = () => {
 
         {/* 하단 여백 (네비게이션 바 공간 확보) */}
         <View style={[styles.bottomSpacer, { height: 100 + Math.max(insets.bottom, 10) }]} />
+          </>
+        )}
       </ScrollView>
 
       {/* 하단 네비게이션 바 */}
@@ -366,32 +601,168 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#FFFFFF',
   },
+  
+  // 날짜 탭 네비게이션
+  dateTabContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+    gap: 12,
+  },
+  dateTab: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    backgroundColor: '#F8F9FA',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dateTabActive: {
+    backgroundColor: Colors.primary,
+  },
+  dateTabText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#666666',
+  },
+  dateTabTextActive: {
+    color: '#FFFFFF',
+  },
+  
+  // 날짜 정보 카드
+  dateInfoCard: {
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  dateInfoText: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#2C3E50',
+  },
+  dateInfoDay: {
+    fontSize: 18,
+    fontWeight: '500',
+    color: Colors.primary,
+  },
+  
+  // 로딩 상태
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 80,
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#666666',
+    fontWeight: '500',
+  },
+  
+  // 새로운 아이콘 스타일들
+  categoryIconContainer: {
+    marginRight: 12,
+  },
+  calendarIconContainer: {
+    marginRight: 12,
+  },
+  calendarIcon: {
+    width: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  calendarTop: {
+    width: 20,
+    height: 4,
+    backgroundColor: Colors.primary,
+    borderRadius: 2,
+    marginBottom: 2,
+  },
+  calendarBody: {
+    width: 18,
+    height: 14,
+    backgroundColor: Colors.primary,
+    borderRadius: 2,
+  },
+  timeIconContainer: {
+    marginRight: 6,
+  },
+  clockIcon: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: Colors.primary,
+    backgroundColor: 'transparent',
+  },
+  emptyIconContainer: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: Colors.primaryLight,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  checkmarkIcon: {
+    width: 32,
+    height: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkmarkLine1: {
+    position: 'absolute',
+    width: 8,
+    height: 2,
+    backgroundColor: 'white',
+    transform: [{ rotate: '45deg' }],
+    left: 8,
+    top: 16,
+  },
+  checkmarkLine2: {
+    position: 'absolute',
+    width: 16,
+    height: 2,
+    backgroundColor: 'white',
+    transform: [{ rotate: '-45deg' }],
+    left: 12,
+    top: 14,
+  },
+
   summaryCard: {
     margin: 20,
     marginTop: 20,
     backgroundColor: '#FFFFFF',
-    borderRadius: 15,
-    padding: 20,
-    borderWidth: 2,
-    borderColor: '#40B59F',
+    borderRadius: 20,
+    padding: 24,
     shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
     elevation: 8,
+    borderWidth: 1,
+    borderColor: '#F0F0F0',
   },
   summaryHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 15,
-  },
-  summaryIcon: {
-    fontSize: 24,
-    marginRight: 10,
+    marginBottom: 20,
   },
   summaryTitle: {
-    fontSize: 20,
-    fontWeight: '600',
+    fontSize: 22,
+    fontWeight: '700',
     color: '#333333',
   },
   summaryStats: {
@@ -448,41 +819,38 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   cardsContainer: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 16,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 6,
-    elevation: 4,
+    backgroundColor: 'transparent',
+    borderRadius: 0,
+    padding: 0,
   },
   todoCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 10,
-    borderWidth: 2,
-    borderColor: '#40B59F',
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  cardTouchArea: {
-    flex: 1,
-  },
-  completedCard: {
-    backgroundColor: '#F8F9FA',
-    borderColor: '#40B59F',
-    opacity: 0.9,
-    position: 'relative',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 12,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.08,
-    shadowRadius: 10,
-    elevation: 8,
+    shadowRadius: 12,
+    elevation: 6,
+    borderWidth: 1,
+    borderColor: '#F5F5F5',
+  },
+  cardContent: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+  },
+  completedCard: {
+    backgroundColor: '#F8F9FA',
+    borderColor: '#E0E0E0',
+    opacity: 0.85,
+    position: 'relative',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 3,
   },
   todoHeader: {
     flexDirection: 'row',
@@ -520,19 +888,67 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  
+  // 펼쳐진 콘텐츠 스타일 - 상자가 길어지는 부분
+  expandedContent: {
+    paddingTop: 16,
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    overflow: 'hidden',
+  },
+  expandedLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.primary,
+    marginBottom: 8,
+  },
+  expandedDescription: {
+    fontSize: 14,
+    color: '#666',
+    lineHeight: 20,
+  },
+  detailDivider: {
+    height: 1,
+    backgroundColor: '#F0F0F0',
+    marginBottom: 16,
+  },
+  detailSection: {
+    marginBottom: 16,
+  },
+  detailLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333333',
+    marginBottom: 8,
+  },
+  detailText: {
+    fontSize: 16,
+    color: '#666666',
+    lineHeight: 24,
+  },
+  detailTimeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.primaryPale,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    alignSelf: 'flex-start',
+  },
+  detailTimeText: {
+    fontSize: 16,
+    color: Colors.primary,
+    fontWeight: '600',
+  },
   timeContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     marginTop: 8,
-    backgroundColor: '#F0F8FF',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
+    backgroundColor: Colors.primaryPale,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
     alignSelf: 'flex-start',
-  },
-  timeIcon: {
-    fontSize: 12,
-    marginRight: 4,
   },
   todoTime: {
     fontSize: 14,
@@ -547,10 +963,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 60,
     paddingHorizontal: 40,
-  },
-  emptyIcon: {
-    fontSize: 64,
-    marginBottom: 20,
   },
   emptyTitle: {
     fontSize: 20,
@@ -574,7 +986,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 1000,
@@ -582,22 +994,56 @@ const styles = StyleSheet.create({
   successCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 20,
-    padding: 30,
+    padding: 32,
     marginHorizontal: 40,
     alignItems: 'center',
     shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 10,
+    minWidth: 280,
+    borderWidth: 2,
+    borderColor: Colors.primary,
+  },
+  
+  // 민트 컬러 체크 아이콘
+  checkContainer: {
+    marginBottom: 20,
+  },
+  checkCircle: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: Colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: Colors.primary,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
-    shadowRadius: 10,
-    elevation: 10,
-    borderWidth: 3,
-    borderColor: '#40B59F',
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  checkIcon: {
+    width: 24,
+    height: 14,
+    borderBottomWidth: 4,
+    borderLeftWidth: 4,
+    borderColor: '#FFFFFF',
+    transform: [{ rotate: '-45deg' }],
+    marginTop: -3,
+    marginLeft: 3,
+  },
+  
+  // 시니어 친화적 메시지 스타일
+  messageContainer: {
+    alignItems: 'center',
   },
   successTitle: {
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: '700',
-    color: '#40B59F',
-    marginBottom: 10,
+    color: Colors.primary,
+    marginBottom: 12,
     textAlign: 'center',
   },
   successMessage: {
@@ -606,44 +1052,18 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     textAlign: 'center',
     fontWeight: '600',
+    lineHeight: 24,
   },
-  successSubMessage: {
+  successSubtitle: {
     fontSize: 16,
     color: '#666666',
     textAlign: 'center',
-    marginTop: 5,
-  },
-  completedBadge: {
-    position: 'absolute',
-    top: -8,
-    right: -8,
-    backgroundColor: '#40B59F',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    zIndex: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 4,
-  },
-  completedBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '500',
+    lineHeight: 22,
   },
   completedTimeContainer: {
-    backgroundColor: '#E8F5E8',
-    borderColor: '#40B59F',
-    borderWidth: 1,
-  },
-  selectedCard: {
-    backgroundColor: '#40B59F',
-    borderColor: '#40B59F',
-    borderWidth: 3,
-    shadowColor: '#40B59F',
-    shadowOpacity: 0.3,
+    backgroundColor: '#F0F0F0',
+    opacity: 0.7,
   },
   selectedBadge: {
     position: 'absolute',
@@ -676,24 +1096,24 @@ const styles = StyleSheet.create({
   completeButton: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    backgroundColor: '#2E8B87',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 25,
+    backgroundColor: Colors.primary,
     minWidth: 80,
-    shadowColor: '#000000',
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  completedButton: {
+    backgroundColor: '#95A5A6',
+    shadowColor: '#95A5A6',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.15,
     shadowRadius: 4,
-    elevation: 3,
-  },
-  completedButton: {
-    backgroundColor: '#1E6B67',
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.2,
-    shadowRadius: 5,
-    elevation: 4,
+    elevation: 2,
   },
   selectedCompleteButton: {
     backgroundColor: '#4A9B97',
@@ -714,26 +1134,5 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#FFFFFF',
     textAlign: 'center',
-  },
-  selectedCompleteButtonText: {
-    color: '#FFFFFF',
-  },
-  addButton: {
-    backgroundColor: '#40B59F',
-    borderRadius: 20,
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#40B59F',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  addButtonText: {
-    color: '#FFFFFF',
-    fontSize: 24,
-    fontWeight: '700',
   },
 });

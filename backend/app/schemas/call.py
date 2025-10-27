@@ -17,10 +17,18 @@ class CallLogResponse(BaseModel):
     call_end_time: Optional[datetime]
     call_duration: Optional[int]
     audio_file_url: Optional[str]
+    conversation_summary: Optional[str]
     created_at: datetime
     
     class Config:
         from_attributes = True
+
+
+class CallSettingsCreate(BaseModel):
+    """통화 설정 생성"""
+    call_time: str  # "09:30" 형식
+    frequency: CallFrequency = CallFrequency.DAILY
+    is_active: bool = True
 
 
 class CallSettingsUpdate(BaseModel):
@@ -28,6 +36,20 @@ class CallSettingsUpdate(BaseModel):
     frequency: CallFrequency
     call_time: time
     is_active: bool = True
+
+
+class CallSettingsResponse(BaseModel):
+    """통화 설정 응답"""
+    setting_id: str
+    elderly_id: str
+    call_time: time
+    frequency: CallFrequency
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+    
+    class Config:
+        from_attributes = True
 
 
 class CallTranscriptResponse(BaseModel):

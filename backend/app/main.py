@@ -3,9 +3,12 @@ Grandby FastAPI Application
 메인 애플리케이션 진입점
 """
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Form, HTTPException, Depends
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Form, HTTPException, Depends, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
+from pydantic import BaseModel
 from contextlib import asynccontextmanager
 import logging
 import json
@@ -13,14 +16,15 @@ import base64
 import asyncio
 import os
 import tempfile
-from typing import Dict
+from typing import Dict, Optional
 import audioop
 from datetime import datetime
 from sqlalchemy.orm import Session
+import time
 
 from twilio.twiml.voice_response import VoiceResponse, Connect, Stream
-from openai import OpenAI
 
+from app.routers import auth, users, calls, diaries, todos, notifications, dashboard
 from app.config import settings, is_development
 from app.database import test_db_connection, get_db
 from app.services.ai_call.stt_service import STTService
@@ -28,12 +32,15 @@ from app.services.ai_call.tts_service import TTSService
 from app.services.ai_call.llm_service import LLMService
 from app.services.ai_call.twilio_service import TwilioService
 
-# 로거 설정
-logging.basicConfig(level=settings.LOG_LEVEL)
+# 로거 설정 (시간 포함)
+logging.basicConfig(
+    level=settings.LOG_LEVEL,
+    format='%(asctime)s.%(msecs)03d - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 logger = logging.getLogger(__name__)
 
 # OpenAI 클라이언트 및 서비스 초기화
-openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
 stt_service = STTService()
 tts_service = TTSService()
 llm_service = LLMService()
@@ -41,228 +48,933 @@ llm_service = LLMService()
 # WebSocket 연결 및 대화 세션 관리
 active_connections: Dict[str, WebSocket] = {}
 conversation_sessions: Dict[str, list] = {}
+saved_calls: set = set()  # 중복 저장 방지용 플래그
+
+
+# ==================== 대화 내용 DB 저장 함수 ====================
+
+async def save_conversation_to_db(call_sid: str, conversation: list):
+    """
+    대화 내용을 DB에 저장하는 공통 함수
+    
+    Args:
+        call_sid: Twilio Call SID
+        conversation: 대화 내용 리스트 [{"role": "user", "content": "..."}, ...]
+    """
+    # 이미 저장되었으면 스킵 (중복 방지)
+    if call_sid in saved_calls:
+        logger.info(f"⏭️  이미 저장된 통화: {call_sid}")
+        return
+    
+    # 저장할 내용이 없으면 스킵
+    if not conversation or len(conversation) == 0:
+        logger.warning(f"⚠️  저장할 대화 내용이 없음: {call_sid}")
+        return
+    
+    logger.info(f"💾 대화 기록 저장 시작: {len(conversation)}개 메시지")
+    
+    try:
+        from app.models.call import CallLog, CallTranscript, CallStatus
+        db = next(get_db())
+        
+        # 1. CallLog 업데이트 (대화 요약)
+        call_log_db = db.query(CallLog).filter(CallLog.call_id == call_sid).first()
+        
+        if call_log_db:
+            # LLM 요약 생성 (대화가 있는 경우에만)
+            if len(conversation) > 0:
+                logger.info("🤖 LLM으로 통화 요약 생성 중...")
+                summary = llm_service.summarize_call_conversation(conversation)
+                call_log_db.conversation_summary = summary
+                logger.info(f"✅ 요약 생성 완료: {summary[:100]}...")
+            
+            db.commit()
+            logger.info(f"✅ CallLog 업데이트 완료")
+        else:
+            logger.warning(f"⚠️  CallLog를 찾을 수 없음: {call_sid}")
+        
+        # 2. CallTranscript 저장 (화자별 대화 내용)
+        for idx, message in enumerate(conversation):
+            speaker = "ELDERLY" if message["role"] == "user" else "AI"
+            
+            transcript = CallTranscript(
+                call_id=call_sid,
+                speaker=speaker,
+                text=message["content"],
+                timestamp=idx * 10.0,  # 대략적인 타임스탬프 (10초 간격)
+                created_at=datetime.utcnow()
+            )
+            db.add(transcript)
+        
+        db.commit()
+        logger.info(f"✅ 대화 내용 {len(conversation)}개 저장 완료")
+        
+        # 저장 성공 플래그 설정
+        saved_calls.add(call_sid)
+        
+        # # ✅ 일기 자동 생성 트리거
+        # try:
+        #     from app.tasks.diary_generator import generate_diary_from_call
+        #     generate_diary_from_call.delay(call_sid)
+        #     logger.info(f"📝 일기 자동 생성 작업 예약: {call_sid}")
+        # except Exception as e:
+        #     logger.error(f"❌ 일기 생성 작업 예약 실패: {e}")
+        
+        db.close()
+        
+    except Exception as e:
+        logger.error(f"❌ DB 저장 실패: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        if 'db' in locals():
+            db.rollback()
+            db.close()
 
 
 # ==================== AudioProcessor ====================
 
 class AudioProcessor:
-    """오디오 처리 클래스 - 실시간 오디오 버퍼링 및 침묵 감지"""
+    """
+    오디오 처리 클래스 - 실시간 오디오 버퍼링 및 침묵 감지 (동적 임계값)
+    
+    Twilio에서 수신한 mulaw 오디오를 버퍼링하고,
+    침묵을 감지하여 STT 처리 시점을 결정합니다.
+    
+    배경 소음 레벨을 자동으로 측정하여 임계값을 동적으로 조정합니다.
+    """
     
     def __init__(self, call_sid: str):
         self.call_sid = call_sid
-        self.audio_buffer = []
-        self.is_speaking = False
-        self.silence_threshold = 500  # 침묵 감지 임계값
-        self.silence_duration = 0
-        self.max_silence = 1.5  # 1.5초 침묵 후 처리
+        self.audio_buffer = []  # 오디오 청크 버퍼 (이제 PCM 데이터 저장)
+        self.transcript_buffer = []  # 실시간 STT 결과 버퍼
+        self.is_speaking = False  # 사용자가 말하고 있는지 여부
         
+        # ========== PCM 기반 동적 임계값 설정 ==========
+        # PCM RMS 값은 μ-law보다 훨씬 큼 (16-bit vs 8-bit)
+        self.base_silence_threshold = 1000  # 기본 임계값 (PCM 16-bit 기준)
+        self.silence_threshold = 1000  # 현재 임계값 (동적으로 변경됨)
+        
+        # 배경 소음 측정
+        self.noise_samples = []  # 배경 소음 RMS 샘플
+        self.noise_calibration_chunks = 50  # 처음 1초(50*20ms) 동안 배경 소음 측정
+        self.is_calibrated = False  # 보정 완료 여부
+        self.background_noise_level = 0  # 측정된 배경 소음 레벨
+        
+        # 적응형 조정 설정 (PCM 값에 맞게 조정)
+        self.noise_margin = 200  # 배경 소음 + 마진 = 임계값 (PCM 기준)
+        self.min_threshold = 500  # 최소 임계값 (PCM 기준)
+        self.max_threshold = 5000  # 최대 임계값 (PCM 기준)
+        # ======================================
+        
+        self.silence_duration = 0  # 현재 침묵 지속 시간
+        self.max_silence = 0.5  # ⭐ 1.5초 침묵 후 STT 처리 (충분한 발화 수집)
+
+        # 초기 노이즈 필터링
+        self.warmup_chunks = 0  # 받은 청크 수
+        self.warmup_threshold = 25  # 처음 0.5초 무시
+        
+        # 연속 음성 감지
+        self.voice_chunks = 0  # 연속 음성 감지 카운터
+        self.voice_threshold = 3  # 최소 3번 연속 감지
+        
+        # TTS 재생 상태 (에코 방지)
+        self.is_bot_speaking = False
+        self.bot_silence_delay = 0
+        
+        # 통계 정보 (디버깅용)
+        self.rms_history = []  # 최근 RMS 기록
+        self.max_rms_history = 100  # 최근 100개만 유지
+    
+    def _calibrate_noise_level(self, rms: float):
+        """
+        배경 소음 레벨 자동 보정 (PCM 기준)
+        
+        통화 시작 후 처음 1초 동안 수신한 RMS 값들의 평균을 
+        배경 소음 레벨로 설정합니다.
+        
+        Args:
+            rms: 현재 청크의 RMS 값 (PCM 16-bit)
+        """
+        if not self.is_calibrated:
+            # 비정상적으로 큰 값은 제외 (연결음 등) - PCM 기준으로 조정
+            if rms < 10000:  # PCM 16-bit 기준으로 조정
+                self.noise_samples.append(rms)
+            
+            # 충분한 샘플이 모이면 평균 계산
+            if len(self.noise_samples) >= self.noise_calibration_chunks:
+                self.background_noise_level = sum(self.noise_samples) / len(self.noise_samples)
+                
+                # 동적 임계값 설정: 배경 소음 + 마진
+                calculated_threshold = self.background_noise_level + self.noise_margin
+                
+                # 최소/최대 범위 내로 제한
+                self.silence_threshold = max(
+                    self.min_threshold,
+                    min(self.max_threshold, calculated_threshold)
+                )
+                
+                self.is_calibrated = True
+                
+                logger.info(f"🎚️  [배경 소음 보정 완료]")
+                logger.info(f"   📊 배경 소음 레벨: {self.background_noise_level:.1f}")
+                logger.info(f"   🎯 조정된 임계값: {self.silence_threshold:.1f} (기본: {self.base_silence_threshold})")
+                logger.info(f"   📈 샘플 수: {len(self.noise_samples)}개")
+    
+    def _update_threshold_adaptive(self, rms: float):
+        """
+        실시간 적응형 임계값 조정 (PCM 기준)
+        
+        대화 중에도 RMS 통계를 기반으로 임계값을 미세 조정합니다.
+        배경 소음이 변화하는 환경(예: 이동 중 통화)에 유용합니다.
+        
+        Args:
+            rms: 현재 청크의 RMS 값 (PCM 16-bit)
+        """
+        # RMS 기록 저장
+        self.rms_history.append(rms)
+        if len(self.rms_history) > self.max_rms_history:
+            self.rms_history.pop(0)
+        
+        # 100개 샘플마다 재조정 (약 2초마다)
+        if len(self.rms_history) >= self.max_rms_history and len(self.rms_history) % 50 == 0:
+            # 하위 30% 값들의 평균 (배경 소음으로 추정)
+            sorted_rms = sorted(self.rms_history)
+            lower_30_percent = sorted_rms[:30]
+            estimated_noise = sum(lower_30_percent) / len(lower_30_percent)
+            
+            # 임계값 재조정 (서서히 적응)
+            new_threshold = estimated_noise + self.noise_margin
+            new_threshold = max(self.min_threshold, min(self.max_threshold, new_threshold))
+            
+            # 큰 변화가 있을 때만 업데이트 (±500 이상) - PCM 기준으로 조정
+            if abs(new_threshold - self.silence_threshold) > 500:
+                old_threshold = self.silence_threshold
+                self.silence_threshold = new_threshold
+                logger.info(f"🔄 임계값 적응: {old_threshold:.1f} → {new_threshold:.1f} (추정 소음: {estimated_noise:.1f})")
+    
+    def get_calibration_status(self) -> dict:
+        """
+        보정 상태 정보 반환 (디버깅/모니터링용)
+        
+        Returns:
+            dict: 보정 관련 통계 정보
+        """
+        return {
+            "is_calibrated": self.is_calibrated,
+            "background_noise_level": round(self.background_noise_level, 2),
+            "current_threshold": round(self.silence_threshold, 2),
+            "base_threshold": self.base_silence_threshold,
+            "samples_collected": len(self.noise_samples),
+            "rms_history_size": len(self.rms_history)
+        }
+
     def add_audio_chunk(self, audio_data: bytes):
-        """오디오 청크 추가"""
-        self.audio_buffer.append(audio_data)
+        """오디오 청크 추가 및 음성 활동 감지 (PCM 기반 동적 임계값 적용)"""
+        # μ-law → PCM 변환 (실시간)
+        try:
+            pcm_data = audioop.ulaw2lin(audio_data, 2)  # 16-bit PCM으로 변환
+            self.audio_buffer.append(pcm_data)
+        except Exception as e:
+            logger.error(f"❌ μ-law → PCM 변환 실패: {e}")
+            return
         
-        # 음성 활동 감지 (RMS - Root Mean Square)
-        rms = audioop.rms(audio_data, 2)  # 16-bit audio
+        # 워밍업: 초기 청크 무시 (연결 노이즈 방지)
+        self.warmup_chunks += 1
+        if self.warmup_chunks <= self.warmup_threshold:
+            if self.warmup_chunks == 1:
+                logger.info("⏳ 오디오 초기화 및 배경 소음 측정 중...")
+            return
         
+        # AI가 말하는 동안 + 종료 후 1초간 사용자 입력 무시 (에코 방지)
+        if self.is_bot_speaking or self.bot_silence_delay > 0:
+            if self.bot_silence_delay > 0:
+                self.bot_silence_delay -= 1
+                if self.bot_silence_delay == 0:
+                    logger.info("✅ AI 응답 종료 후 대기 완료, 사용자 입력 재개")
+            return
+        
+        # RMS 계산 (PCM 16-bit 기준)
+        rms = audioop.rms(pcm_data, 2)  # 2바이트 샘플 폭
+        
+        # ========== 동적 임계값 기능 ==========
+        # 1. 배경 소음 보정 (처음 1초)
+        if not self.is_calibrated:
+            self._calibrate_noise_level(rms)
+            return  # 보정 완료 전까지는 음성 감지 안함
+        
+        # 2. 실시간 적응형 조정 (선택적, 주석 해제하여 활성화)
+        # self._update_threshold_adaptive(rms)
+        # ======================================
+        
+        # 비정상적으로 큰 RMS 값 필터링 (PCM 기준으로 조정)
+        if rms > 20000:  # PCM 16-bit 기준으로 조정
+            logger.warning(f"⚠️  비정상적인 RMS 무시: {rms}")
+            self.voice_chunks = 0
+            return
+        
+        # 음성 활동 감지 (동적 임계값 사용)
         if rms > self.silence_threshold:
-            self.is_speaking = True
-            self.silence_duration = 0
+            self.voice_chunks += 1
+            
+            # 연속으로 여러 번 감지되어야 음성으로 인정
+            if self.voice_chunks >= self.voice_threshold:
+                if not self.is_speaking:
+                    logger.info(f"🎤 [음성 감지] 말하기 시작 (RMS: {rms:.1f}, 임계값: {self.silence_threshold:.1f})")
+                self.is_speaking = True
+                self.silence_duration = 0
         else:
+            # 조용하면 음성 카운터 리셋
+            self.voice_chunks = 0
+            
+            # 이전에 말하고 있었다면 침묵 카운터 증가
             if self.is_speaking:
+                if self.silence_duration == 0:
+                    logger.info(f"🔇 [침묵 감지] 말을 멈춤 (RMS: {rms:.1f})")
+                
                 self.silence_duration += 0.02  # 20ms per chunk
+                
+                # 침묵 진행 상황 (0.5초마다)
+                if int(self.silence_duration * 10) % 5 == 0:
+                    logger.debug(f"⏱️  침묵: {self.silence_duration:.1f}초 / {self.max_silence}초")
                 
     def should_process(self) -> bool:
         """오디오 처리가 필요한지 확인 (사용자가 말을 멈췄는지)"""
-        return (self.is_speaking and 
+        return (self.is_speaking and
                 self.silence_duration >= self.max_silence and 
                 len(self.audio_buffer) > 0)
     
     def get_audio(self) -> bytes:
-        """버퍼링된 오디오 가져오기 및 초기화"""
+        """
+        버퍼링된 오디오 가져오기 및 초기화
+        
+        Returns:
+            bytes: 병합된 오디오 데이터 (PCM 포맷)
+        """
         audio = b''.join(self.audio_buffer)
         self.audio_buffer = []
         self.is_speaking = False
         self.silence_duration = 0
         return audio
+    
+    def add_transcript(self, text: str):
+        """
+        실시간 변환된 텍스트를 버퍼에 추가
+        
+        Args:
+            text: 변환된 텍스트
+        """
+        if text and text.strip():
+            self.transcript_buffer.append(text)
+            logger.debug(f"📝 텍스트 버퍼 추가: {len(self.transcript_buffer)}개 문장")
+    
+    def get_full_transcript(self) -> str:
+        """
+        전체 대화 내용 가져오기
+        
+        Returns:
+            str: 공백으로 결합된 전체 대화 텍스트
+        """
+        return " ".join(self.transcript_buffer)
+    
+    def start_bot_speaking(self):
+        """AI 응답 시작 - 사용자 입력 차단 (에코 방지)"""
+        logger.info("🤖 [에코 방지] AI 응답 중 - 사용자 입력 차단")
+        self.is_bot_speaking = True
+        # 기존 상태 초기화
+        self.is_speaking = False
+        self.voice_chunks = 0
+        self.silence_duration = 0
+    
+    def stop_bot_speaking(self):
+        """AI 응답 종료 - 1초 대기 후 사용자 입력 재개"""
+        self.bot_silence_delay = 50  # 50개 청크 = 1초 대기
+        self.is_bot_speaking = False
+        logger.info("🤖 [에코 방지] AI 응답 종료 - 1초 후 사용자 입력 재개")
+    
+    def remove_silence(self, audio_data: bytes) -> bytes:
+        """
+        오디오 데이터에서 무음 구간 제거 (PCM 기준)
+        
+        Args:
+            audio_data: PCM 포맷 오디오 데이터
+        
+        Returns:
+            bytes: 무음이 제거된 오디오 데이터
+        """
+        try:
+            # 청크 크기 (20ms = 320 bytes at 8kHz PCM 16-bit)
+            chunk_size = 320  # 8kHz * 20ms * 2 bytes
+            voice_chunks = []
+            
+            # 동적 임계값 사용 (calibration 완료 후)
+            threshold = self.silence_threshold if self.is_calibrated else self.base_silence_threshold
+            
+            # 청크 단위로 RMS 계산하여 음성 구간만 추출
+            for i in range(0, len(audio_data), chunk_size):
+                chunk = audio_data[i:i + chunk_size]
+                
+                # 마지막 청크가 작을 수 있으므로 체크
+                if len(chunk) < chunk_size:
+                    break
+                
+                # RMS 계산 (PCM 16-bit)
+                try:
+                    rms = audioop.rms(chunk, 2)  # 2바이트 샘플 폭
+                    
+                    # 임계값보다 큰 경우에만 포함 (음성 구간)
+                    if rms > threshold:
+                        voice_chunks.append(chunk)
+                except Exception as e:
+                    logger.debug(f"RMS 계산 오류, 청크 건너뜀: {e}")
+                    continue
+            
+            if not voice_chunks:
+                logger.warning("⚠️  무음 제거 후 남은 오디오 없음")
+                return audio_data  # 원본 반환
+            
+            # 음성 청크들을 결합
+            cleaned_audio = b''.join(voice_chunks)
+            
+            reduction_percent = (1 - len(cleaned_audio) / len(audio_data)) * 100
+            logger.info(f"🎚️  무음 제거: {len(audio_data)} → {len(cleaned_audio)} bytes ({reduction_percent:.1f}% 감소)")
+            
+            return cleaned_audio
+            
+        except Exception as e:
+            logger.error(f"❌ 무음 제거 중 오류: {e}")
+            return audio_data  # 오류 시 원본 반환
 
 
 # ==================== Helper Functions ====================
 
-def transcribe_audio(audio_data: bytes) -> str:
+async def transcribe_audio_realtime(audio_data: bytes, audio_processor=None) -> tuple[str, float]:
     """
-    Whisper API를 사용하여 오디오를 텍스트로 변환
-    Twilio mulaw 포맷 → WAV 변환 후 전송
-    """
-    try:
-        import wave
-        
-        # Twilio는 mulaw (G.711 μ-law) 포맷으로 전송
-        # mulaw를 16-bit PCM으로 변환
-        try:
-            pcm_data = audioop.ulaw2lin(audio_data, 2)
-        except Exception as conv_error:
-            logger.error(f"mulaw 변환 오류: {conv_error}")
-            return ""
-        
-        # 임시 WAV 파일 생성
-        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_audio:
-            temp_audio_path = temp_audio.name
-        
-        # PCM 데이터를 WAV 파일로 저장
-        try:
-            with wave.open(temp_audio_path, 'wb') as wav_file:
-                wav_file.setnchannels(1)      # Mono
-                wav_file.setsampwidth(2)      # 16-bit (2 bytes)
-                wav_file.setframerate(8000)   # 8kHz (Twilio 샘플레이트)
-                wav_file.writeframes(pcm_data)
-        except Exception as wav_error:
-            logger.error(f"WAV 파일 생성 오류: {wav_error}")
-            if os.path.exists(temp_audio_path):
-                os.unlink(temp_audio_path)
-            return ""
-        
-        # Whisper API 호출
-        try:
-            with open(temp_audio_path, 'rb') as audio_file:
-                transcript = openai_client.audio.transcriptions.create(
-                    model="whisper-1",
-                    file=audio_file,
-                    language="ko"
-                )
-            
-            logger.info(f"✅ 음성 인식 성공: {transcript.text[:50]}...")
-            return transcript.text
-            
-        except Exception as whisper_error:
-            logger.error(f"Whisper API 오류: {whisper_error}")
-            return ""
-        
-        finally:
-            # 임시 파일 삭제
-            if os.path.exists(temp_audio_path):
-                os.unlink(temp_audio_path)
+    실시간 오디오를 텍스트로 변환 (PCM 기반)
     
-    except Exception as e:
-        logger.error(f"음성 인식 전체 오류: {str(e)}")
-        return ""
-
-
-def get_gpt_response(user_message: str, call_sid: str) -> str:
-    """GPT를 사용한 대화 응답 생성"""
-    try:
-        # 대화 세션 초기화 (첫 메시지인 경우)
-        if call_sid not in conversation_sessions:
-            conversation_sessions[call_sid] = [
-                {
-                    "role": "system",
-                    "content": """당신은 친절하고 따뜻한 한국어 AI 어시스턴트입니다.
-                    어르신과 전화 통화를 하며 일상 대화를 나누고 있습니다.
-                    간결하고 명확하게 답변하며, 전화 통화에 적합한 짧은 문장으로 대답하세요.
-                    어르신의 안부를 묻고, 오늘 하루 어떻게 지냈는지, 건강은 어떤지 관심을 가져주세요."""
-                }
-            ]
-        
-        # 사용자 메시지 추가
-        conversation_sessions[call_sid].append({
-            "role": "user",
-            "content": user_message
-        })
-        
-        # GPT API 호출
-        response = openai_client.chat.completions.create(
-            model=settings.OPENAI_MODEL,
-            messages=conversation_sessions[call_sid],
-            max_tokens=150,
-            temperature=0.7
-        )
-        
-        assistant_message = response.choices[0].message.content
-        
-        # AI 응답 저장
-        conversation_sessions[call_sid].append({
-            "role": "assistant",
-            "content": assistant_message
-        })
-        
-        return assistant_message
-    except Exception as e:
-        logger.error(f"GPT API 오류: {str(e)}")
-        return "죄송합니다. 응답을 생성하는 중 오류가 발생했습니다."
-
-
-def text_to_speech(text: str) -> bytes:
-    """
-    OpenAI TTS API를 사용하여 텍스트를 음성으로 변환
-    """
-    try:
-        response = openai_client.audio.speech.create(
-            model=settings.OPENAI_TTS_MODEL,
-            voice=settings.OPENAI_TTS_VOICE,  # alloy, echo, fable, onyx, nova, shimmer
-            input=text,
-            response_format="wav"
-        )
-        
-        return response.content
-    except Exception as e:
-        logger.error(f"TTS 오류: {str(e)}")
-        return b""
-
-
-async def send_audio_to_twilio(websocket: WebSocket, stream_sid: str, text: str):
-    """
-    텍스트를 음성으로 변환하여 Twilio WebSocket으로 전송
-    WAV → mulaw 변환 포함
+    이제 audio_data는 이미 PCM 포맷이므로 추가 변환 불필요
+    
+    Args:
+        audio_data: PCM 오디오 데이터 (16-bit)
+        audio_processor: AudioProcessor 인스턴스 (무음 제거용)
+    
+    Returns:
+        tuple: (변환된 텍스트, 실행 시간)
     """
     try:
         import wave
         import io
         
-        # TTS로 음성 생성 (WAV 포맷)
-        audio_data = text_to_speech(text)
+        # ✅ 무음 제거 (AudioProcessor가 제공된 경우)
+        if audio_processor:
+            # audio_data = audio_processor.remove_silence(audio_data)
+            
+            # 무음 제거 후 데이터가 너무 짧으면 스킵
+            if len(audio_data) < 1600:  # 최소 0.1초 (320 bytes * 5)
+                logger.debug("⏭️  오디오 데이터가 너무 짧음, STT 스킵")
+                return "", 0
+        
+        # PCM 데이터를 WAV 포맷으로 변환 (메모리 내)
+        logger.info(f"🔍 [STT 디버그] PCM 데이터 크기: {len(audio_data)} bytes")
+        
+        try:
+            wav_io = io.BytesIO()
+            
+            with wave.open(wav_io, 'wb') as wav_file:
+                wav_file.setnchannels(1)      # Mono
+                wav_file.setsampwidth(2)      # 16-bit (2 bytes)
+                wav_file.setframerate(8000)   # 8kHz
+                wav_file.writeframes(audio_data)  # 이미 PCM 데이터
+            
+            wav_data = wav_io.getvalue()
+            logger.info(f"✅ [STT 디버그] WAV 변환 완료: {len(wav_data)} bytes")
+            
+        except Exception as wav_error:
+            logger.error(f"❌ [STT 디버그] WAV 변환 실패: {wav_error}")
+            logger.error(f"   - PCM 데이터 크기: {len(audio_data)}")
+            logger.error(f"   - PCM 데이터 타입: {type(audio_data)}")
+            return "", 0
+        
+        # 실시간 STT 변환 (비동기 처리)
+        logger.info(f"🎤 [STT 디버그] STT 서비스 호출 시작...")
+        try:
+            transcript, stt_time = await stt_service.transcribe_audio_chunk(
+                wav_data,
+                language="ko"
+            )
+            logger.info(f"✅ [STT 디버그] STT 서비스 응답 완료: '{transcript[:50]}...' ({stt_time:.2f}초)")
+        except Exception as stt_error:
+            logger.error(f"❌ [STT 디버그] STT 서비스 호출 실패: {stt_error}")
+            logger.error(f"   - WAV 데이터 크기: {len(wav_data)}")
+            import traceback
+            logger.error(f"   - 상세 오류: {traceback.format_exc()}")
+            return "", 0
+        
+        return transcript, stt_time
+        
+    except Exception as e:
+        logger.error(f"❌ 실시간 음성 인식 오류: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return "", 0
+
+
+async def convert_and_send_audio(websocket: WebSocket, stream_sid: str, text: str) -> float:
+    """
+    단일 문장을 TTS 변환하고 Twilio로 즉시 전송 (병렬 처리용)
+    
+    이 함수는 LLM 스트리밍 중 문장이 완성될 때마다 호출됩니다.
+    사용자는 AI가 말하는 것을 거의 실시간으로 들을 수 있습니다.
+    
+    처리 플로우:
+    1. 문장 TTS 변환 (비동기)
+    2. WAV → mulaw 변환
+    3. Base64 인코딩
+    4. Twilio WebSocket으로 전송
+    
+    Args:
+        websocket: Twilio WebSocket 연결
+        stream_sid: Twilio Stream SID
+        text: 변환할 문장
+    
+    Returns:
+        float: 이 문장의 예상 재생 시간 (초)
+    """
+    try:
+        import wave
+        import io
+        
+        # 1. TTS 변환 (문장 단위, 비동기)
+        audio_data, tts_time = await tts_service.text_to_speech_sentence(text)
         
         if not audio_data:
-            logger.error("TTS 음성 생성 실패")
+            logger.warning(f"⚠️ TTS 변환 실패, 건너뜀: {text[:30]}...")
+            return 0.0
+        
+        # 2. WAV → mulaw 변환 (Twilio 호환)
+        wav_io = io.BytesIO(audio_data)
+        with wave.open(wav_io, 'rb') as wav_file:
+            channels = wav_file.getnchannels()
+            sample_width = wav_file.getsampwidth()
+            framerate = wav_file.getframerate()
+            pcm_data = wav_file.readframes(wav_file.getnframes())
+        
+        # Stereo → Mono 변환 (필요 시)
+        if channels == 2:
+            pcm_data = audioop.tomono(pcm_data, sample_width, 1, 1)
+        
+        # 샘플레이트 변환: Twilio는 8kHz 요구
+        if framerate != 8000:
+            pcm_data, _ = audioop.ratecv(pcm_data, sample_width, 1, framerate, 8000, None)
+        
+        # PCM → mulaw 변환
+        mulaw_data = audioop.lin2ulaw(pcm_data, 2)
+        
+        # ⭐ 재생 시간 계산 (mulaw 8kHz: 1초 = 8000 bytes)
+        playback_duration = len(mulaw_data) / 8000.0
+        
+        # 3. Base64 인코딩
+        audio_base64 = base64.b64encode(mulaw_data).decode('utf-8')
+        
+        # 4. Twilio로 청크 단위 전송
+        chunk_size = 8000  # 8KB 청크
+        for i in range(0, len(audio_base64), chunk_size):
+            chunk = audio_base64[i:i + chunk_size]
+            
+            message = {
+                "event": "media",
+                "streamSid": stream_sid,
+                "media": {
+                    "payload": chunk
+                }
+            }
+            
+            await websocket.send_text(json.dumps(message))
+            await asyncio.sleep(0.02)  # 부드러운 재생을 위한 작은 지연
+        
+        logger.info(f"✅ 문장 전송 완료 ({tts_time:.2f}초, 재생: {playback_duration:.2f}초): {text[:30]}...")
+        
+        return playback_duration  # 재생 시간 반환
+        
+    except Exception as e:
+        logger.error(f"❌ 오디오 변환/전송 오류: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return 0.0
+
+
+async def process_streaming_response(
+    websocket: WebSocket,
+    stream_sid: str,
+    user_text: str,
+    conversation_history: list,
+    audio_processor=None
+) -> str:
+    """
+    실시간 하이브리드 방식: LLM 스트리밍 중 문장 생성 즉시 TTS 시작, 전송은 순서 보장
+    
+    핵심 개선:
+    - 문장이 생성되는 즉시 TTS 시작 (대기 시간 없음)
+    - TTS는 병렬로 실행되지만 전송은 순서대로
+    - 첫 응답 시간 최소화 (가장 빠른 방식)
+    
+    Args:
+        websocket: Twilio WebSocket 연결
+        stream_sid: Twilio Stream SID  
+        user_text: 사용자 발화 전체 텍스트
+        conversation_history: 대화 기록
+        audio_processor: AudioProcessor 인스턴스
+    
+    Returns:
+        str: 생성된 전체 AI 응답
+    """
+    import re
+    
+    # 에코 방지
+    if audio_processor:
+        audio_processor.start_bot_speaking()
+    
+    try:
+        # 전체 파이프라인 시작 시간
+        pipeline_start = time.time()
+        
+        # 순서 관리 변수
+        completed_audio = {}  # {index: (mulaw_data, playback_duration)}
+        next_send_index = [0]  # 다음에 전송할 순서 (리스트로 감싸서 클로저에서 수정 가능)
+        send_lock = asyncio.Lock()  # 동시 전송 방지
+        sentence_index = [0]  # 현재 문장 인덱스
+        
+        # 문장 및 응답 저장
+        sentence_buffer = ""
+        full_response = []
+        tts_tasks = []  # TTS 태스크 추적
+        
+        logger.info(f"[발화 종료 +0.00초] 실시간 하이브리드 파이프라인 시작")
+        
+        # LLM 스트리밍: 문장 생성 즉시 TTS 시작
+        async for chunk in llm_service.generate_response_streaming(
+            user_text, conversation_history
+        ):
+            sentence_buffer += chunk
+            full_response.append(chunk)
+            
+            # 문장 종료 감지 (마침표, 느낌표, 물음표, 줄바꿈)
+            if re.search(r'[.!?\n]', chunk):
+                sentences = re.split(r'([.!?\n]+)', sentence_buffer)
+                
+                for i in range(0, len(sentences)-1, 2):
+                    sentence = sentences[i] + (sentences[i+1] if i+1 < len(sentences) else "")
+                    sentence = sentence.strip()
+                    
+                    if sentence:
+                        current_idx = sentence_index[0]
+                        elapsed = time.time() - pipeline_start
+                        
+                        logger.info(f"[+{elapsed:.2f}초] 문장[{current_idx}] 생성: {sentence[:40]}...")
+                        
+                        # 핵심: 즉시 TTS 태스크 시작 (대기하지 않음!)
+                        task = asyncio.create_task(
+                            process_tts_and_send(
+                                websocket, stream_sid,
+                                current_idx, sentence,
+                                completed_audio, next_send_index, send_lock,
+                                pipeline_start
+                            )
+                        )
+                        tts_tasks.append(task)
+                        sentence_index[0] += 1
+                
+                sentence_buffer = sentences[-1] if len(sentences) % 2 == 1 else ""
+        
+        # 마지막 문장 처리
+        if sentence_buffer.strip():
+            current_idx = sentence_index[0]
+            elapsed = time.time() - pipeline_start
+            logger.info(f"[+{elapsed:.2f}초] 문장[{current_idx}] 생성(마지막): {sentence_buffer[:40]}...")
+            
+            task = asyncio.create_task(
+                process_tts_and_send(
+                    websocket, stream_sid,
+                    current_idx, sentence_buffer,
+                    completed_audio, next_send_index, send_lock,
+                    pipeline_start
+                )
+            )
+            tts_tasks.append(task)
+        
+        # 모든 TTS 완료 대기
+        results = await asyncio.gather(*tts_tasks, return_exceptions=True)
+        total_playback_duration = sum(r for r in results if isinstance(r, (int, float)))
+        
+        pipeline_time = time.time() - pipeline_start
+        final_text = "".join(full_response)
+        
+        logger.info(f"[+{pipeline_time:.2f}초] 전체 완료 (재생시간: {total_playback_duration:.2f}초)")
+        
+        # 음성 재생 완료 대기
+        actual_wait_time = total_playback_duration * 1.2
+        if actual_wait_time > 0:
+            await asyncio.sleep(actual_wait_time)
+        
+        return final_text
+        
+    except Exception as e:
+        logger.error(f"실시간 하이브리드 오류: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return ""
+    finally:
+        if audio_processor:
+            audio_processor.stop_bot_speaking()
+
+
+async def process_tts_and_send(
+    websocket: WebSocket,
+    stream_sid: str,
+    index: int,
+    sentence: str,
+    completed_audio: dict,
+    next_send_index: list,
+    send_lock: asyncio.Lock,
+    pipeline_start: float
+) -> float:
+    """
+    단일 문장을 TTS 변환하고 순서에 맞춰 전송
+    
+    동작:
+    1. TTS 변환 (병렬 실행)
+    2. 완료되면 completed_audio에 저장
+    3. 자신의 순서가 되면 즉시 전송
+    
+    Args:
+        index: 문장 순서 번호
+        sentence: 변환할 문장
+        completed_audio: 완료된 오디오 저장소
+        next_send_index: 다음 전송 순서
+        send_lock: 전송 동기화 락
+        pipeline_start: 파이프라인 시작 시간
+    
+    Returns:
+        float: 재생 시간
+    """
+    try:
+        import wave
+        import io
+        
+        tts_start = time.time()
+        elapsed_start = tts_start - pipeline_start
+        logger.info(f"[+{elapsed_start:.2f}초] 문장[{index}] TTS 시작")
+        
+        # TTS 변환 (이 부분이 병렬로 실행됨)
+        audio_data, tts_time = await tts_service.text_to_speech_sentence(sentence)
+        
+        if not audio_data:
+            logger.warning(f"문장[{index}] TTS 실패")
+            return 0.0
+        
+        elapsed_tts_done = time.time() - pipeline_start
+        logger.info(f"[+{elapsed_tts_done:.2f}초] 문장[{index}] TTS 완료 ({tts_time:.2f}초 소요)")
+        
+        # WAV → mulaw 변환
+        wav_io = io.BytesIO(audio_data)
+        with wave.open(wav_io, 'rb') as wav_file:
+            channels = wav_file.getnchannels()
+            sample_width = wav_file.getsampwidth()
+            framerate = wav_file.getframerate()
+            pcm_data = wav_file.readframes(wav_file.getnframes())
+        
+        # Stereo → Mono 변환 (필요 시)
+        if channels == 2:
+            pcm_data = audioop.tomono(pcm_data, sample_width, 1, 1)
+        
+        # 샘플레이트 변환: Twilio는 8kHz 요구
+        if framerate != 8000:
+            pcm_data, _ = audioop.ratecv(pcm_data, sample_width, 1, framerate, 8000, None)
+        
+        # PCM → mulaw 변환
+        mulaw_data = audioop.lin2ulaw(pcm_data, 2)
+        playback_duration = len(mulaw_data) / 8000.0
+        
+        # 완료된 오디오를 저장소에 저장
+        completed_audio[index] = (mulaw_data, playback_duration)
+        
+        # 순서에 맞춰 전송 시도
+        await try_send_in_order(
+            websocket, stream_sid,
+            completed_audio, next_send_index, send_lock,
+            pipeline_start
+        )
+        
+        return playback_duration
+        
+    except Exception as e:
+        logger.error(f"문장[{index}] 처리 오류: {e}")
+        return 0.0
+
+
+async def try_send_in_order(
+    websocket: WebSocket,
+    stream_sid: str,
+    completed_audio: dict,
+    next_send_index: list,
+    send_lock: asyncio.Lock,
+    pipeline_start: float
+):
+    """
+    다음 순서의 오디오가 준비되면 전송
+    
+    핵심: 순서를 건너뛰지 않고 차례대로만 전송
+    예: 1번 완료 → 전송, 3번 완료 → 대기, 2번 완료 → 2,3 연속 전송
+    """
+    async with send_lock:  # 동시 전송 방지
+        # 다음 순서가 준비될 때까지 계속 전송
+        while next_send_index[0] in completed_audio:
+            index = next_send_index[0]
+            mulaw_data, playback_duration = completed_audio[index]
+            
+            send_start = time.time()
+            elapsed_send_start = send_start - pipeline_start
+            logger.info(f"[+{elapsed_send_start:.2f}초] 문장[{index}] 전송 시작")
+            
+            # Base64 인코딩 및 청크 단위 전송
+            audio_base64 = base64.b64encode(mulaw_data).decode('utf-8')
+            
+            chunk_size = 8000  # 8KB 청크
+            for i in range(0, len(audio_base64), chunk_size):
+                chunk = audio_base64[i:i + chunk_size]
+                
+                message = {
+                    "event": "media",
+                    "streamSid": stream_sid,
+                    "media": {"payload": chunk}
+                }
+                
+                await websocket.send_text(json.dumps(message))
+                await asyncio.sleep(0.02)  # 부드러운 재생
+            
+            elapsed_send_done = time.time() - pipeline_start
+            logger.info(f"[+{elapsed_send_done:.2f}초] 문장[{index}] 전송 완료 (재생: {playback_duration:.2f}초)")
+            
+            # 정리 및 다음 순서로 이동
+            del completed_audio[index]
+            next_send_index[0] += 1
+
+
+async def send_audio_to_twilio_with_tts(websocket: WebSocket, stream_sid: str, text: str, audio_processor=None):
+    """
+    TTS Service를 사용하여 텍스트를 음성으로 변환 후 Twilio WebSocket으로 전송
+    WAV → mulaw 변환 포함
+    
+    Args:
+        websocket: Twilio WebSocket 연결
+        stream_sid: Twilio Stream SID
+        text: 변환할 텍스트
+        audio_processor: AudioProcessor 인스턴스 (에코 방지용)
+    """
+    # TTS 시작 알림 (에코 방지)
+    if audio_processor:
+        audio_processor.start_bot_speaking()
+    
+    try:
+        import wave
+        import io
+        
+        # TTS Service로 음성 생성 (WAV 파일로 저장됨)
+        audio_file_path, tts_time = tts_service.text_to_speech(text)
+        
+        # TTS 실패 체크
+        if not audio_file_path or tts_time == 0:
+            logger.error("❌ TTS 변환 실패 - 응답이 None이거나 시간이 0초")
             return
         
-        # WAV 데이터를 mulaw로 변환
+        logger.info(f"✅ TTS 완료 ({tts_time:.2f}초): {audio_file_path}")
+        
+        # 파일 존재 확인
+        if not os.path.exists(audio_file_path):
+            logger.error(f"❌ TTS 파일이 존재하지 않음: {audio_file_path}")
+            return
+        
+        # 파일 크기 확인
+        file_size = os.path.getsize(audio_file_path)
+        logger.info(f"📁 생성된 파일 크기: {file_size} bytes")
+        
+        if file_size == 0:
+            logger.error("❌ 파일이 비어있습니다! TTS API 문제 가능성")
+            return
+        
         try:
-            # WAV 파일을 메모리에서 읽기
-            wav_io = io.BytesIO(audio_data)
-            with wave.open(wav_io, 'rb') as wav_file:
-                # WAV 파라미터 확인
+            # 파일 헤더 확인
+            with open(audio_file_path, 'rb') as f:
+                header = f.read(12)
+                logger.info(f"📄 파일 헤더: {header.hex() if header else 'EMPTY'}")
+                
+                if len(header) == 0:
+                    logger.error("❌ 헤더를 읽을 수 없습니다!")
+                    return
+                
+                # WAV 파일 검증
+                if header[:4] == b'RIFF' and header[8:12] == b'WAVE':
+                    logger.info("✅ 정상 WAV 파일 확인")
+                elif header[:3] == b'ID3' or header[:2] == b'\xff\xfb':
+                    logger.error("❌ MP3 파일입니다! response_format이 wav로 설정되지 않았습니다.")
+                    return
+                else:
+                    logger.error(f"❌ 알 수 없는 파일 형식: {header[:4]}")
+                    return
+
+            # WAV 파일 읽기 (wave 모듈만 사용)
+            with wave.open(audio_file_path, 'rb') as wav_file:
                 channels = wav_file.getnchannels()
                 sample_width = wav_file.getsampwidth()
                 framerate = wav_file.getframerate()
-                frames = wav_file.readframes(wav_file.getnframes())
+                n_frames = wav_file.getnframes()
                 
-                logger.info(f"🎵 TTS WAV: {channels}ch, {sample_width*8}bit, {framerate}Hz")
+                logger.info(f"🎵 TTS WAV 정보:")
+                logger.info(f"  - 채널: {channels}ch")
+                logger.info(f"  - 비트: {sample_width*8}bit")
+                logger.info(f"  - 샘플레이트: {framerate}Hz")
+                logger.info(f"  - 프레임 수: {n_frames}")
                 
-                # Stereo → Mono 변환 (필요시)
-                if channels == 2:
-                    frames = audioop.tomono(frames, sample_width, 1, 1)
-                
-                # 샘플레이트 변환 (Twilio는 8kHz 요구)
-                if framerate != 8000:
-                    frames, _ = audioop.ratecv(frames, sample_width, 1, framerate, 8000, None)
-                
-                # 16-bit → 8-bit mulaw 변환
-                if sample_width == 2:  # 16-bit
-                    mulaw_data = audioop.lin2ulaw(frames, 2)
-                elif sample_width == 1:  # 8-bit
-                    # 8-bit PCM → 16-bit PCM → mulaw
-                    frames_16 = audioop.lin2lin(frames, 1, 2)
-                    mulaw_data = audioop.lin2ulaw(frames_16, 2)
-                else:
-                    logger.error(f"지원하지 않는 샘플 너비: {sample_width}")
-                    return
-                
-        except Exception as conv_error:
-            logger.error(f"오디오 변환 오류: {conv_error}")
+                pcm_data = wav_file.readframes(n_frames)
+                logger.info(f"  - PCM 데이터: {len(pcm_data)} bytes")
+
+            # Stereo → Mono 변환 (필요시)
+            if channels == 2:
+                logger.info("🔄 Stereo → Mono 변환 중...")
+                pcm_data = audioop.tomono(pcm_data, sample_width, 1, 1)
+                logger.info(f"✅ Mono 변환 완료: {len(pcm_data)} bytes")
+
+            # 샘플레이트 변환 (Twilio는 8kHz 요구)
+            if framerate != 8000:
+                logger.info(f"🔄 샘플레이트 변환: {framerate}Hz → 8000Hz")
+                pcm_data, _ = audioop.ratecv(pcm_data, sample_width, 1, framerate, 8000, None)
+                logger.info(f"✅ 샘플레이트 변환 완료: {len(pcm_data)} bytes")
+
+            # PCM → mulaw 변환
+            logger.info("🔄 PCM → mulaw 변환 중...")
+            mulaw_data = audioop.lin2ulaw(pcm_data, 2)
+            logger.info(f"✅ mulaw 변환 완료: {len(mulaw_data)} bytes")
+            
+        except wave.Error as wave_err:
+            logger.error(f"❌ WAV 파일 읽기 오류: {wave_err}")
+            import traceback
+            logger.error(traceback.format_exc())
             return
+        except Exception as conv_error:
+            logger.error(f"❌ 오디오 변환 오류: {type(conv_error).__name__}: {conv_error}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return
+        finally:
+            # TTS로 생성된 임시 MP3 파일 삭제
+            if os.path.exists(audio_file_path):
+                os.unlink(audio_file_path)
+
+                
         
         # mulaw 데이터를 Base64로 인코딩
         audio_base64 = base64.b64encode(mulaw_data).decode('utf-8')
         
-        logger.info(f"📤 오디오 전송: {len(mulaw_data)} bytes (mulaw 8kHz)")
+        logger.info(f"📤 오디오 전송 시작: {len(mulaw_data)} bytes (mulaw 8kHz)")
         
         # 청크로 나누어 전송 (Twilio 제한 고려)
         chunk_size = 8000  # 8KB chunks
@@ -279,11 +991,17 @@ async def send_audio_to_twilio(websocket: WebSocket, stream_sid: str, text: str)
             
             await websocket.send_text(json.dumps(message))
             await asyncio.sleep(0.02)  # 작은 지연으로 부드러운 재생
-            
+        
         logger.info("✅ 음성 전송 완료")
         
     except Exception as e:
         logger.error(f"❌ 음성 전송 오류: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+    finally:
+        # TTS 종료 알림 (에코 방지)
+        if audio_processor:
+            audio_processor.stop_bot_speaking()
 
 
 # Lifespan 이벤트 (startup/shutdown)
@@ -352,6 +1070,25 @@ async def log_requests(request: Request, call_next):
 
 # ==================== Exception Handlers ====================
 
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """422 Validation Error 상세 정보 로깅"""
+    logger.error(f"❌ 422 Validation Error:")
+    logger.error(f"❌ URL: {request.url}")
+    logger.error(f"❌ Method: {request.method}")
+    logger.error(f"❌ Body: {exc.body}")
+    logger.error(f"❌ Errors: {exc.errors()}")
+    
+    # 상세 에러 정보를 JSON으로 반환
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": "Validation Error",
+            "errors": exc.errors(),
+            "body": exc.body if isinstance(exc.body, dict) else (exc.body.decode() if exc.body else None)
+        }
+    )
+
 @app.exception_handler(404)
 async def not_found_handler(request: Request, exc):
     """404 에러 핸들러"""
@@ -403,9 +1140,6 @@ async def health_check():
 
 
 # ==================== API Routers ====================
-# 각 도메인별 라우터를 여기에 등록
-
-from app.routers import auth, users, calls, diaries, todos, notifications, dashboard
 
 # 인증
 app.include_router(
@@ -456,24 +1190,43 @@ app.include_router(
     tags=["Dashboard"]
 )
 
-
 # ==================== Twilio WebSocket Endpoints ====================
 
-@app.post("/api/twilio/call", tags=["Twilio"])
-async def initiate_test_call(db: Session = Depends(get_db)):
+class RealtimeCallRequest(BaseModel):
+    """실시간 AI 대화 통화 요청"""
+    to_number: str  # 전화번호 (+821012345678 형식)
+    user_id: str = "test-user"  # 사용자 ID (선택)
+
+
+class RealtimeCallResponse(BaseModel):
+    """실시간 AI 대화 통화 응답"""
+    success: bool
+    call_sid: str
+    to_number: str
+    status: str
+    message: str
+    voice_url: str
+    timestamp: str
+
+
+@app.post("/api/twilio/call", response_model=RealtimeCallResponse, tags=["Twilio"])
+async def initiate_realtime_call(
+    request: RealtimeCallRequest,
+    db: Session = Depends(get_db)
+):
     """
-    테스트 전화 발신 (TEST_PHONE_NUMBER로 자동 발신)
+    실시간 AI 대화 통화 발신 (WebSocket 기반)
     
-    환경 변수 TEST_PHONE_NUMBER에 설정된 번호로 자동으로 전화를 겁니다.
+    사용자가 입력한 전화번호로 전화를 걸고, WebSocket을 통해 실시간 AI 대화를 제공합니다.
+    
+    플로우:
+    1. 앱에서 이 API 호출 (전화번호 전달)
+    2. Twilio가 사용자 전화번호로 전화 발신
+    3. 사용자가 전화 받음
+    4. /api/twilio/voice 엔드포인트에서 WebSocket 연결 시작
+    5. 실시간 음성 대화 (STT → LLM → TTS)
     """
     try:
-        # TEST_PHONE_NUMBER 확인
-        if not settings.TEST_PHONE_NUMBER:
-            raise HTTPException(
-                status_code=400,
-                detail="TEST_PHONE_NUMBER가 환경 변수에 설정되지 않았습니다."
-            )
-        
         # API Base URL 확인
         if not settings.API_BASE_URL:
             raise HTTPException(
@@ -484,17 +1237,18 @@ async def initiate_test_call(db: Session = Depends(get_db)):
         # Twilio 서비스 초기화
         twilio_service = TwilioService()
         
-        # Callback URL 설정
+        # Callback URL 설정 (WebSocket 연결)
         api_base_url = settings.API_BASE_URL
-        voice_url = f"https://{api_base_url}/api/twilio/voice"
+        voice_url = f"https://{api_base_url}/api/twilio/voice"  # WebSocket 시작 엔드포인트
         status_callback_url = f"https://{api_base_url}/api/twilio/call-status"
         
-        logger.info(f"📞 전화 발신 시작: {settings.TEST_PHONE_NUMBER}")
-        logger.info(f"🔗 Voice URL: {voice_url}")
+        logger.info(f"📞 실시간 AI 대화 통화 발신 시작: {request.to_number}")
+        logger.info(f"👤 사용자 ID: {request.user_id}")
+        logger.info(f"🔗 Voice URL (WebSocket 시작): {voice_url}")
         
         # 전화 걸기
         call_sid = twilio_service.make_call(
-            to_number=settings.TEST_PHONE_NUMBER,
+            to_number=request.to_number,  # 사용자 입력 전화번호
             voice_url=voice_url,
             status_callback_url=status_callback_url
         )
@@ -504,7 +1258,7 @@ async def initiate_test_call(db: Session = Depends(get_db)):
             from app.models.call import CallLog
             new_call = CallLog(
                 call_id=call_sid,
-                elderly_id="test-user",  # 테스트용
+                elderly_id=request.user_id,
                 call_status="initiated",
                 twilio_call_sid=call_sid,
                 created_at=datetime.utcnow()
@@ -516,25 +1270,25 @@ async def initiate_test_call(db: Session = Depends(get_db)):
             logger.warning(f"⚠️ 통화 기록 저장 실패 (계속 진행): {str(e)}")
             db.rollback()
         
-        logger.info(f"✅ 전화 발신 성공: {call_sid}")
+        logger.info(f"✅ 실시간 AI 대화 통화 발신 성공: {call_sid}")
         
-        return {
-            "success": True,
-            "call_sid": call_sid,
-            "to_number": settings.TEST_PHONE_NUMBER,
-            "status": "initiated",
-            "message": f"전화가 {settings.TEST_PHONE_NUMBER}로 발신되었습니다.",
-            "voice_url": voice_url,
-            "timestamp": datetime.utcnow().isoformat()
-        }
+        return RealtimeCallResponse(
+            success=True,
+            call_sid=call_sid,
+            to_number=request.to_number,
+            status="initiated",
+            message=f"실시간 AI 대화 전화가 {request.to_number}로 발신되었습니다. 전화를 받으시면 AI와 대화하실 수 있습니다.",
+            voice_url=voice_url,
+            timestamp=datetime.utcnow().isoformat()
+        )
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ 전화 발신 실패: {str(e)}")
+        logger.error(f"❌ 실시간 AI 대화 통화 발신 실패: {str(e)}")
         raise HTTPException(
             status_code=500,
-            detail=f"전화 발신 중 오류 발생: {str(e)}"
+            detail=f"실시간 AI 대화 통화 발신 중 오류 발생: {str(e)}"
         )
 
 
@@ -546,10 +1300,10 @@ async def voice_handler():
     response = VoiceResponse()
     
     # 환영 메시지
-    response.say(
-        "안녕하세요. AI 어시스턴트에 연결되었습니다.",
-        language='ko-KR'
-    )
+    # response.say(
+    #     "안녕하세요. AI 어시스턴트에 연결되었습니다.",
+    #     language='ko-KR'
+    # )
     
     # WebSocket 스트림 연결 설정
     if not settings.API_BASE_URL:
@@ -570,10 +1324,21 @@ async def voice_handler():
 
 
 @app.websocket("/api/twilio/media-stream")
-async def media_stream_handler(websocket: WebSocket):
+async def media_stream_handler(
+    websocket: WebSocket,
+    db: Session = Depends(get_db)
+):
     """
-    Twilio Media Streams WebSocket 핸들러
-    실시간 오디오 데이터 양방향 처리
+    Twilio Media Streams WebSocket 핸들러 (실시간 STT 적용)
+    
+    실시간 오디오 데이터 양방향 처리:
+    1. 오디오 청크 수신 및 버퍼링
+    2. 침묵 감지 시 실시간 STT 변환
+    3. 변환된 텍스트를 실시간으로 누적
+    4. 각 발화마다 즉시 AI 응답 생성 및 TTS 재생
+    5. 통화 종료 시 전체 대화 내용 저장
+    
+    실시간 STT → LLM → TTS 파이프라인
     """
     await websocket.accept()
     logger.info("📞 Twilio WebSocket 연결됨")
@@ -581,78 +1346,197 @@ async def media_stream_handler(websocket: WebSocket):
     call_sid = None
     stream_sid = None
     audio_processor = None
+    call_log = None  # DB에 저장할 CallLog 객체
+    elderly_id = None  # 통화 대상 어르신 ID
     
     try:
         async for message in websocket.iter_text():
             data = json.loads(message)
             event_type = data.get('event')
             
+            # ========== 1. 스트림 시작 ==========
             if event_type == 'start':
-                # 스트림 시작
                 call_sid = data['start']['callSid']
                 stream_sid = data['start']['streamSid']
+                
+                # customParameters에서 elderly_id 추출 (Twilio 통화 시작 시 전달)
+                custom_params = data['start'].get('customParameters', {})
+                elderly_id = custom_params.get('elderly_id', 'unknown')
+                
                 audio_processor = AudioProcessor(call_sid)
                 active_connections[call_sid] = websocket
                 
-                logger.info(f"🎙️ 스트림 시작 - Call: {call_sid}, Stream: {stream_sid}")
+                # 대화 세션 초기화 (LLM 대화 히스토리 관리)
+                if call_sid not in conversation_sessions:
+                    conversation_sessions[call_sid] = []
                 
-                # 시작 안내 메시지
-                welcome_text = "무엇을 도와드릴까요?"
-                await send_audio_to_twilio(websocket, stream_sid, welcome_text)
+                # DB에 통화 시작 기록 저장 (status: initiated만)
+                try:
+                    from app.models.call import CallLog, CallStatus
+                    db = next(get_db())
+                    
+                    # 기존 CallLog가 있는지 확인
+                    existing_call = db.query(CallLog).filter(CallLog.call_id == call_sid).first()
+                    
+                    if not existing_call:
+                        call_log = CallLog(
+                            call_id=call_sid,
+                            elderly_id=elderly_id,
+                            call_status=CallStatus.INITIATED,
+                            twilio_call_sid=call_sid
+                        )
+                        db.add(call_log)
+                        db.commit()
+                        db.refresh(call_log)
+                        logger.info(f"✅ DB에 통화 시작 기록 저장: {call_sid}")
+                    else:
+                        logger.info(f"⏭️  이미 존재하는 통화 기록: {call_sid}")
+                    
+                    db.close()
+                except Exception as e:
+                    logger.error(f"❌ 통화 시작 기록 저장 실패: {e}")
                 
+                logger.info(f"┌{'─'*58}┐")
+                logger.info(f"│ 🎙️  Twilio 통화 시작                                   │")
+                logger.info(f"│ Call SID: {call_sid:43} │")
+                logger.info(f"│ Stream SID: {stream_sid:41} │")
+                logger.info(f"│ Elderly ID: {elderly_id:41} │")
+                logger.info(f"└{'─'*58}┘")
+                
+                # 시작 안내 메시지 (TTS 서비스 사용)
+                welcome_text = "안녕하세요! 무엇을 도와드릴까요?"
+                await send_audio_to_twilio_with_tts(websocket, stream_sid, welcome_text, audio_processor)
+                
+            # ========== 2. 오디오 데이터 수신 및 실시간 STT 처리 ==========
             elif event_type == 'media':
-                # 오디오 데이터 수신 (실시간 스트리밍)
                 if audio_processor:
                     # Base64 디코딩 (Twilio는 mulaw 8kHz로 전송)
                     audio_payload = base64.b64decode(data['media']['payload'])
                     audio_processor.add_audio_chunk(audio_payload)
                     
-                    # 사용자가 말을 멈췄는지 확인
+                    # 사용자가 말을 멈췄는지 확인 (침묵 감지 - 1초로 단축!)
                     if audio_processor.should_process():
-                        # 오디오 → 텍스트 변환 (STT)
-                        audio_data = audio_processor.get_audio()
-                        user_text = transcribe_audio(audio_data)
+                        cycle_start = time.time()
+                        logger.info(f"{'='*60}")
+                        logger.info(f"🎯 발화 종료 감지 → 즉시 스트리밍 응답")
+                        logger.info(f"{'='*60}")
                         
-                        if user_text:
-                            logger.info(f"👤 사용자: {user_text}")
+                        # 1️⃣ STT: 오디오 → 텍스트 변환 (실시간 청크 기반 + 무음 제거)
+                        audio_data = audio_processor.get_audio()
+                        user_text, stt_time = await transcribe_audio_realtime(audio_data, audio_processor)
+                        
+                        if user_text and user_text.strip():
+                            logger.info(f"✅ STT 완료 ({stt_time:.2f}초)")
+                            logger.info(f"👤 [사용자 발화] {user_text}")
                             
-                            # 종료 키워드 확인
-                            if any(keyword in user_text.lower() 
-                                   for keyword in ['종료', '끝', '그만', 'goodbye', '끊어']):
-                                goodbye_text = "대화를 종료합니다. 감사합니다. 좋은 하루 보내세요!"
-                                await send_audio_to_twilio(websocket, stream_sid, goodbye_text)
+                            # 변환된 텍스트를 버퍼에 저장 (전체 대화 추적용)
+                            audio_processor.add_transcript(user_text)
+                            
+                            # 종료 키워드 확인 (더 구체적인 키워드로 변경)
+                            if '그랜비 통화를 종료합니다' in user_text:
+                                logger.info(f"🛑 종료 키워드 감지: '{user_text}'")
+                                
+                                # 대화 세션에 사용자 메시지 추가
+                                if call_sid not in conversation_sessions:
+                                    conversation_sessions[call_sid] = []
+                                conversation_sessions[call_sid].append({"role": "user", "content": user_text})
+                                
+                                goodbye_text = "그랜비 통화를 종료합니다. 감사합니다. 좋은 하루 보내세요!"
+                                
+                                # 대화 세션에 AI 응답 추가
+                                conversation_sessions[call_sid].append({"role": "assistant", "content": goodbye_text})
+                                
+                                await send_audio_to_twilio_with_tts(websocket, stream_sid, goodbye_text, audio_processor)
                                 await asyncio.sleep(2)  # 마지막 메시지 재생 대기
                                 await websocket.close()
                                 break
                             
-                            # GPT 응답 생성
-                            gpt_response = get_gpt_response(user_text, call_sid)
-                            logger.info(f"🤖 AI: {gpt_response}")
+                            # 2️⃣+3️⃣ LLM 스트리밍 + TTS 병렬 처리
+                            # 이것이 핵심 최적화!
+                            # LLM이 문장을 생성하면 즉시 TTS 변환하여 전송
                             
-                            # 텍스트 → 음성 → Twilio로 전송
-                            await send_audio_to_twilio(websocket, stream_sid, gpt_response)
+                            # ✅ 대화 세션 초기화 및 사용자 메시지 추가
+                            if call_sid not in conversation_sessions:
+                                conversation_sessions[call_sid] = []
+                            
+                            # 사용자 메시지를 대화 세션에 추가
+                            conversation_sessions[call_sid].append({"role": "user", "content": user_text})
+                            
+                            conversation_history = conversation_sessions[call_sid]
+                            
+                            ai_response = await process_streaming_response(
+                                websocket,
+                                stream_sid,
+                                user_text,
+                                conversation_history,
+                                audio_processor
+                            )
+                            
+                            # ✅ AI 응답을 대화 세션에 추가
+                            if ai_response and ai_response.strip():
+                                conversation_sessions[call_sid].append({"role": "assistant", "content": ai_response})
+                                logger.info(f"💾 대화 세션 업데이트: {len(conversation_sessions[call_sid])}개 메시지")
+                            
+                            # 대화 히스토리 관리 (최근 20개 메시지 유지)
+                            if len(conversation_sessions[call_sid]) > 20:
+                                conversation_sessions[call_sid] = conversation_sessions[call_sid][-20:]
+                                logger.info(f"🔄 대화 히스토리 정리: 최근 20개 메시지 유지")
+                            
+                            total_cycle_time = time.time() - cycle_start
+                            logger.info(f"⏱️  전체 응답 사이클: {total_cycle_time:.2f}초")
+                            logger.info(f"{'='*60}\n\n")
+                        else:
+                            logger.debug("⏭️  STT 결과 없음 (침묵 또는 잡음)")
                         
+            # ========== 3. 스트림 종료 ==========
             elif event_type == 'stop':
-                # 스트림 종료
-                logger.info(f"📞 스트림 종료 - Call: {call_sid}")
+                logger.info(f"\n{'='*60}")
+                logger.info(f"📞 Twilio 통화 종료 - Call: {call_sid}")
+                logger.info(f"{'='*60}")
+                
+                # 전체 대화 내용 확인
+                if audio_processor:
+                    full_transcript = audio_processor.get_full_transcript()
+                    if full_transcript:
+                        logger.info(f"\n📋 전체 대화 내용:")
+                        logger.info(f"─" * 60)
+                        logger.info(f"{full_transcript}")
+                        logger.info(f"─" * 60)
+                
+                # ✅ 대화 세션을 DB에 저장 (함수 호출)
                 if call_sid in conversation_sessions:
-                    # 통화 내용 저장 가능 (향후 일기 생성 등에 활용)
                     conversation = conversation_sessions[call_sid]
-                    logger.info(f"대화 내용 저장 가능: {len(conversation)}개 메시지")
-                    del conversation_sessions[call_sid]
-                if call_sid in active_connections:
-                    del active_connections[call_sid]
+                    await save_conversation_to_db(call_sid, conversation)
+                
+                logger.info(f"┌{'─'*58}┐")
+                logger.info(f"│ ✅ Twilio 통화 정리 완료                               │")
+                logger.info(f"└{'─'*58}┘\n")
                 break
                 
     except WebSocketDisconnect:
-        logger.info("📞 Twilio WebSocket 연결 해제")
+        logger.info(f"📞 Twilio WebSocket 연결 해제 (Call: {call_sid})")
     except Exception as e:
         logger.error(f"❌ Twilio WebSocket 오류: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
     finally:
+        # ✅ 연결 종료 시 항상 DB 저장 (핵심!)
+        # 사용자가 직접 전화를 끊어도 대화 내용 보존
+        if call_sid and call_sid in conversation_sessions:
+            try:
+                conversation = conversation_sessions[call_sid]
+                await save_conversation_to_db(call_sid, conversation)
+                logger.info(f"🔄 Finally 블록에서 DB 저장 완료: {call_sid}")
+            except Exception as e:
+                logger.error(f"❌ Finally 블록 DB 저장 실패: {e}")
+        
+        # 정리 작업 (메모리에서 제거)
         if call_sid and call_sid in active_connections:
             del active_connections[call_sid]
         if call_sid and call_sid in conversation_sessions:
             del conversation_sessions[call_sid]
+        
+        logger.info(f"🧹 WebSocket 정리 완료: {call_sid}")
 
 
 @app.post("/api/twilio/call-status", tags=["Twilio"])
@@ -666,12 +1550,56 @@ async def call_status_handler(
     """
     logger.info(f"📞 통화 상태 업데이트: {CallSid} - {CallStatus}")
     
-    if CallStatus == 'completed':
-        # 통화 종료 시 정리
-        if CallSid in conversation_sessions:
-            del conversation_sessions[CallSid]
-        if CallSid in active_connections:
-            del active_connections[CallSid]
+    # 통화 상태에 따른 DB 업데이트
+    try:
+        from app.models.call import CallLog, CallStatus as CallStatusEnum
+        db = next(get_db())
+        
+        call_log = db.query(CallLog).filter(CallLog.call_id == CallSid).first()
+        
+        if call_log:
+            if CallStatus == 'answered':
+                # 통화 연결 시 시작 시간 설정
+                if not call_log.call_start_time:
+                    call_log.call_start_time = datetime.utcnow()
+                    call_log.call_status = CallStatusEnum.ANSWERED
+                    db.commit()
+                    logger.info(f"✅ 통화 시작 시간 설정: {CallSid}")
+            
+            elif CallStatus == 'completed':
+                # 통화 종료 시 종료 시간 설정
+                call_log.call_end_time = datetime.utcnow()
+                call_log.call_status = CallStatusEnum.COMPLETED
+                
+                # 통화 시간 계산
+                if call_log.call_start_time:
+                    duration = (call_log.call_end_time - call_log.call_start_time).total_seconds()
+                    call_log.call_duration = int(duration)
+                    logger.info(f"✅ 통화 종료 시간 설정: {CallSid}, 지속시간: {duration}초")
+                
+                db.commit()
+                
+                # ✅ 통화 종료 시 DB 저장 (백업용 - 중복 방지 로직 포함)
+                if CallSid in conversation_sessions:
+                    try:
+                        conversation = conversation_sessions[CallSid]
+                        await save_conversation_to_db(CallSid, conversation)
+                        logger.info(f"💾 콜백에서 통화 기록 저장 완료: {CallSid}")
+                    except Exception as e:
+                        logger.error(f"❌ 콜백 DB 저장 실패: {e}")
+                
+                # 세션 정리
+                if CallSid in conversation_sessions:
+                    del conversation_sessions[CallSid]
+                if CallSid in active_connections:
+                    del active_connections[CallSid]
+        
+        db.close()
+        
+    except Exception as e:
+        logger.error(f"❌ 통화 상태 업데이트 실패: {e}")
+        if 'db' in locals():
+            db.close()
     
     return {"status": "ok", "call_sid": CallSid, "call_status": CallStatus}
 
@@ -687,4 +1615,3 @@ if __name__ == "__main__":
         reload=is_development(),
         log_level=settings.LOG_LEVEL.lower(),
     )
-

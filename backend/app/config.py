@@ -36,6 +36,15 @@ class Settings(BaseSettings):
     OPENAI_TTS_MODEL: str = "tts-1"
     OPENAI_TTS_VOICE: str = "nova"
     
+    # ==================== Speech-to-Text ====================
+    # STT 제공자 선택: "google" 또는 "openai"
+    STT_PROVIDER: str = "google"
+    
+    # Google Cloud STT 설정
+    GOOGLE_APPLICATION_CREDENTIALS: str = "credentials/google-cloud-stt.json"
+    GOOGLE_STT_LANGUAGE_CODE: str = "ko-KR"
+    GOOGLE_STT_MODEL: str = "latest_short"  # phone_call, latest_short, latest_long
+    
     # ==================== Twilio ====================
     TWILIO_ACCOUNT_SID: str
     TWILIO_AUTH_TOKEN: str
@@ -86,6 +95,11 @@ class Settings(BaseSettings):
     ENABLE_TODO_EXTRACTION: bool = True
     ENABLE_EMOTION_ANALYSIS: bool = True
     ENABLE_NOTIFICATIONS: bool = True
+    
+    # ==================== Image Upload Settings ====================
+    UPLOAD_DIR: str = "uploads/profiles"
+    MAX_IMAGE_SIZE: int = 5 * 1024 * 1024  # 5MB
+    PROFILE_IMAGE_SIZE: tuple = (512, 512)  # 리사이징 크기
     
     model_config = SettingsConfigDict(
         env_file=".env",

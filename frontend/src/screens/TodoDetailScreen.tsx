@@ -1,5 +1,5 @@
 /**
- * 어르신 할일 상세 화면
+ * 어르신 할일 상세 화면 - 리디자인 버전
  */
 import React from 'react';
 import {
@@ -13,6 +13,7 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Header, BottomNavigationBar } from '../components';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Colors } from '../constants/Colors';
 
 interface TodoItem {
   id: string;
@@ -23,6 +24,80 @@ interface TodoItem {
   priority: 'high' | 'medium' | 'low';
   category: 'medicine' | 'hospital' | 'daily' | 'other';
 }
+
+// 카테고리별 아이콘 컴포넌트
+const CategoryIcon = ({ category, size = 32 }: { category: string; size?: number }) => {
+  const iconStyle = {
+    width: size,
+    height: size,
+    borderRadius: size / 2,
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
+  };
+
+  switch (category) {
+    case 'medicine':
+      return (
+        <View style={[iconStyle, { backgroundColor: '#FF6B6B' }]}>
+          <View style={{
+            width: size * 0.6,
+            height: size * 0.6,
+            backgroundColor: 'white',
+            borderRadius: 2,
+          }} />
+        </View>
+      );
+    case 'hospital':
+      return (
+        <View style={[iconStyle, { backgroundColor: '#4ECDC4' }]}>
+          <View style={{
+            width: size * 0.4,
+            height: size * 0.6,
+            backgroundColor: 'white',
+          }} />
+          <View style={{
+            position: 'absolute',
+            width: size * 0.6,
+            height: size * 0.4,
+            backgroundColor: 'white',
+          }} />
+        </View>
+      );
+    case 'daily':
+      return (
+        <View style={[iconStyle, { backgroundColor: '#45B7D1' }]}>
+          <View style={{
+            width: size * 0.5,
+            height: size * 0.5,
+            borderRadius: size * 0.25,
+            backgroundColor: 'white',
+          }} />
+        </View>
+      );
+    default:
+      return (
+        <View style={[iconStyle, { backgroundColor: '#96CEB4' }]}>
+          <View style={{
+            width: size * 0.6,
+            height: 2,
+            backgroundColor: 'white',
+            marginBottom: 2,
+          }} />
+          <View style={{
+            width: size * 0.4,
+            height: 2,
+            backgroundColor: 'white',
+            marginBottom: 2,
+          }} />
+          <View style={{
+            width: size * 0.5,
+            height: 2,
+            backgroundColor: 'white',
+          }} />
+        </View>
+      );
+  }
+};
 
 export const TodoDetailScreen = () => {
   const router = useRouter();
@@ -40,26 +115,12 @@ export const TodoDetailScreen = () => {
     category: 'medicine',
   };
 
-  const getCategoryIcon = (category: string) => {
-    switch (category) {
-      case 'medicine':
-        return '💊';
-      case 'hospital':
-        return '🏥';
-      case 'daily':
-        return '🏃';
-      case 'other':
-        return '📞';
-      default:
-        return '📝';
-    }
-  };
 
 
   const handleComplete = () => {
     Alert.alert(
       '할일 완료',
-      '이 할일을 완료 처리하시겠습니까?',
+      '이 할일을 완료하시겠습니까?',
       [
         { text: '취소', style: 'cancel' },
         {
@@ -84,9 +145,9 @@ export const TodoDetailScreen = () => {
         <View style={styles.todoCard}>
           <View style={styles.todoHeader}>
             <View style={styles.categorySection}>
-              <Text style={styles.categoryIcon}>
-                {getCategoryIcon(todo.category)}
-              </Text>
+              <View style={styles.categoryIconContainer}>
+                <CategoryIcon category={todo.category} size={40} />
+              </View>
               <View style={styles.categoryInfo}>
                 <Text style={styles.categoryLabel}>카테고리</Text>
                 <Text style={styles.categoryValue}>
@@ -121,7 +182,9 @@ export const TodoDetailScreen = () => {
           <View style={styles.timeSection}>
             <Text style={styles.timeLabel}>예정 시간</Text>
             <View style={styles.timeContainer}>
-              <Text style={styles.timeIcon}>🕐</Text>
+              <View style={styles.timeIconContainer}>
+                <View style={styles.clockIcon} />
+              </View>
               <Text style={styles.timeText}>{todo.time}</Text>
             </View>
           </View>
@@ -135,7 +198,9 @@ export const TodoDetailScreen = () => {
               onPress={handleComplete}
               activeOpacity={0.7}
             >
-              <Text style={styles.completeButtonText}>완료 처리</Text>
+              <Text style={styles.completeButtonText}>완료
+                
+              </Text>
             </TouchableOpacity>
           )}
         </View>
@@ -158,34 +223,48 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     backgroundColor: '#FFFFFF',
+    paddingHorizontal: 20,
   },
-  todoCard: {
-    margin: 20,
-    marginTop: 20,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 15,
-    padding: 20,
+  
+  // 새로운 아이콘 스타일들
+  categoryIconContainer: {
+    marginRight: 16,
+  },
+  timeIconContainer: {
+    marginRight: 8,
+  },
+  clockIcon: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
     borderWidth: 2,
-    borderColor: '#40B59F',
+    borderColor: Colors.primary,
+    backgroundColor: 'transparent',
+  },
+  
+  todoCard: {
+    marginTop: 20,
+    marginBottom: 20,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 24,
     shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
     elevation: 8,
+    borderWidth: 1,
+    borderColor: '#F0F0F0',
   },
   todoHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 15,
+    marginBottom: 20,
   },
   categorySection: {
     flexDirection: 'row',
     alignItems: 'center',
-  },
-  categoryIcon: {
-    fontSize: 32,
-    marginRight: 12,
   },
   categoryInfo: {
     flex: 1,
@@ -193,17 +272,18 @@ const styles = StyleSheet.create({
   categoryLabel: {
     fontSize: 14,
     color: '#666666',
-    marginBottom: 4,
+    marginBottom: 6,
+    fontWeight: '500',
   },
   categoryValue: {
-    fontSize: 18,
-    fontWeight: '600',
+    fontSize: 20,
+    fontWeight: '700',
     color: '#333333',
   },
   divider: {
     height: 1,
-    backgroundColor: '#E0E0E0',
-    marginVertical: 15,
+    backgroundColor: '#F0F0F0',
+    marginVertical: 20,
   },
   titleSection: {
     flexDirection: 'row',
@@ -218,14 +298,14 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   statusBadge: {
-    backgroundColor: '#40B59F',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
   },
   statusText: {
     color: '#FFFFFF',
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '700',
   },
   descriptionSection: {
@@ -254,36 +334,31 @@ const styles = StyleSheet.create({
   timeContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F0F8FF',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
+    backgroundColor: Colors.primaryPale,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 16,
     alignSelf: 'flex-start',
-  },
-  timeIcon: {
-    fontSize: 16,
-    marginRight: 8,
   },
   timeText: {
     fontSize: 16,
-    color: '#40B59F',
+    color: Colors.primary,
     fontWeight: '600',
   },
   actionSection: {
-    paddingHorizontal: 20,
     marginBottom: 20,
   },
   completeButton: {
-    backgroundColor: '#40B59F',
-    borderRadius: 12,
-    paddingVertical: 16,
+    backgroundColor: Colors.primary,
+    borderRadius: 16,
+    paddingVertical: 18,
     alignItems: 'center',
     marginBottom: 12,
-    shadowColor: '#40B59F',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 6,
   },
   completeButtonText: {
     color: '#FFFFFF',

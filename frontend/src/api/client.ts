@@ -33,12 +33,12 @@ const getApiBaseUrl = () => {
   }
   
   // 3. 개발 환경: Expo 개발 서버의 호스트 자동 감지
-  // 같은 네트워크의 다른 기기에서 접근 가능
-  const debuggerHost = Constants.expoConfig?.hostUri?.split(':').shift();
-  if (debuggerHost && debuggerHost !== 'localhost') {
-    console.log('🔗 자동 감지된 API URL:', `http://${debuggerHost}:8000`);
-    return `http://${debuggerHost}:8000`;
-  }
+  // exp.direct는 Expo 터널이므로 백엔드 주소로 사용 불가
+const debuggerHost = Constants.expoConfig?.hostUri?.split(':').shift();
+if (debuggerHost && debuggerHost !== 'localhost' && !debuggerHost.includes('exp.direct')) {
+  console.log('🔗 자동 감지된 API URL:', `http://${debuggerHost}:8000`);
+  return `http://${debuggerHost}:8000`;
+}
   
   // 4. Fallback: 로컬 개발 (백엔드를 직접 실행한 경우)
   console.log('🔗 Fallback 로컬 API URL 사용');
@@ -117,6 +117,15 @@ apiClient.interceptors.request.use(
     
     if (tokens?.access_token) {
       config.headers.Authorization = `Bearer ${tokens.access_token}`;
+      
+      // 토큰 상태 확인
+      if (__DEV__ && config.url?.includes('/todos')) {
+        console.log(`🔐 토큰 전달 중...`);
+        console.log(`  - Access Token 앞 20자: ${tokens.access_token.substring(0, 20)}...`);
+        console.log(`  - Authorization 헤더: ${config.headers.Authorization ? '설정됨' : '없음'}`);
+      }
+    } else {
+      console.warn('⚠️ 토큰이 없습니다! 요청 시 인증 실패 예상');
     }
     
     // 개발 환경에서 요청 로깅
@@ -211,8 +220,10 @@ apiClient.interceptors.response.use(
     
     // 403: 권한 없음
     if (status === 403) {
+      const detail = error.response.data?.detail || '접근 권한이 없습니다.';
+      console.error('❌ 403 에러 상세:', error.response.data);
       return Promise.reject({
-        message: '접근 권한이 없습니다.'
+        message: detail
       });
     }
     

@@ -11,13 +11,16 @@ from app.models.diary import AuthorType, DiaryStatus
 class DiaryCreate(BaseModel):
     """다이어리 생성"""
     date: date
+    title: Optional[str] = None
     content: str
+    mood: Optional[str] = None
     status: DiaryStatus = DiaryStatus.DRAFT
-
 
 class DiaryUpdate(BaseModel):
     """다이어리 수정"""
+    title: Optional[str] = None
     content: Optional[str] = None
+    mood: Optional[str] = None
     status: Optional[DiaryStatus] = None
 
 
@@ -27,7 +30,9 @@ class DiaryResponse(BaseModel):
     user_id: str
     author_id: str
     date: date
+    title: Optional[str] = None
     content: str
+    mood: Optional[str] = None
     author_type: AuthorType
     is_auto_generated: bool
     status: DiaryStatus
@@ -50,6 +55,8 @@ class DiaryCommentResponse(BaseModel):
     content: str
     is_read: bool
     created_at: datetime
+    user_name: str  # 유저 이름 추가
+    user_role: str  # 유저 역할 추가
     
     class Config:
         from_attributes = True

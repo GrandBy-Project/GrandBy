@@ -2,10 +2,10 @@
 사용자 관련 Pydantic 스키마
 """
 
-from pydantic import BaseModel, EmailStr
-from datetime import datetime
+from pydantic import BaseModel, EmailStr, validator
+from datetime import datetime, date
 from typing import Optional
-from app.models.user import UserRole, AuthProvider, ConnectionStatus
+from app.models.user import UserRole, AuthProvider, ConnectionStatus, Gender
 
 
 class UserBase(BaseModel):
@@ -19,7 +19,24 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     """회원가입 요청"""
     password: str
+    birth_date: date  # 필수
+    gender: Gender  # 필수
     auth_provider: AuthProvider = AuthProvider.EMAIL
+    
+    @validator('birth_date')
+    def validate_birth_date(cls, v):
+        """생년월일 유효성 검증"""
+        today = date.today()
+        age = today.year - v.year - ((today.month, today.day) < (v.month, v.day))
+        
+        if age < 14:
+            raise ValueError('만 14세 이상만 가입 가능합니다')
+        if age > 120:
+            raise ValueError('올바른 생년월일을 입력해주세요')
+        if v > today:
+            raise ValueError('미래 날짜는 입력할 수 없습니다')
+        
+        return v
 
 
 class UserLogin(BaseModel):
@@ -33,6 +50,9 @@ class UserResponse(UserBase):
     user_id: str
     is_active: bool
     created_at: datetime
+    birth_date: Optional[date] = None
+    gender: Optional[Gender] = None
+    profile_image_url: Optional[str] = None
     
     class Config:
         from_attributes = True
@@ -48,11 +68,11 @@ class Token(BaseModel):
 
 class ConnectionCreate(BaseModel):
     """연결 요청 생성"""
-    elderly_phone_or_email: str
+    elderly_phone_or_email: str  # 이메일 또는 전화번호
 
 
 class ConnectionResponse(BaseModel):
-    """연결 응답"""
+    """연결 응답 (기본)"""
     connection_id: str
     caregiver_id: str
     elderly_id: str
@@ -61,4 +81,99 @@ class ConnectionResponse(BaseModel):
     
     class Config:
         from_attributes = True
+
+
+class ElderlySearchResult(BaseModel):
+    """어르신 검색 결과"""
+    user_id: str
+    name: str
+    email: str
+    phone_number: Optional[str]
+    is_already_connected: bool  # 이미 연결되었는지
+    connection_status: Optional[ConnectionStatus] = None  # 연결 상태 (있으면)
+    
+    class Config:
+        from_attributes = True
+
+
+class ConnectionWithUserInfo(BaseModel):
+    """사용자 정보 포함 연결 응답"""
+    connection_id: str
+    status: ConnectionStatus
+    created_at: datetime
+    updated_at: datetime
+    
+    # 상대방 정보
+    user_id: str
+    name: str
+    email: str
+    phone_number: Optional[str]
+    
+    class Config:
+        from_attributes = True
+
+
+class ConnectionListResponse(BaseModel):
+    """연결 목록 응답"""
+    active: list[ConnectionWithUserInfo]  # 활성 연결
+    pending: list[ConnectionWithUserInfo]  # 대기 중 (보호자: 내가 보낸 요청, 어르신: 받은 요청)
+    rejected: list[ConnectionWithUserInfo]  # 거절됨
+
+
+class ConnectionCancelRequest(BaseModel):
+    """연결 취소 요청"""
+    reason: Optional[str] = None  # 취소 사유 (선택)
+
+
+# ==================== 자동 통화 스케줄 ====================
+class CallScheduleUpdate(BaseModel):
+    """자동 통화 스케줄 업데이트 요청"""
+    is_active: bool
+    # HH:MM 형식, 비활성화 시 None 허용
+    call_time: Optional[str] = None
+
+
+class CallScheduleResponse(BaseModel):
+    """자동 통화 스케줄 응답"""
+    is_active: bool
+    call_time: Optional[str] = None  # HH:MM 형식 (예: "14:30")
+
+
+# ==================== 사용자 설정 ====================
+class UserSettingsUpdate(BaseModel):
+    """사용자 설정 업데이트"""
+    auto_diary_enabled: Optional[bool] = None
+    push_notification_enabled: Optional[bool] = None
+    push_todo_reminder_enabled: Optional[bool] = None
+    push_todo_incomplete_enabled: Optional[bool] = None
+    push_todo_created_enabled: Optional[bool] = None
+    push_diary_enabled: Optional[bool] = None
+    push_call_enabled: Optional[bool] = None
+    push_connection_enabled: Optional[bool] = None
+    language_preference: Optional[str] = None
+
+
+class UserSettingsResponse(BaseModel):
+    """사용자 설정 응답"""
+    setting_id: str
+    user_id: str
+    auto_diary_enabled: bool
+    push_notification_enabled: bool
+    push_todo_reminder_enabled: bool
+    push_todo_incomplete_enabled: bool
+    push_todo_created_enabled: bool
+    push_diary_enabled: bool
+    push_call_enabled: bool
+    push_connection_enabled: bool
+    language_preference: str
+    updated_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+# ==================== 푸시 토큰 ====================
+class PushTokenUpdate(BaseModel):
+    """푸시 토큰 업데이트"""
+    push_token: str
 

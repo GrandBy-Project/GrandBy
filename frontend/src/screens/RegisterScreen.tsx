@@ -26,8 +26,10 @@ import {
   formatPhoneNumber,
   validateName,
   validateVerificationCode,
+  validateBirthDate,
+  formatBirthDate,
 } from '../utils/validation';
-import { UserRole } from '../types';
+import { UserRole, Gender } from '../types';
 import apiClient, { TokenManager } from '../api/client';
 import { TermsModal } from '../components/TermsModal';
 import { useAuthStore } from '../store/authStore';
@@ -43,6 +45,7 @@ export const RegisterScreen = () => {
   const confirmPasswordRef = useRef<TextInput>(null);
   const nameRef = useRef<TextInput>(null);
   const phoneRef = useRef<TextInput>(null);
+  const birthDateRef = useRef<TextInput>(null);
   
   // 폼 상태
   const [email, setEmail] = useState('');
@@ -55,6 +58,8 @@ export const RegisterScreen = () => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [name, setName] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
+  const [birthDate, setBirthDate] = useState('');
+  const [gender, setGender] = useState<Gender>(Gender.MALE);
   const [role, setRole] = useState<UserRole>(UserRole.ELDERLY);
   
   // 에러 상태
@@ -64,7 +69,6 @@ export const RegisterScreen = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isSendingCode, setIsSendingCode] = useState(false);
   const [isVerifyingCode, setIsVerifyingCode] = useState(false);
-  
   // 약관 모달 상태
   const [showTermsModal, setShowTermsModal] = useState(false);
 
@@ -154,6 +158,13 @@ export const RegisterScreen = () => {
     const formatted = formatPhoneNumber(text);
     setPhoneNumber(formatted);
   };
+  
+  
+  // 생년월일 입력 처리
+  const handleBirthDateChange = (text: string) => {
+    const formatted = formatBirthDate(text);
+    setBirthDate(formatted);
+  };
 
   // 폼 검증
   const validateForm = (): boolean => {
@@ -186,6 +197,13 @@ export const RegisterScreen = () => {
     if (!phoneValidation.valid) {
       newErrors.phoneNumber = phoneValidation.message;
     }
+    
+    
+    // 생년월일 검증 (필수)
+    const birthDateValidation = validateBirthDate(birthDate);
+    if (!birthDateValidation.valid) {
+      newErrors.birthDate = birthDateValidation.message;
+    }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -216,6 +234,8 @@ export const RegisterScreen = () => {
         name: name.trim(),
         role,
         phone_number: phoneNumber.replace(/[^\d]/g, ''),
+        birth_date: birthDate,
+        gender: gender,
         auth_provider: 'email',
       });
 
@@ -228,6 +248,7 @@ export const RegisterScreen = () => {
       // Zustand 스토어에 사용자 정보 저장
       setUser(response.data.user);
 
+      // 회원가입 완료
       Alert.alert('환영합니다!', '회원가입이 완료되었습니다.', [
         {
           text: '확인',
@@ -269,7 +290,7 @@ export const RegisterScreen = () => {
           <View style={styles.emailContainer}>
             <View style={{ flex: 1 }}>
               <Input
-                inputRef={emailRef}
+                ref={emailRef}
                 label=""
                 value={email}
                 onChangeText={setEmail}
@@ -302,7 +323,7 @@ export const RegisterScreen = () => {
             <View style={styles.codeContainer}>
               <View style={{ flex: 1 }}>
                 <Input
-                  inputRef={verificationCodeRef}
+                  ref={verificationCodeRef}
                   label=""
                   value={verificationCode}
                   onChangeText={setVerificationCode}
@@ -333,7 +354,7 @@ export const RegisterScreen = () => {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>비밀번호 * (최소 6자)</Text>
           <Input
-            inputRef={passwordRef}
+            ref={passwordRef}
             label=""
             value={password}
             onChangeText={setPassword}
@@ -372,7 +393,7 @@ export const RegisterScreen = () => {
           )}
 
           <Input
-            inputRef={confirmPasswordRef}
+            ref={confirmPasswordRef}
             label=""
             value={confirmPassword}
             onChangeText={setConfirmPassword}
@@ -388,7 +409,7 @@ export const RegisterScreen = () => {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>이름 *</Text>
           <Input
-            inputRef={nameRef}
+            ref={nameRef}
             label=""
             value={name}
             onChangeText={setName}
@@ -402,17 +423,74 @@ export const RegisterScreen = () => {
         {/* 전화번호 */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>전화번호 *</Text>
+          <View>
+            <View style={{ flex: 1 }}>
+              <Input
+                ref={phoneRef}
+                label=""
+                value={phoneNumber}
+                onChangeText={handlePhoneNumberChange}
+                placeholder="010-1234-5678"
+                keyboardType="phone-pad"
+                error={errors.phoneNumber}
+                returnKeyType="next"
+              />
+            </View>
+          </View>
+        </View>
+
+        {/* 생년월일 */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>생년월일 * (YYYY-MM-DD)</Text>
           <Input
-            inputRef={phoneRef}
+            ref={birthDateRef}
             label=""
-            value={phoneNumber}
-            onChangeText={handlePhoneNumberChange}
-            placeholder="010-1234-5678"
-            keyboardType="phone-pad"
-            error={errors.phoneNumber}
+            value={birthDate}
+            onChangeText={handleBirthDateChange}
+            placeholder="1990-01-01"
+            keyboardType="numeric"
+            error={errors.birthDate}
+            maxLength={10}
             returnKeyType="done"
             onSubmitEditing={() => {}}
           />
+          <Text style={styles.helperText}>만 14세 이상만 가입 가능합니다</Text>
+        </View>
+
+        {/* 성별 */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>성별 *</Text>
+          <View style={styles.genderButtons}>
+            <TouchableOpacity
+              style={[
+                styles.genderButton,
+                gender === Gender.MALE && styles.genderButtonActive,
+              ]}
+              onPress={() => setGender(Gender.MALE)}
+            >
+              <Text style={[
+                styles.genderButtonText,
+                gender === Gender.MALE && styles.genderButtonTextActive,
+              ]}>
+                남성
+              </Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={[
+                styles.genderButton,
+                gender === Gender.FEMALE && styles.genderButtonActive,
+              ]}
+              onPress={() => setGender(Gender.FEMALE)}
+            >
+              <Text style={[
+                styles.genderButtonText,
+                gender === Gender.FEMALE && styles.genderButtonTextActive,
+              ]}>
+                여성
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* 사용자 유형 */}
@@ -472,6 +550,7 @@ export const RegisterScreen = () => {
         onAgree={handleAgreeTerms}
         onCancel={() => setShowTermsModal(false)}
       />
+      
     </KeyboardAvoidingView>
   );
 };
@@ -601,4 +680,39 @@ const styles = StyleSheet.create({
     marginTop: 16,
     marginBottom: 32,
   },
+  helperText: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+    marginTop: 4,
+  },
+  genderButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  genderButton: {
+    flex: 1,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: Colors.border,
+    backgroundColor: Colors.backgroundLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 54,
+  },
+  genderButtonActive: {
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primaryPale,
+  },
+  genderButtonText: {
+    fontSize: 16,
+    color: Colors.textSecondary,
+    fontWeight: '600',
+  },
+  genderButtonTextActive: {
+    color: Colors.primary,
+    fontWeight: '700',
+  },
 });
+
