@@ -648,6 +648,10 @@ async def process_streaming_response(
         full_response = []
         tts_tasks = []  # TTS 태스크 추적
         
+        MIN_CHARS_FOR_TTS = 40  # 최소 문자 수 (약 15-20 토큰)
+        MAX_WAIT_CHUNKS = 5     # 최대 청크 대기 수
+        chunk_count = 0
+
         logger.info(f"[발화 종료 +0.00초] 실시간 하이브리드 파이프라인 시작")
         
         # LLM 스트리밍: 문장 생성 즉시 TTS 시작
@@ -659,19 +663,31 @@ async def process_streaming_response(
             chunk_count += 1
             sentence_buffer += chunk
             full_response.append(chunk)
-            logger.info(f"🔄 [LLM] 청크[{chunk_count}] 수신: '{chunk}' (길이: {len(chunk)})")
-            
+            chunk_count += 1
+
+            should_process = False
+
             # 문장 종료 감지 (마침표, 느낌표, 물음표, 줄바꿈)
             if re.search(r'[.!?\n]', chunk):
-                logger.info(f"🔍 [문장분할] 문장 종료 감지 - 현재 버퍼: '{sentence_buffer}'")
+                should_process = True
+            
+            # 최소 길이 도달
+            elif len(sentence_buffer) >= MIN_CHARS_FOR_TTS:
+                if re.search(r'[.!?\n]', sentence_buffer):
+                    should_process = True
+            
+            # 너무 오래 대기 (강제 분할)
+            elif chunk_count >= MIN_CHARS_FOR_TTS:
+                should_process = True
+            
+            if should_process:
                 sentences = re.split(r'([.!?\n]+)', sentence_buffer)
-                logger.info(f"🔍 [문장분할] 분할된 문장들: {sentences}")
-                
+
                 for i in range(0, len(sentences)-1, 2):
                     sentence = sentences[i] + (sentences[i+1] if i+1 < len(sentences) else "")
                     sentence = sentence.strip()
                     
-                    if sentence:
+                    if sentence and len(sentence) >= 10:
                         current_idx = sentence_index[0]
                         elapsed = time.time() - pipeline_start
                         
@@ -689,12 +705,7 @@ async def process_streaming_response(
                         )
                         tts_tasks.append(task)
                         sentence_index[0] += 1
-                        
-                        logger.info(f"✅ [TTS] 문장[{current_idx}] TTS 태스크 생성 완료 (총 {len(tts_tasks)}개 태스크)")
-                        
-                        # 🔑 핵심: 이벤트 루프에 제어권을 넘겨서 TTS가 즉시 실행되도록 함
-                        await asyncio.sleep(0)
-                        logger.info(f"🚀 [TTS] 문장[{current_idx}] TTS 즉시 실행 시작")
+                        chunk_count = 0
                 
                 sentence_buffer = sentences[-1] if len(sentences) % 2 == 1 else ""
                 logger.info(f"🔍 [문장분할] 남은 버퍼: '{sentence_buffer}'")
@@ -758,35 +769,23 @@ async def process_tts_and_send(
     pipeline_start: float
 ) -> float:
     """
-    단일 문장을 TTS 변환하고 순서에 맞춰 전송
-    
-    동작:
-    1. TTS 변환 (병렬 실행)
-    2. 완료되면 completed_audio에 저장
-    3. 자신의 순서가 되면 즉시 전송
-    
-    Args:
-        index: 문장 순서 번호
-        sentence: 변환할 문장
-        completed_audio: 완료된 오디오 저장소
-        next_send_index: 다음 전송 순서
-        send_lock: 전송 동기화 락
-        pipeline_start: 파이프라인 시작 시간
-    
-    Returns:
-        float: 재생 시간
+    TTS 변환 및 전송 (오디오 변환 병렬화)
     """
     try:
-        import wave
-        import io
-        
         tts_start = time.time()
         elapsed_start = tts_start - pipeline_start
         logger.info(f"🔊 [TTS] 문장[{index}] 변환 시작: {sentence[:30]}...")
         logger.info(f"⏰ [TTS] 문장[{index}] 실제 TTS 함수 진입 시간: +{elapsed_start:.2f}초")
         
-        # TTS 변환 (이 부분이 병렬로 실행됨)
-        audio_data, tts_time = await tts_service.text_to_speech_sentence(sentence)
+        # TTS 변환 (타임아웃 10초)
+        try:
+            audio_data, tts_time = await asyncio.wait_for(
+                tts_service.text_to_speech_sentence(sentence),
+                timeout=10.0
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"문장[{index}] TTS 타임아웃")
+            return 0.0
         
         # 🔑 추가: audio_data 유효성 검증 강화
         if not audio_data or not isinstance(audio_data, bytes) or len(audio_data) == 0:
@@ -796,37 +795,23 @@ async def process_tts_and_send(
             return 0.0
         
         elapsed_tts_done = time.time() - pipeline_start
-        logger.info(f"✅ [TTS] 문장[{index}] 변환 완료 ({tts_time:.2f}초 소요)")
+        logger.info(f"[+{elapsed_tts_done:.2f}초] 문장[{index}] TTS 완료 ({tts_time:.2f}초)")
         
-        # WAV → mulaw 변환
-        # 🔑 추가: WAV 파일 검증
-        if len(audio_data) < 44:  # WAV 헤더는 최소 44 bytes
-            logger.error(f"❌ 문장[{index}] TTS 응답이 너무 짧습니다 ({len(audio_data)} bytes)")
-            return 0.0
+        # 최적화: 오디오 변환을 별도 스레드로 처리 (CPU 집약적 작업)
+        if len(audio_data) > 100000:
+            loop = asyncio.get_event_loop()
+            mulaw_data, playback_duration = await loop.run_in_executor(
+                None,  # 기본 ThreadPoolExecutor 사용
+                convert_to_mulaw_optimized,
+                audio_data
+            )
+        else:
+            mulaw_data, playback_duration = convert_to_mulaw_optimized(audio_data)
         
-        wav_io = io.BytesIO(audio_data)
-        with wave.open(wav_io, 'rb') as wav_file:
-            channels = wav_file.getnchannels()
-            sample_width = wav_file.getsampwidth()
-            framerate = wav_file.getframerate()
-            pcm_data = wav_file.readframes(wav_file.getnframes())
-        
-        # Stereo → Mono 변환 (필요 시)
-        if channels == 2:
-            pcm_data = audioop.tomono(pcm_data, sample_width, 1, 1)
-        
-        # 샘플레이트 변환: Twilio는 8kHz 요구
-        if framerate != 8000:
-            pcm_data, _ = audioop.ratecv(pcm_data, sample_width, 1, framerate, 8000, None)
-        
-        # PCM → mulaw 변환
-        mulaw_data = audioop.lin2ulaw(pcm_data, 2)
-        playback_duration = len(mulaw_data) / 8000.0
-        
-        # 완료된 오디오를 저장소에 저장
+        # 완료된 오디오 저장
         completed_audio[index] = (mulaw_data, playback_duration)
         
-        # 순서에 맞춰 전송 시도
+        # 순서에 맞춰 전송
         await try_send_in_order(
             websocket, stream_sid,
             completed_audio, next_send_index, send_lock,
@@ -838,6 +823,52 @@ async def process_tts_and_send(
     except Exception as e:
         logger.error(f"문장[{index}] 처리 오류: {e}")
         return 0.0
+
+
+def convert_to_mulaw_optimized(audio_data: bytes) -> tuple[bytes, float]:
+    """
+    오디오 변환 최적화
+    
+    최적화 포인트:
+    1. ✅ ThreadPool로 병렬 처리 (속도 향상)
+    2. ✅ audioop 사용 유지 (음질 보장)
+    """
+    import wave
+    import io
+    import audioop
+    
+    # WAV 파일 읽기
+    wav_io = io.BytesIO(audio_data)
+    with wave.open(wav_io, 'rb') as wav_file:
+        channels = wav_file.getnchannels()
+        sample_width = wav_file.getsampwidth()
+        framerate = wav_file.getframerate()
+        n_frames = wav_file.getnframes()
+        pcm_data = wav_file.readframes(n_frames)
+    
+    logger.info(f"원본 오디오: {framerate}Hz, {channels}ch, {sample_width}바이트, {n_frames}프레임")
+    
+    # Stereo → Mono (평균)
+    if channels == 2:
+        pcm_data = audioop.tomono(pcm_data, sample_width, 1, 1)
+        logger.info(f"Mono 변환 완료")
+    
+    if sample_width != 2:
+        pcm_data = audioop.lin2lin(pcm_data, sample_width, 2)
+        sample_width = 2
+        logger.info(f"16-bit 변환 완료")
+    
+    if framerate != 8000:
+        logger.info(f"샘플레이트 변환: {framerate}Hz → 8000Hz")
+        pcm_data, _ = audioop.ratecv(
+            pcm_data, sample_width, 1, framerate, 8000, None
+        )
+        logger.info(f"샘플레이트 변환 완료")
+
+    mulaw_data = audioop.lin2ulaw(pcm_data, 2)
+    playback_duration = len(mulaw_data) / 8000.0
+    
+    return mulaw_data, playback_duration
 
 
 async def try_send_in_order(
