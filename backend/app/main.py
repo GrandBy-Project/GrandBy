@@ -651,15 +651,21 @@ async def process_streaming_response(
         logger.info(f"[발화 종료 +0.00초] 실시간 하이브리드 파이프라인 시작")
         
         # LLM 스트리밍: 문장 생성 즉시 TTS 시작
+        logger.info("🔄 [LLM] 스트리밍 시작")
+        chunk_count = 0
         async for chunk in llm_service.generate_response_streaming(
             user_text, conversation_history
         ):
+            chunk_count += 1
             sentence_buffer += chunk
             full_response.append(chunk)
+            logger.info(f"🔄 [LLM] 청크[{chunk_count}] 수신: '{chunk}' (길이: {len(chunk)})")
             
             # 문장 종료 감지 (마침표, 느낌표, 물음표, 줄바꿈)
             if re.search(r'[.!?\n]', chunk):
+                logger.info(f"🔍 [문장분할] 문장 종료 감지 - 현재 버퍼: '{sentence_buffer}'")
                 sentences = re.split(r'([.!?\n]+)', sentence_buffer)
+                logger.info(f"🔍 [문장분할] 분할된 문장들: {sentences}")
                 
                 for i in range(0, len(sentences)-1, 2):
                     sentence = sentences[i] + (sentences[i+1] if i+1 < len(sentences) else "")
@@ -669,7 +675,8 @@ async def process_streaming_response(
                         current_idx = sentence_index[0]
                         elapsed = time.time() - pipeline_start
                         
-                        logger.info(f"[+{elapsed:.2f}초] 문장[{current_idx}] 생성: {sentence[:40]}...")
+                        logger.info(f"✅ [LLM] 문장[{current_idx}] 생성 완료: {sentence[:40]}...")
+                        logger.info(f"🚀 [TTS] 문장[{current_idx}] TTS 태스크 시작 예정")
                         
                         # 핵심: 즉시 TTS 태스크 시작 (대기하지 않음!)
                         task = asyncio.create_task(
@@ -682,8 +689,17 @@ async def process_streaming_response(
                         )
                         tts_tasks.append(task)
                         sentence_index[0] += 1
+                        
+                        logger.info(f"✅ [TTS] 문장[{current_idx}] TTS 태스크 생성 완료 (총 {len(tts_tasks)}개 태스크)")
+                        
+                        # 🔑 핵심: 이벤트 루프에 제어권을 넘겨서 TTS가 즉시 실행되도록 함
+                        await asyncio.sleep(0)
+                        logger.info(f"🚀 [TTS] 문장[{current_idx}] TTS 즉시 실행 시작")
                 
                 sentence_buffer = sentences[-1] if len(sentences) % 2 == 1 else ""
+                logger.info(f"🔍 [문장분할] 남은 버퍼: '{sentence_buffer}'")
+        
+        logger.info(f"✅ [LLM] 스트리밍 완료 - 총 {chunk_count}개 청크 수신")
         
         # 마지막 문장 처리
         if sentence_buffer.strip():
@@ -700,6 +716,10 @@ async def process_streaming_response(
                 )
             )
             tts_tasks.append(task)
+            
+            # 🔑 핵심: 마지막 문장도 즉시 실행되도록 함
+            await asyncio.sleep(0)
+            logger.info(f"🚀 [TTS] 문장[{current_idx}] TTS 즉시 실행 시작 (마지막)")
         
         # 모든 TTS 완료 대기
         results = await asyncio.gather(*tts_tasks, return_exceptions=True)
@@ -762,19 +782,28 @@ async def process_tts_and_send(
         
         tts_start = time.time()
         elapsed_start = tts_start - pipeline_start
-        logger.info(f"[+{elapsed_start:.2f}초] 문장[{index}] TTS 시작")
+        logger.info(f"🔊 [TTS] 문장[{index}] 변환 시작: {sentence[:30]}...")
+        logger.info(f"⏰ [TTS] 문장[{index}] 실제 TTS 함수 진입 시간: +{elapsed_start:.2f}초")
         
         # TTS 변환 (이 부분이 병렬로 실행됨)
         audio_data, tts_time = await tts_service.text_to_speech_sentence(sentence)
         
-        if not audio_data:
-            logger.warning(f"문장[{index}] TTS 실패")
+        # 🔑 추가: audio_data 유효성 검증 강화
+        if not audio_data or not isinstance(audio_data, bytes) or len(audio_data) == 0:
+            logger.warning(f"⚠️ 문장[{index}] TTS 실패 또는 빈 응답")
+            logger.warning(f"    - audio_data 타입: {type(audio_data)}")
+            logger.warning(f"    - audio_data 길이: {len(audio_data) if audio_data else 0}")
             return 0.0
         
         elapsed_tts_done = time.time() - pipeline_start
-        logger.info(f"[+{elapsed_tts_done:.2f}초] 문장[{index}] TTS 완료 ({tts_time:.2f}초 소요)")
+        logger.info(f"✅ [TTS] 문장[{index}] 변환 완료 ({tts_time:.2f}초 소요)")
         
         # WAV → mulaw 변환
+        # 🔑 추가: WAV 파일 검증
+        if len(audio_data) < 44:  # WAV 헤더는 최소 44 bytes
+            logger.error(f"❌ 문장[{index}] TTS 응답이 너무 짧습니다 ({len(audio_data)} bytes)")
+            return 0.0
+        
         wav_io = io.BytesIO(audio_data)
         with wave.open(wav_io, 'rb') as wav_file:
             channels = wav_file.getnchannels()
@@ -833,7 +862,7 @@ async def try_send_in_order(
             
             send_start = time.time()
             elapsed_send_start = send_start - pipeline_start
-            logger.info(f"[+{elapsed_send_start:.2f}초] 문장[{index}] 전송 시작")
+            logger.info(f"📤 [AUDIO] 문장[{index}] 음성 전송 시작")
             
             # Base64 인코딩 및 청크 단위 전송
             audio_base64 = base64.b64encode(mulaw_data).decode('utf-8')
@@ -852,7 +881,7 @@ async def try_send_in_order(
                 await asyncio.sleep(0.02)  # 부드러운 재생
             
             elapsed_send_done = time.time() - pipeline_start
-            logger.info(f"[+{elapsed_send_done:.2f}초] 문장[{index}] 전송 완료 (재생: {playback_duration:.2f}초)")
+            logger.info(f"✅ [AUDIO] 문장[{index}] 음성 출력 종료 (재생: {playback_duration:.2f}초)")
             
             # 정리 및 다음 순서로 이동
             del completed_audio[index]
@@ -874,6 +903,8 @@ async def send_audio_to_twilio_with_tts(websocket: WebSocket, stream_sid: str, t
     if audio_processor:
         audio_processor.start_bot_speaking()
     
+    logger.info(f"🔊 [TTS] 텍스트 변환 시작: {text[:30]}...")
+    
     try:
         import wave
         import io
@@ -886,7 +917,7 @@ async def send_audio_to_twilio_with_tts(websocket: WebSocket, stream_sid: str, t
             logger.error("❌ TTS 변환 실패 - 응답이 None이거나 시간이 0초")
             return
         
-        logger.info(f"✅ TTS 완료 ({tts_time:.2f}초): {audio_file_path}")
+        logger.info(f"✅ [TTS] 텍스트 변환 완료 ({tts_time:.2f}초)")
         
         # 파일 존재 확인
         if not os.path.exists(audio_file_path):
@@ -974,7 +1005,7 @@ async def send_audio_to_twilio_with_tts(websocket: WebSocket, stream_sid: str, t
         # mulaw 데이터를 Base64로 인코딩
         audio_base64 = base64.b64encode(mulaw_data).decode('utf-8')
         
-        logger.info(f"📤 오디오 전송 시작: {len(mulaw_data)} bytes (mulaw 8kHz)")
+        logger.info(f"📤 [AUDIO] 음성 전송 시작: {len(mulaw_data)} bytes")
         
         # 청크로 나누어 전송 (Twilio 제한 고려)
         chunk_size = 8000  # 8KB chunks
@@ -992,7 +1023,7 @@ async def send_audio_to_twilio_with_tts(websocket: WebSocket, stream_sid: str, t
             await websocket.send_text(json.dumps(message))
             await asyncio.sleep(0.02)  # 작은 지연으로 부드러운 재생
         
-        logger.info("✅ 음성 전송 완료")
+        logger.info("✅ [AUDIO] 음성 출력 종료")
         
     except Exception as e:
         logger.error(f"❌ 음성 전송 오류: {str(e)}")
@@ -1422,11 +1453,12 @@ async def media_stream_handler(
                         logger.info(f"{'='*60}")
                         
                         # 1️⃣ STT: 오디오 → 텍스트 변환 (실시간 청크 기반 + 무음 제거)
+                        logger.info("🎤 [STT] 변환 시작")
                         audio_data = audio_processor.get_audio()
                         user_text, stt_time = await transcribe_audio_realtime(audio_data, audio_processor)
                         
                         if user_text and user_text.strip():
-                            logger.info(f"✅ STT 완료 ({stt_time:.2f}초)")
+                            logger.info(f"✅ [STT] 변환 완료 ({stt_time:.2f}초)")
                             logger.info(f"👤 [사용자 발화] {user_text}")
                             
                             # 변환된 텍스트를 버퍼에 저장 (전체 대화 추적용)
@@ -1446,7 +1478,9 @@ async def media_stream_handler(
                                 # 대화 세션에 AI 응답 추가
                                 conversation_sessions[call_sid].append({"role": "assistant", "content": goodbye_text})
                                 
+                                logger.info("🔊 [TTS] 종료 메시지 변환 시작")
                                 await send_audio_to_twilio_with_tts(websocket, stream_sid, goodbye_text, audio_processor)
+                                logger.info("✅ [TTS] 종료 메시지 변환 완료")
                                 await asyncio.sleep(2)  # 마지막 메시지 재생 대기
                                 await websocket.close()
                                 break
@@ -1464,6 +1498,8 @@ async def media_stream_handler(
                             
                             conversation_history = conversation_sessions[call_sid]
                             
+                            # 2️⃣ LLM: 텍스트 생성
+                            logger.info("🤖 [LLM] 생성 시작")
                             ai_response = await process_streaming_response(
                                 websocket,
                                 stream_sid,
@@ -1471,6 +1507,7 @@ async def media_stream_handler(
                                 conversation_history,
                                 audio_processor
                             )
+                            logger.info("✅ [LLM] 생성 완료")
                             
                             # ✅ AI 응답을 대화 세션에 추가
                             if ai_response and ai_response.strip():
