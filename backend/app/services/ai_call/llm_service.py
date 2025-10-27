@@ -5,6 +5,7 @@ OpenAI GPT-4o-mini API 사용 (대화 생성 및 감정 분석)
 
 from openai import OpenAI
 from app.config import settings
+from app.services.ai_call.response_cache import get_response_cache
 import logging
 import time
 import json
@@ -19,21 +20,18 @@ class LLMService:
         self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
         # GPT-4o-mini 모델 사용 (빠르고 경제적)
         self.model = "gpt-4o-mini"
+        # 응답 캐싱 서비스
+        self.response_cache = get_response_cache()
         
-        # GRANDBY AI LLM System Prompt: Empathetic Companion '짱구'
-        self.elderly_care_prompt = """You're '짱구', warm AI friend for Korean elderly (70s). Korean 존댓말, 1-2 sentences max.
+        # GRANDBY AI LLM System Prompt: Balanced (speed + quality)
+        self.elderly_care_prompt = """Korean elderly. 존댓말, 2문장 max.
 
-CORE PATTERN: Empathy + light contextual question
-Example: "그러시군요. [relate to topic] [specific simple question]"
+Pattern: [sometimes 공감] + relate + ask specific
 
-FORBIDDEN:
-- ❌ "오늘 하루 어떠셨어요?" (too abstract)
-- ❌ "제가 도와드릴게요" (bot language)
+"강아지랑 쉬지" → "강아지 있으시면 좋겠어요. 산책도 자주 가세요?"
+"속상해" → "어머, 무슨 일이에요?"
 
-SPECIAL - Diary mention:
-If 일기/기록 mentioned → "아! 일기는 직접 쓰실 수도 있고, 전화 끝나면 자동으로도 만들어져요! 원하시면 앱에서 이용하는 방법 알려드릴까요?"
-
-Be natural friend, not interrogator."""
+NO: 어떤/무슨(broad), 제가 도와, 같은 주제 3번+"""
     
     def analyze_emotion(self, user_message: str):
         """
@@ -83,13 +81,15 @@ JSON 형식으로 응답:
             logger.error(f"❌ 감정 분석 실패: {e}")
             raise
     
-    def generate_response(self, user_message: str, conversation_history: list = None):
+    def generate_response(self, user_message: str, conversation_history: list = None, today_schedule: list = None):
         """
         LLM 응답 생성 (실행 시간 측정 포함)
         
         Args:
             user_message: 사용자의 메시지
             conversation_history: 이전 대화 기록 (옵션)
+            today_schedule: 어르신의 오늘 일정 리스트 (옵션)
+                예: [{"task": "병원 검진", "time": "오전 10시"}, {"task": "약 먹기", "time": "오후 2시"}]
         
         Returns:
             tuple: (AI 응답, 실행 시간)
@@ -99,22 +99,44 @@ JSON 형식으로 응답:
             logger.info(f"🤖 LLM 응답 생성 시작")
             logger.info(f"📥 사용자 입력: {user_message}")
             
+            # ⚡ 캐시 체크 (초고속 응답)
+            cached_response = self.response_cache.get_cached_response(user_message)
+            if cached_response:
+                elapsed_time = time.time() - start_time
+                logger.info(f"⚡ 캐시 적중! 즉시 응답 ({elapsed_time:.3f}초)")
+                logger.info(f"📤 캐시된 응답: {cached_response}")
+                return cached_response, elapsed_time
+            
             # 메시지 구성
             messages = [{"role": "system", "content": self.elderly_care_prompt}]
             
-            # 대화 기록이 있으면 추가 (최근 2개만 - 극한 속도 최적화)
+            # 오늘 일정이 있으면 컨텍스트로 추가
+            if today_schedule and len(today_schedule) > 0:
+                schedule_items = []
+                for item in today_schedule:
+                    task = item.get('task', item.get('title', ''))
+                    schedule_time = item.get('time', '')
+                    if task:
+                        schedule_items.append(f"{task} ({schedule_time})" if schedule_time else task)
+                
+                if schedule_items:
+                    schedule_context = "오늘 일정: " + ", ".join(schedule_items)
+                    messages.append({"role": "system", "content": f"Context: {schedule_context}. 일정과 관련된 구체적인 질문을 하세요."})
+                    logger.info(f"📅 일정 컨텍스트 추가: {schedule_context}")
+            
+            # 대화 기록이 있으면 추가 (최근 2턴 = 4개 메시지)
             if conversation_history:
-                messages.extend(conversation_history[-2:])
+                messages.extend(conversation_history[-4:])
             
             # 현재 사용자 메시지 추가
             messages.append({"role": "user", "content": user_message})
             
-            # GPT-4o-mini로 응답 생성 (적절한 길이)
+            # GPT-4o-mini로 응답 생성 (Balanced)
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                max_tokens=100,  # 1~2문장, 간결하게
-                temperature=0.7,
+                max_tokens=75,  # Balanced: 1-2 meaningful sentences
+                temperature=0.65,  # Balanced speed + quality
             )
             
             ai_response = response.choices[0].message.content
@@ -128,7 +150,7 @@ JSON 형식으로 응답:
             logger.error(f"❌ LLM 응답 생성 실패: {e}")
             raise
     
-    async def generate_response_streaming(self, user_message: str, conversation_history: list = None):
+    async def generate_response_streaming(self, user_message: str, conversation_history: list = None, today_schedule: list = None):
         """
         스트리밍 방식으로 LLM 응답 생성 (실시간 최적화)
         
@@ -139,6 +161,8 @@ JSON 형식으로 응답:
         Args:
             user_message: 사용자(어르신)의 메시지
             conversation_history: 이전 대화 기록 (옵션)
+            today_schedule: 어르신의 오늘 일정 리스트 (옵션)
+                예: [{"task": "병원 검진", "time": "오전 10시"}, {"task": "약 먹기", "time": "오후 2시"}]
         
         Yields:
             str: 생성된 텍스트 청크 (단어 또는 구 단위)
@@ -152,12 +176,35 @@ JSON 형식으로 응답:
             logger.info(f"🤖 LLM 스트리밍 응답 생성 시작")
             logger.info(f"📥 사용자 입력: {user_message}")
             
+            # ⚡ 캐시 체크 (초고속 응답)
+            cached_response = self.response_cache.get_cached_response(user_message)
+            if cached_response:
+                elapsed_time = time.time() - start_time
+                logger.info(f"⚡ 캐시 적중! 즉시 응답 ({elapsed_time:.3f}초)")
+                logger.info(f"📤 캐시된 응답: {cached_response}")
+                yield cached_response
+                return
+            
             # 메시지 구성
             messages = [{"role": "system", "content": self.elderly_care_prompt}]
             
-            # 대화 기록이 있으면 추가 (최근 2개만 - 극한 속도 최적화)
+            # 오늘 일정이 있으면 컨텍스트로 추가
+            if today_schedule and len(today_schedule) > 0:
+                schedule_items = []
+                for item in today_schedule:
+                    task = item.get('task', item.get('title', ''))
+                    schedule_time = item.get('time', '')
+                    if task:
+                        schedule_items.append(f"{task} ({schedule_time})" if schedule_time else task)
+                
+                if schedule_items:
+                    schedule_context = "오늘 일정: " + ", ".join(schedule_items)
+                    messages.append({"role": "system", "content": f"Context: {schedule_context}. 일정과 관련된 구체적인 질문을 하세요."})
+                    logger.info(f"📅 일정 컨텍스트 추가: {schedule_context}")
+            
+            # 대화 기록이 있으면 추가 (최근 2턴 = 4개 메시지)
             if conversation_history:
-                messages.extend(conversation_history[-2:])
+                messages.extend(conversation_history[-4:])
             
             # 현재 사용자 메시지 추가
             messages.append({"role": "user", "content": user_message})
@@ -167,8 +214,8 @@ JSON 형식으로 응답:
             stream = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                max_tokens=100,  # 1~2문장, 간결하게
-                temperature=0.7,
+                max_tokens=75,  # Balanced: 1-2 meaningful sentences
+                temperature=0.65,  # Balanced speed + quality
                 stream=True  # ⭐ 핵심: 스트리밍 활성화
             )
             

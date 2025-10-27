@@ -29,6 +29,16 @@ from openai import OpenAI
 import logging
 import time
 import json
+import sys
+import os
+
+# 캐싱 서비스 import (직접 import로 __init__.py 우회)
+import importlib.util
+cache_module_path = os.path.join(os.path.dirname(__file__), 'app', 'services', 'ai_call', 'response_cache.py')
+spec = importlib.util.spec_from_file_location("response_cache", cache_module_path)
+response_cache_module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(response_cache_module)
+get_response_cache = response_cache_module.get_response_cache
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -40,21 +50,18 @@ class SimpleLLMTest:
     def __init__(self, api_key: str):
         self.client = OpenAI(api_key=api_key)
         self.model = "gpt-4o-mini"
+        # 응답 캐싱 서비스
+        self.response_cache = get_response_cache()
         
-        # GRANDBY AI LLM System Prompt: Empathetic Companion '짱구' (same as llm_service.py)
-        self.elderly_care_prompt = """You're '짱구', warm AI friend for Korean elderly (70s). Korean 존댓말, 1-2 sentences max.
+        # GRANDBY AI LLM System Prompt: Balanced (same as llm_service.py)
+        self.elderly_care_prompt = """Korean elderly. 존댓말, 2문장 max.
 
-CORE PATTERN: Empathy + light contextual question
-Example: "그러시군요. [relate to topic] [specific simple question]"
+Pattern: [sometimes 공감] + relate + ask specific
 
-FORBIDDEN:
-- ❌ "오늘 하루 어떠셨어요?" (too abstract)
-- ❌ "제가 도와드릴게요" (bot language)
+"강아지랑 쉬지" → "강아지 있으시면 좋겠어요. 산책도 자주 가세요?"
+"속상해" → "어머, 무슨 일이에요?"
 
-SPECIAL - Diary mention:
-If 일기/기록 mentioned → "아! 일기는 직접 쓰실 수도 있고, 전화 끝나면 자동으로도 만들어져요! 원하시면 앱에서 이용하는 방법 알려드릴까요?"
-
-Be natural friend, not interrogator."""
+NO: 어떤/무슨(broad), 제가 도와, 같은 주제 3번+"""
     
     def generate_response(self, user_message: str, conversation_history: list = None):
         """
@@ -70,12 +77,19 @@ Be natural friend, not interrogator."""
         try:
             start_time = time.time()
             
+            # ⚡ 캐시 체크 (초고속 응답)
+            cached_response = self.response_cache.get_cached_response(user_message)
+            if cached_response:
+                elapsed_time = time.time() - start_time
+                logger.info(f"⚡ 캐시 적중! 즉시 응답 ({elapsed_time:.3f}초)")
+                return cached_response, elapsed_time
+            
             # 메시지 구성 (llm_service.py와 동일)
             messages = [{"role": "system", "content": self.elderly_care_prompt}]
             
-            # 대화 기록이 있으면 추가 (최근 2개만 - 극한 속도 최적화)
+            # 대화 기록이 있으면 추가 (최근 2턴 = 4개 메시지)
             if conversation_history:
-                messages.extend(conversation_history[-2:])
+                messages.extend(conversation_history[-4:])
             
             # 현재 사용자 메시지 추가
             messages.append({"role": "user", "content": user_message})
@@ -83,8 +97,8 @@ Be natural friend, not interrogator."""
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                max_tokens=100,  # 1~2문장, 간결하게
-                temperature=0.7,
+                max_tokens=75,  # Balanced: 1-2 meaningful sentences
+                temperature=0.65,  # Balanced speed + quality
             )
             
             ai_response = response.choices[0].message.content
