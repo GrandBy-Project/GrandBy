@@ -1467,10 +1467,9 @@ async def media_stream_handler(
                             is_final = result.get('is_final', False)
                             partial_only = result.get('partial_only', False)
                             
-                            # 부분 결과를 백그라운드로 LLM에 전송
+                            # 부분 결과는 무시 (실제 효과가 미미함)
                             if partial_only and text:
-                                llm_collector.add_partial(text)
-                                logger.info(f"💭 [백그라운드 LLM] 부분 결과 수신: {text}")
+                                logger.debug(f"📝 [RTZR 부분 인식] {text}")
                                 continue
                             
                             # 최종 결과 처리
