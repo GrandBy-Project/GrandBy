@@ -23,6 +23,7 @@ class RTZRRealtimeSTT:
     - 실시간 음성 스트리밍 인식
     - 부분 결과를 LLM에 백그라운드 전송
     - 최종 결과 반환 (is_final 감지)
+    - AI 응답 중 사용자 입력 차단 (에코 방지)
     """
     
     def __init__(self):
@@ -35,7 +36,27 @@ class RTZRRealtimeSTT:
         # 부분 결과 관리
         self.partial_buffer = PartialResultBuffer()
         
+        # 발화 시작 시간 트래킹
+        self.streaming_start_time: Optional[float] = None
+        self.first_partial_time: Optional[float] = None
+        
+        # ✅ AI 응답 중 사용자 입력 차단 플래그
+        self.is_bot_speaking = False
+        self.bot_silence_delay = 0  # AI 응답 종료 후 1초 대기
+        
         logger.info("✅ RTZR 실시간 STT 초기화 완료")
+    
+    def start_bot_speaking(self):
+        """AI 응답 시작 - 사용자 입력 차단"""
+        self.is_bot_speaking = True
+        self.bot_silence_delay = 0
+        logger.debug("🤖 [에코 방지] AI 응답 중 - 사용자 입력 차단")
+    
+    def stop_bot_speaking(self):
+        """AI 응답 종료 - 1초 후 사용자 입력 재개"""
+        self.is_bot_speaking = False
+        self.bot_silence_delay = 5  # 5개 청크 = 0.1초 대기
+        logger.debug("🤖 [에코 방지] AI 응답 종료 - 1초 후 사용자 입력 재개")
     
     async def start_streaming(self) -> AsyncGenerator[dict, None]:
         """
@@ -57,6 +78,15 @@ class RTZRRealtimeSTT:
         try:
             # RTZR 스트리밍 시작 (AsyncGenerator)
             async for result in self.rtzr_service.transcribe_streaming(self.audio_queue):
+                # ✅ AI 응답 중이면 사용자 입력 무시
+                if self.is_bot_speaking:
+                    continue
+                
+                # ✅ AI 응답 종료 후 1초 대기 중이면 무시
+                if self.bot_silence_delay > 0:
+                    self.bot_silence_delay -= 1
+                    continue
+                
                 if result and 'text' in result and result['text']:
                     text = result['text']
                     is_final = result.get('is_final', False)
@@ -71,10 +101,16 @@ class RTZRRealtimeSTT:
                             'partial_only': False
                         }
                         
-                        # 발화 완료 - 버퍼 초기화
+                        # 발화 완료 - 버퍼 초기화 및 시간 리셋
                         self.partial_buffer.reset()
+                        self.streaming_start_time = None
+                        self.first_partial_time = None
                     else:
-                        # 부분 결과 - 백그라운드로 LLM에 전송
+                        # 부분 결과 - 첫 부분 인식 시 발화 시작 시간 기록
+                        if not self.streaming_start_time:
+                            self.streaming_start_time = time.time()
+                            logger.info(f"🎤 [발화 시작] 첫 부분 인식: {text}")
+                        
                         self.partial_buffer.add_partial(text)
                         
                         yield {
