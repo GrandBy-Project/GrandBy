@@ -53,15 +53,100 @@ class SimpleLLMTest:
         # 응답 캐싱 서비스
         self.response_cache = get_response_cache()
         
-        # GRANDBY AI LLM System Prompt: Balanced (same as llm_service.py)
-        self.elderly_care_prompt = """Korean elderly. 존댓말, 2문장 max.
+        # GRANDBY AI LLM System Prompt: Empathetic Friend (EN)
+        self.elderly_care_prompt = """You are a warm friend for Korean seniors. Always respond in KOREAN using natural honorifics (e.g., ~세요, ~셔요, ~네요, ~어요, ~죠). Keep it to 1–2 sentences only.
 
-Pattern: [sometimes 공감] + relate + ask specific
+[Core]
+- First acknowledge the user's feelings about the situation.
+- Ask at most one light follow-up question only when appropriate.
+- Do NOT give advice by default.
+- Anti-echo rule: Even if the user asks “what/which” (무슨/어떤), do NOT mirror that form. Prefer a brief feeling reflection or a concrete state-check instead (e.g., “지금은 속 괜찮으세요?”).
 
-"강아지랑 쉬지" → "강아지 있으시면 좋겠어요. 산책도 자주 가세요?"
-"속상해" → "어머, 무슨 일이에요?"
+[Good examples]
+"여보세요" → "안녕하세요! 오늘 기분은 괜찮으세요?"
+"길 잊어버렸어" → "집에 오는 길이 잠시 헷갈리셨군요. 얼마나 놀라셨을지 걱정돼요."
+"넘어졌어" → "넘어지셔서 많이 놀라셨겠어요. 지금은 괜찮으세요?"
+"자식이 안 와" → "보고 싶으시겠어요. 많이 서운하셨을 것 같아요."
+"밥맛없어" → "입맛이 없으시군요. 많이 힘드셨겠어요."
+"무릎아파" → "무릎이 아프셔서 불편하셨겠어요. 오늘은 좀 어떠세요?"
+"뭘 먹으면 기분 나아질까?" → "입맛이 없으셨군요. 지금은 속 괜찮으세요?"
 
-NO: 어떤/무슨(broad), 제가 도와, 같은 주제 3번+"""
+[Do NOT]
+- Ignore the situation and switch topics (예: "산책은 즐거우셨나요?")
+- Give advice/solutions (예: "~해보세요", "~하시면 좋겠어요")
+- Ask abstract/meta questions ("어떤/무슨/왜/언제/혹시 …?", "어떤 이야기를 더 나누고 싶으세요?")
+- End the conversation yourself ("통화 종료", "끊을게요")"""
+    
+    def _post_process_response(self, response: str, user_message: str) -> str:
+        """
+        GPT 응답 후처리: 규칙 강제 적용 (llm_service.py와 동일)
+        """
+        import re
+        
+        # 1. 문장 수 제한 (최대 2문장)
+        sentences = re.split(r'([.!?])\s*', response.strip())
+        
+        # 구두점과 문장을 다시 합치기
+        complete_sentences = []
+        for i in range(0, len(sentences)-1, 2):
+            if sentences[i]:
+                if i+1 < len(sentences) and sentences[i+1] in '.!?':
+                    complete_sentences.append(sentences[i] + sentences[i+1])
+                else:
+                    complete_sentences.append(sentences[i])
+        
+        # 마지막 문장이 구두점 없이 끝나는 경우
+        if len(sentences) > 0 and sentences[-1] and sentences[-1] not in '.!?':
+            complete_sentences.append(sentences[-1])
+        
+        # 2문장으로 제한
+        if len(complete_sentences) > 2:
+            response = " ".join(complete_sentences[:2])
+            logger.info(f"🔧 문장 수 제한: {len(complete_sentences)}개 → 2개")
+        else:
+            response = " ".join(complete_sentences)
+        
+        # 마지막에 구두점이 없으면 추가
+        if response and response[-1] not in '.!?':
+            response += "."
+        
+        # 2. 금지 패턴 감지
+        banned_patterns = [
+            (r'(그럼|그러면|이제)\s*(끊|통화\s*종료|전화\s*끊|헤어지|그만)', '금지: 대화 끝내기'),
+            (r'(계좌|비밀번호|카드|돈|금융|송금|이체)', '금지: 금융정보'),
+            (r'(주민등록|주소|전화번호|개인정보)', '금지: 개인정보'),
+            (r'(병원\s*가|진료\s*받|검사\s*받|의사\s*만나).*세요', '금지: 의료 강요'),
+            (r'(해야\s*해|하셔야|반드시|꼭\s*해)', '금지: 강요'),
+            (r'(계획|목표|운동|다이어트).*세요', '금지: 무거운 조언'),
+        ]
+        
+        for pattern, reason in banned_patterns:
+            if re.search(pattern, response, re.IGNORECASE):
+                logger.warning(f"⚠️ {reason} 감지: '{response}'")
+                response = self._generate_safe_response(user_message)
+                break
+        
+        # 3. 존댓말 확인 (경고만)
+        jondaemal_markers = ['세요', '셔요', '습니다', '네요', '어요', '죠']
+        has_jondaemal = any(marker in response for marker in jondaemal_markers)
+        
+        if not has_jondaemal:
+            logger.warning(f"⚠️ 존댓말 미흡: '{response}'")
+        
+        return response
+    
+    def _generate_safe_response(self, user_message: str) -> str:
+        """안전한 공감 응답 생성"""
+        if any(word in user_message for word in ['아프', '힘들', '고통', '통증']):
+            return "많이 힘드시겠어요. 제가 옆에 있을게요."
+        elif any(word in user_message for word in ['외롭', '쓸쓸', '혼자', '아무도']):
+            return "외로우시군요. 저랑 얘기하시면 좋겠어요."
+        elif any(word in user_message for word in ['슬프', '우울', '속상', '걱정']):
+            return "속상하시겠어요. 무슨 일이 있으셨나요?"
+        elif any(word in user_message for word in ['자식', '아들', '딸', '손주']):
+            return "가족 보고 싶으시군요. 많이 생각나시겠어요."
+        else:
+            return "그러시군요. 제가 잘 듣고 있어요."
     
     def generate_response(self, user_message: str, conversation_history: list = None):
         """
@@ -87,9 +172,9 @@ NO: 어떤/무슨(broad), 제가 도와, 같은 주제 3번+"""
             # 메시지 구성 (llm_service.py와 동일)
             messages = [{"role": "system", "content": self.elderly_care_prompt}]
             
-            # 대화 기록이 있으면 추가 (최근 2턴 = 4개 메시지)
+            # 대화 기록이 있으면 추가 (최근 3턴 = 6개 메시지, 맥락 유지)
             if conversation_history:
-                messages.extend(conversation_history[-4:])
+                messages.extend(conversation_history[-6:])
             
             # 현재 사용자 메시지 추가
             messages.append({"role": "user", "content": user_message})
@@ -97,11 +182,15 @@ NO: 어떤/무슨(broad), 제가 도와, 같은 주제 3번+"""
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                max_tokens=75,  # Balanced: 1-2 meaningful sentences
-                temperature=0.65,  # Balanced speed + quality
+                max_tokens=40,  # 2문장 충분 (더 빠름)
+                temperature=0.5,  # 속도 우선 (0.3은 느림)
             )
             
             ai_response = response.choices[0].message.content
+            
+            # 후처리: 규칙 강제 적용 (llm_service.py와 동일)
+            ai_response = self._post_process_response(ai_response, user_message)
+            
             elapsed_time = time.time() - start_time
             
             return ai_response, elapsed_time
@@ -207,6 +296,10 @@ NO: 어떤/무슨(broad), 제가 도와, 같은 주제 3번+"""
             # 대화 히스토리에 추가 (user 메시지 + AI 응답)
             conversation_history.append({"role": "user", "content": user_input})
             conversation_history.append({"role": "assistant", "content": response})
+            
+            # 최근 4개(2턴)만 유지 (메모리 절약 및 속도 개선)
+            if len(conversation_history) > 4:
+                conversation_history = conversation_history[-4:]
             
             # ==========================================
             # 📊 개선된 평가 기준 (2025-10-27)
