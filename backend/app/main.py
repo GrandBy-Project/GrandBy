@@ -31,6 +31,7 @@ from app.services.ai_call.stt_service import STTService
 from app.services.ai_call.tts_service import TTSService
 from app.services.ai_call.llm_service import LLMService
 from app.services.ai_call.twilio_service import TwilioService
+from app.services.ai_call.rtzr_stt_realtime import RTZRRealtimeSTT, LLMPartialCollector
 
 # 로거 설정 (시간 포함)
 logging.basicConfig(
@@ -1391,25 +1392,27 @@ async def media_stream_handler(
     db: Session = Depends(get_db)
 ):
     """
-    Twilio Media Streams WebSocket 핸들러 (실시간 STT 적용)
+    Twilio Media Streams WebSocket 핸들러 (RTZR 실시간 STT 적용)
     
-    실시간 오디오 데이터 양방향 처리:
-    1. 오디오 청크 수신 및 버퍼링
-    2. 침묵 감지 시 실시간 STT 변환
-    3. 변환된 텍스트를 실시간으로 누적
-    4. 각 발화마다 즉시 AI 응답 생성 및 TTS 재생
+    실시간 오디오 데이터 양방향 처리 (RTZR 기반):
+    1. RTZR 실시간 STT 스트리밍 시작
+    2. 부분 인식 결과를 LLM에 백그라운드 전송 (대기 상태 유지)
+    3. 최종 인식 결과(is_final: true) 감지
+    4. 즉시 AI 응답 생성 및 TTS 재생
     5. 통화 종료 시 전체 대화 내용 저장
     
-    실시간 STT → LLM → TTS 파이프라인
+    RTZR 실시간 STT → LLM (백그라운드) → 최종 문장 → 즉시 응답
     """
     await websocket.accept()
     logger.info("📞 Twilio WebSocket 연결됨")
     
     call_sid = None
     stream_sid = None
-    audio_processor = None
+    rtzr_stt = None  # RTZR 실시간 STT
+    llm_collector = None  # LLM 부분 결과 수집기
     call_log = None  # DB에 저장할 CallLog 객체
     elderly_id = None  # 통화 대상 어르신 ID
+    partial_response_context = ""  # 부분 결과 컨텍스트 (LLM 메모리)
     
     try:
         async for message in websocket.iter_text():
@@ -1425,12 +1428,24 @@ async def media_stream_handler(
                 custom_params = data['start'].get('customParameters', {})
                 elderly_id = custom_params.get('elderly_id', 'unknown')
                 
-                audio_processor = AudioProcessor(call_sid)
                 active_connections[call_sid] = websocket
                 
                 # 대화 세션 초기화 (LLM 대화 히스토리 관리)
                 if call_sid not in conversation_sessions:
                     conversation_sessions[call_sid] = []
+                
+                # RTZR 실시간 STT 초기화
+                rtzr_stt = RTZRRealtimeSTT()
+                
+                # LLM 부분 결과 수집기 초기화 (백그라운드 전송)
+                async def llm_partial_callback(partial_text: str):
+                    """부분 인식 결과를 LLM에 백그라운드 전송"""
+                    nonlocal partial_response_context, call_sid
+                    # LLM이 미리 준비할 수 있도록 컨텍스트 업데이트
+                    partial_response_context = partial_text
+                    logger.debug(f"💭 [LLM 백그라운드] 부분 결과 업데이트: {partial_text}")
+                
+                llm_collector = LLMPartialCollector(llm_partial_callback)
                 
                 # DB에 통화 시작 기록 저장 (status: initiated만)
                 try:
@@ -1459,7 +1474,7 @@ async def media_stream_handler(
                     logger.error(f"❌ 통화 시작 기록 저장 실패: {e}")
                 
                 logger.info(f"┌{'─'*58}┐")
-                logger.info(f"│ 🎙️  Twilio 통화 시작                                   │")
+                logger.info(f"│ 🎙️  Twilio 통화 시작 (RTZR STT)                     │")
                 logger.info(f"│ Call SID: {call_sid:43} │")
                 logger.info(f"│ Stream SID: {stream_sid:41} │")
                 logger.info(f"│ Elderly ID: {elderly_id:41} │")
@@ -1467,94 +1482,116 @@ async def media_stream_handler(
                 
                 # 시작 안내 메시지 (TTS 서비스 사용)
                 welcome_text = "안녕하세요! 무엇을 도와드릴까요?"
-                await send_audio_to_twilio_with_tts(websocket, stream_sid, welcome_text, audio_processor)
+                await send_audio_to_twilio_with_tts(websocket, stream_sid, welcome_text, None)
                 
-            # ========== 2. 오디오 데이터 수신 및 실시간 STT 처리 ==========
-            elif event_type == 'media':
-                if audio_processor:
-                    # Base64 디코딩 (Twilio는 mulaw 8kHz로 전송)
-                    audio_payload = base64.b64decode(data['media']['payload'])
-                    audio_processor.add_audio_chunk(audio_payload)
-                    
-                    # 사용자가 말을 멈췄는지 확인 (침묵 감지 - 1초로 단축!)
-                    if audio_processor.should_process():
-                        cycle_start = time.time()
-                        logger.info(f"{'='*60}")
-                        logger.info(f"🎯 발화 종료 감지 → 즉시 스트리밍 응답")
-                        logger.info(f"{'='*60}")
-                        
-                        # 1️⃣ STT: 오디오 → 텍스트 변환 (실시간 청크 기반 + 무음 제거)
-                        logger.info("🎤 [STT] 변환 시작")
-                        audio_data = audio_processor.get_audio()
-                        user_text, stt_time = await transcribe_audio_realtime(audio_data, audio_processor)
-                        
-                        if user_text and user_text.strip():
-                            logger.info(f"✅ [STT] 변환 완료 ({stt_time:.2f}초)")
-                            logger.info(f"👤 [사용자 발화] {user_text}")
+                # ========== RTZR 스트리밍 시작 ==========
+                logger.info("🎤 RTZR 실시간 STT 스트리밍 시작")
+                
+                async def process_rtzr_results():
+                    """RTZR 인식 결과 처리"""
+                    try:
+                        async for result in rtzr_stt.start_streaming():
+                            if not result or 'text' not in result:
+                                continue
                             
-                            # 변환된 텍스트를 버퍼에 저장 (전체 대화 추적용)
-                            audio_processor.add_transcript(user_text)
+                            text = result.get('text', '')
+                            is_final = result.get('is_final', False)
+                            partial_only = result.get('partial_only', False)
                             
-                            # 종료 키워드 확인 (더 구체적인 키워드로 변경)
-                            if '그랜비 통화를 종료합니다' in user_text:
-                                logger.info(f"🛑 종료 키워드 감지: '{user_text}'")
+                            # 부분 결과는 무시 (실제 효과가 미미함)
+                            if partial_only and text:
+                                logger.debug(f"📝 [RTZR 부분 인식] {text}")
+                                continue
+                            
+                            # 최종 결과 처리
+                            if is_final and text:
+                                # 최종 발화 완료
+                                logger.info(f"✅ [RTZR 최종] {text}")
+                                
+                                # 종료 키워드 확인
+                                if '그랜비 통화를 종료합니다' in text:
+                                    logger.info(f"🛑 종료 키워드 감지")
+                                    
+                                    # 대화 세션에 사용자 메시지 추가
+                                    if call_sid not in conversation_sessions:
+                                        conversation_sessions[call_sid] = []
+                                    conversation_sessions[call_sid].append({"role": "user", "content": text})
+                                    
+                                    goodbye_text = "그랜비 통화를 종료합니다. 감사합니다. 좋은 하루 보내세요!"
+                                    conversation_sessions[call_sid].append({"role": "assistant", "content": goodbye_text})
+                                    
+                                    logger.info("🔊 [TTS] 종료 메시지 전송")
+                                    await send_audio_to_twilio_with_tts(websocket, stream_sid, goodbye_text, None)
+                                    await asyncio.sleep(2)
+                                    await websocket.close()
+                                    return
+                                
+                                # 발화 처리 사이클
+                                cycle_start = time.time()
+                                logger.info(f"{'='*60}")
+                                logger.info(f"🎯 발화 완료 → 즉시 응답 생성")
+                                logger.info(f"{'='*60}")
                                 
                                 # 대화 세션에 사용자 메시지 추가
                                 if call_sid not in conversation_sessions:
                                     conversation_sessions[call_sid] = []
-                                conversation_sessions[call_sid].append({"role": "user", "content": user_text})
+                                conversation_sessions[call_sid].append({"role": "user", "content": text})
                                 
-                                goodbye_text = "그랜비 통화를 종료합니다. 감사합니다. 좋은 하루 보내세요!"
+                                conversation_history = conversation_sessions[call_sid]
                                 
-                                # 대화 세션에 AI 응답 추가
-                                conversation_sessions[call_sid].append({"role": "assistant", "content": goodbye_text})
+                                # LLM 응답 생성
+                                logger.info("🤖 [LLM] 응답 생성 시작")
+                                ai_response = await process_streaming_response(
+                                    websocket,
+                                    stream_sid,
+                                    text,
+                                    conversation_history,
+                                    None
+                                )
+                                logger.info("✅ [LLM] 응답 생성 완료")
                                 
-                                logger.info("🔊 [TTS] 종료 메시지 변환 시작")
-                                await send_audio_to_twilio_with_tts(websocket, stream_sid, goodbye_text, audio_processor)
-                                logger.info("✅ [TTS] 종료 메시지 변환 완료")
-                                await asyncio.sleep(2)  # 마지막 메시지 재생 대기
-                                await websocket.close()
-                                break
-                            
-                            # 2️⃣+3️⃣ LLM 스트리밍 + TTS 병렬 처리
-                            # 이것이 핵심 최적화!
-                            # LLM이 문장을 생성하면 즉시 TTS 변환하여 전송
-                            
-                            # ✅ 대화 세션 초기화 및 사용자 메시지 추가
-                            if call_sid not in conversation_sessions:
-                                conversation_sessions[call_sid] = []
-                            
-                            # 사용자 메시지를 대화 세션에 추가
-                            conversation_sessions[call_sid].append({"role": "user", "content": user_text})
-                            
-                            conversation_history = conversation_sessions[call_sid]
-                            
-                            # 2️⃣ LLM: 텍스트 생성
-                            logger.info("🤖 [LLM] 생성 시작")
-                            ai_response = await process_streaming_response(
-                                websocket,
-                                stream_sid,
-                                user_text,
-                                conversation_history,
-                                audio_processor
-                            )
-                            logger.info("✅ [LLM] 생성 완료")
-                            
-                            # ✅ AI 응답을 대화 세션에 추가
-                            if ai_response and ai_response.strip():
-                                conversation_sessions[call_sid].append({"role": "assistant", "content": ai_response})
-                                logger.info(f"💾 대화 세션 업데이트: {len(conversation_sessions[call_sid])}개 메시지")
-                            
-                            # 대화 히스토리 관리 (최근 20개 메시지 유지)
-                            if len(conversation_sessions[call_sid]) > 20:
-                                conversation_sessions[call_sid] = conversation_sessions[call_sid][-20:]
-                                logger.info(f"🔄 대화 히스토리 정리: 최근 20개 메시지 유지")
-                            
-                            total_cycle_time = time.time() - cycle_start
-                            logger.info(f"⏱️  전체 응답 사이클: {total_cycle_time:.2f}초")
-                            logger.info(f"{'='*60}\n\n")
-                        else:
-                            logger.debug("⏭️  STT 결과 없음 (침묵 또는 잡음)")
+                                # AI 응답을 대화 세션에 추가 (안전하게)
+                                try:
+                                    if ai_response and ai_response.strip():
+                                        # conversation_sessions에 여전히 존재하는지 확인
+                                        if call_sid in conversation_sessions:
+                                            conversation_sessions[call_sid].append({"role": "assistant", "content": ai_response})
+                                        
+                                        # 대화 히스토리 관리
+                                        if call_sid in conversation_sessions and len(conversation_sessions[call_sid]) > 20:
+                                            conversation_sessions[call_sid] = conversation_sessions[call_sid][-20:]
+                                    
+                                    total_cycle_time = time.time() - cycle_start
+                                    logger.info(f"⏱️  전체 응답 사이클: {total_cycle_time:.2f}초")
+                                    logger.info(f"{'='*60}\n\n")
+                                except KeyError:
+                                    # 세션이 이미 삭제된 경우 (통화 종료)
+                                    logger.info("⚠️  세션이 이미 삭제됨 (통화 종료 중)")
+                                    break
+                                except Exception as e:
+                                    logger.error(f"❌ 응답 저장 오류: {e}")
+                                
+                            elif text:
+                                # 부분 결과를 LLM에 백그라운드 전송
+                                llm_collector.add_partial(text)
+                                logger.debug(f"📝 [RTZR 부분] {text}")
+                    
+                    except Exception as e:
+                        logger.error(f"❌ RTZR 처리 오류: {e}")
+                        import traceback
+                        logger.error(traceback.format_exc())
+                
+                # RTZR 스트리밍 태스크 시작 (백그라운드)
+                rtzr_task = asyncio.create_task(process_rtzr_results())
+                
+            # ========== 2. 오디오 데이터 수신 및 RTZR로 전송 ==========
+            elif event_type == 'media':
+                if rtzr_stt and rtzr_stt.is_active:
+                    # Base64 디코딩 (Twilio는 mulaw 8kHz로 전송)
+                    audio_payload = base64.b64decode(data['media']['payload'])
+                    
+                    # RTZR로 오디오 청크 전송
+                    await rtzr_stt.add_audio_chunk(audio_payload)
                         
             # ========== 3. 스트림 종료 ==========
             elif event_type == 'stop':
@@ -1562,18 +1599,24 @@ async def media_stream_handler(
                 logger.info(f"📞 Twilio 통화 종료 - Call: {call_sid}")
                 logger.info(f"{'='*60}")
                 
-                # 전체 대화 내용 확인
-                if audio_processor:
-                    full_transcript = audio_processor.get_full_transcript()
-                    if full_transcript:
-                        logger.info(f"\n📋 전체 대화 내용:")
-                        logger.info(f"─" * 60)
-                        logger.info(f"{full_transcript}")
-                        logger.info(f"─" * 60)
+                # RTZR 스트리밍 종료
+                if rtzr_stt:
+                    await rtzr_stt.end_streaming()
+                    logger.info("🛑 RTZR 스트리밍 종료")
                 
                 # ✅ 대화 세션을 DB에 저장 (함수 호출)
                 if call_sid in conversation_sessions:
                     conversation = conversation_sessions[call_sid]
+                    
+                    # 대화 내용 출력
+                    if conversation:
+                        logger.info(f"\n📋 전체 대화 내용:")
+                        logger.info(f"─" * 60)
+                        for msg in conversation:
+                            role = "👤 사용자" if msg['role'] == 'user' else "🤖 AI"
+                            logger.info(f"{role}: {msg['content']}")
+                        logger.info(f"─" * 60)
+                    
                     await save_conversation_to_db(call_sid, conversation)
                 
                 logger.info(f"┌{'─'*58}┐")

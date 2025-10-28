@@ -37,13 +37,20 @@ class Settings(BaseSettings):
     OPENAI_TTS_VOICE: str = "nova"
     
     # ==================== Speech-to-Text ====================
-    # STT 제공자 선택: "google" 또는 "openai"
-    STT_PROVIDER: str = "google"
+    # STT 제공자 선택: "google", "openai", "rtzr"
+    STT_PROVIDER: str = "rtzr"
     
     # Google Cloud STT 설정
     GOOGLE_APPLICATION_CREDENTIALS: str = "credentials/google-cloud-stt.json"
     GOOGLE_STT_LANGUAGE_CODE: str = "ko-KR"
     GOOGLE_STT_MODEL: str = "latest_short"  # phone_call, latest_short, latest_long
+    
+    # ==================== RTZR STT (Korean Speech Recognition) ====================
+    RTZR_CLIENT_ID: str = ""
+    RTZR_CLIENT_SECRET: str = ""
+    RTZR_API_HOST: str = "openapi.vito.ai"
+    RTZR_SAMPLE_RATE: int = 8000
+    RTZR_ENCODING: str = "LINEAR16"
     
     # ==================== Twilio ====================
     TWILIO_ACCOUNT_SID: str
