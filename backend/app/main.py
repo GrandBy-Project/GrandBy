@@ -1456,10 +1456,20 @@ async def media_stream_handler(
                 # ========== RTZR 스트리밍 시작 ==========
                 logger.info("🎤 RTZR 실시간 STT 스트리밍 시작")
                 
+                # STT 응답 속도 측정 변수
+                last_partial_time = None
+                
                 async def process_rtzr_results():
                     """RTZR 인식 결과 처리"""
+                    nonlocal last_partial_time, call_sid
+                    stt_complete_time = None
                     try:
                         async for result in rtzr_stt.start_streaming():
+                            # ✅ 통화 종료 체크
+                            if call_sid not in conversation_sessions:
+                                logger.info("⚠️ 통화 종료로 인한 RTZR 처리 중단")
+                                break
+                            
                             if not result or 'text' not in result:
                                 continue
                             
@@ -1467,15 +1477,31 @@ async def media_stream_handler(
                             is_final = result.get('is_final', False)
                             partial_only = result.get('partial_only', False)
                             
-                            # 부분 결과는 무시 (실제 효과가 미미함)
+                            current_time = time.time()
+                            
+                            # 부분 결과는 무시하되 시간 기록
                             if partial_only and text:
                                 logger.debug(f"📝 [RTZR 부분 인식] {text}")
+                                last_partial_time = current_time
                                 continue
                             
                             # 최종 결과 처리
                             if is_final and text:
+                                # ✅ 통화 종료 체크
+                                if call_sid not in conversation_sessions:
+                                    logger.info("⚠️ 통화 종료로 인한 최종 처리 중단")
+                                    break
+                                # STT 응답 속도 측정
+                                # 말이 끝난 시점부터 최종 인식까지의 시간
+                                if last_partial_time:
+                                    speech_to_final_delay = current_time - last_partial_time
+                                    logger.info(f"⏱️ [STT 지연] 말 끝 → 최종 인식: {speech_to_final_delay:.2f}초")
+                                
                                 # 최종 발화 완료
                                 logger.info(f"✅ [RTZR 최종] {text}")
+                                
+                                # 최종 인식 시점 기록 (LLM 전달 전 시간 측정용)
+                                stt_complete_time = current_time
                                 
                                 # 종료 키워드 확인
                                 if '그랜비 통화를 종료합니다' in text:
@@ -1508,8 +1534,18 @@ async def media_stream_handler(
                                 
                                 conversation_history = conversation_sessions[call_sid]
                                 
+                                # LLM 전달까지의 시간 측정
+                                llm_delivery_start = time.time()
+                                if stt_complete_time:
+                                    stt_to_llm_delay = llm_delivery_start - stt_complete_time
+                                    logger.info(f"⏱️ [지연시간] 최종 인식 → LLM 전달: {stt_to_llm_delay:.2f}초")
+                                
+                                # ✅ AI 응답 시작 (사용자 입력 차단)
+                                rtzr_stt.start_bot_speaking()
+                                
                                 # LLM 응답 생성
                                 logger.info("🤖 [LLM] 응답 생성 시작")
+                                llm_start_time = time.time()
                                 ai_response = await process_streaming_response(
                                     websocket,
                                     stream_sid,
@@ -1517,7 +1553,18 @@ async def media_stream_handler(
                                     conversation_history,
                                     None
                                 )
+                                llm_end_time = time.time()
+                                llm_duration = llm_end_time - llm_start_time
+                                
+                                # ✅ AI 응답 종료 (1초 후 사용자 입력 재개)
+                                rtzr_stt.stop_bot_speaking()
+                                
                                 logger.info("✅ [LLM] 응답 생성 완료")
+                                
+                                # 전체 처리 시간 로깅
+                                if stt_complete_time:
+                                    total_delay = llm_end_time - stt_complete_time
+                                    logger.info(f"⏱️ [전체 지연] 최종 인식 → LLM 완료: {total_delay:.2f}초 (LLM 응답 생성: {llm_duration:.2f}초)")
                                 
                                 # AI 응답을 대화 세션에 추가 (안전하게)
                                 try:
@@ -1556,6 +1603,15 @@ async def media_stream_handler(
             # ========== 2. 오디오 데이터 수신 및 RTZR로 전송 ==========
             elif event_type == 'media':
                 if rtzr_stt and rtzr_stt.is_active:
+                    # ✅ AI 응답 중이면 오디오 무시 (에코 방지)
+                    if rtzr_stt.is_bot_speaking:
+                        continue
+                    
+                    # ✅ AI 응답 종료 후 1초 대기 중이면 무시
+                    if rtzr_stt.bot_silence_delay > 0:
+                        rtzr_stt.bot_silence_delay -= 1
+                        continue
+                    
                     # Base64 디코딩 (Twilio는 mulaw 8kHz로 전송)
                     audio_payload = base64.b64decode(data['media']['payload'])
                     
@@ -1567,6 +1623,15 @@ async def media_stream_handler(
                 logger.info(f"\n{'='*60}")
                 logger.info(f"📞 Twilio 통화 종료 - Call: {call_sid}")
                 logger.info(f"{'='*60}")
+                
+                # ✅ RTZR 백그라운드 태스크 취소
+                if 'rtzr_task' in locals() and rtzr_task:
+                    logger.info("🛑 RTZR 백그라운드 태스크 취소 중...")
+                    rtzr_task.cancel()
+                    try:
+                        await asyncio.wait_for(rtzr_task, timeout=2.0)
+                    except (asyncio.CancelledError, asyncio.TimeoutError):
+                        logger.info("✅ RTZR 백그라운드 태스크 종료 완료")
                 
                 # RTZR 스트리밍 종료
                 if rtzr_stt:
