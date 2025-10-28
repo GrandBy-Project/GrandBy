@@ -29,6 +29,7 @@ from app.config import settings, is_development
 from app.database import test_db_connection, get_db
 from app.services.ai_call.stt_service import STTService
 from app.services.ai_call.tts_service import TTSService
+from app.services.ai_call.cartesia_tts_service import cartesia_tts_service
 from app.services.ai_call.llm_service import LLMService
 from app.services.ai_call.twilio_service import TwilioService
 from app.services.ai_call.rtzr_stt_realtime import RTZRRealtimeSTT, LLMPartialCollector
@@ -50,6 +51,69 @@ llm_service = LLMService()
 active_connections: Dict[str, WebSocket] = {}
 conversation_sessions: Dict[str, list] = {}
 saved_calls: set = set()  # 중복 저장 방지용 플래그
+
+
+# ==================== 통화 세션 관리 클래스 ====================
+
+class CallSession:
+    """통화 세션 관리 클래스 - Cartesia WebSocket 연결 재사용"""
+    
+    def __init__(self, call_sid: str, stream_sid: str):
+        self.call_sid = call_sid
+        self.stream_sid = stream_sid
+        self.cartesia_ws = None
+        self.context_id = None
+        self.is_connected = False
+        self.connection_task = None
+        
+    async def initialize_cartesia_connection(self):
+        """통화 시작 시 Cartesia WebSocket 연결 생성"""
+        try:
+            access_token = await cartesia_tts_service._get_access_token()
+            ws_url = f"wss://api.cartesia.ai/tts/websocket?api_key={access_token}&cartesia_version=2025-04-16"
+            
+            import websockets
+            self.cartesia_ws = await websockets.connect(
+                ws_url,
+                ping_interval=20,
+                ping_timeout=10
+            )
+            self.context_id = f"ctx_{self.stream_sid}_{int(time.time() * 1000)}"
+            self.is_connected = True
+            
+            # 연결 상태 모니터링 백그라운드 태스크 시작
+            self.connection_task = asyncio.create_task(self._monitor_connection())
+            
+            logger.info(f"✅ Cartesia WebSocket 연결 생성 완료: {self.call_sid}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Cartesia WebSocket 연결 실패: {e}")
+            self.is_connected = False
+            return False
+    
+    async def _monitor_connection(self):
+        """WebSocket 연결 상태 모니터링"""
+        try:
+            while self.is_connected:
+                await asyncio.sleep(30)  # 30초마다 확인
+                if self.cartesia_ws:
+                    await self.cartesia_ws.ping()
+        except Exception as e:
+            logger.warning(f"⚠️ WebSocket 연결 모니터링 실패: {e}")
+            self.is_connected = False
+    
+    async def close(self):
+        """통화 종료 시 연결 정리"""
+        self.is_connected = False
+        if self.connection_task:
+            self.connection_task.cancel()
+        if self.cartesia_ws:
+            await self.cartesia_ws.close()
+        logger.info(f"🔄 Cartesia WebSocket 연결 종료: {self.call_sid}")
+
+# 전역 세션 관리
+call_sessions: Dict[str, CallSession] = {}
 
 
 # ==================== 대화 내용 DB 저장 함수 ====================
@@ -388,7 +452,7 @@ class AudioProcessor:
     
     def stop_bot_speaking(self):
         """AI 응답 종료 - 1초 대기 후 사용자 입력 재개"""
-        self.bot_silence_delay = 50  # 50개 청크 = 1초 대기
+        self.bot_silence_delay = 5
         self.is_bot_speaking = False
         logger.info("🤖 [에코 방지] AI 응답 종료 - 1초 후 사용자 입력 재개")
     
@@ -545,7 +609,7 @@ async def convert_and_send_audio(websocket: WebSocket, stream_sid: str, text: st
         import io
         
         # 1. TTS 변환 (문장 단위, 비동기)
-        audio_data, tts_time = await tts_service.text_to_speech_sentence(text)
+        audio_data, tts_time = await cartesia_tts_service.text_to_speech_sentence(text)
         
         if not audio_data:
             logger.warning(f"⚠️ TTS 변환 실패, 건너뜀: {text[:30]}...")
@@ -603,6 +667,28 @@ async def convert_and_send_audio(websocket: WebSocket, stream_sid: str, text: st
         return 0.0
 
 
+async def process_fallback_response(
+    websocket: WebSocket,
+    stream_sid: str,
+    user_text: str,
+    audio_processor=None
+) -> str:
+    """폴백 모드 - 기존 방식으로 처리"""
+    logger.warning("🔄 폴백 모드: 기존 방식으로 처리")
+    
+    try:
+        # 기존의 단순한 TTS 방식 사용
+        response_text = await llm_service.generate_response(user_text, [])
+        
+        if response_text:
+            await send_audio_to_twilio_with_tts(websocket, stream_sid, response_text, audio_processor)
+            return response_text
+        
+        return ""
+    except Exception as e:
+        logger.error(f"❌ 폴백 모드 처리 실패: {e}")
+        return ""
+
 async def process_streaming_response(
     websocket: WebSocket,
     stream_sid: str,
@@ -611,141 +697,277 @@ async def process_streaming_response(
     audio_processor=None
 ) -> str:
     """
-    실시간 하이브리드 방식: LLM 스트리밍 중 문장 생성 즉시 TTS 시작, 전송은 순서 보장
+    최적화된 스트리밍 응답 처리 - 사전 연결된 WebSocket 사용
     
     핵심 개선:
-    - 문장이 생성되는 즉시 TTS 시작 (대기 시간 없음)
-    - TTS는 병렬로 실행되지만 전송은 순서대로
-    - 첫 응답 시간 최소화 (가장 빠른 방식)
-    
-    Args:
-        websocket: Twilio WebSocket 연결
-        stream_sid: Twilio Stream SID  
-        user_text: 사용자 발화 전체 텍스트
-        conversation_history: 대화 기록
-        audio_processor: AudioProcessor 인스턴스
-    
-    Returns:
-        str: 생성된 전체 AI 응답
+    - 사전 연결된 Cartesia WebSocket 재사용
+    - LLM 스트림을 두 갈래로 분리 (텍스트 수집 + TTS)
     """
-    import re
+    import audioop
     
-    # 에코 방지
     if audio_processor:
         audio_processor.start_bot_speaking()
     
     try:
-        # 전체 파이프라인 시작 시간
         pipeline_start = time.time()
-        
-        # 순서 관리 변수
-        completed_audio = {}  # {index: (mulaw_data, playback_duration)}
-        next_send_index = [0]  # 다음에 전송할 순서 (리스트로 감싸서 클로저에서 수정 가능)
-        send_lock = asyncio.Lock()  # 동시 전송 방지
-        sentence_index = [0]  # 현재 문장 인덱스
-        
-        # 문장 및 응답 저장
-        sentence_buffer = ""
         full_response = []
-        tts_tasks = []  # TTS 태스크 추적
+        logger.info("=" * 60)
+        logger.info("🚀 실시간 스트리밍 파이프라인 시작")
+        logger.info("=" * 60)
+
+        # call_sid 찾기 (stream_sid로부터)
+        call_sid = None
+        for cid, session in call_sessions.items():
+            if session.stream_sid == stream_sid:
+                call_sid = cid
+                break
         
-        logger.info(f"[발화 종료 +0.00초] 실시간 하이브리드 파이프라인 시작")
+        if not call_sid or call_sid not in call_sessions:
+            logger.error("❌ 통화 세션을 찾을 수 없음 - 폴백 모드 사용")
+            return await process_fallback_response(websocket, stream_sid, user_text, audio_processor)
         
-        # LLM 스트리밍: 문장 생성 즉시 TTS 시작
-        logger.info("🔄 [LLM] 스트리밍 시작")
-        chunk_count = 0
-        async for chunk in llm_service.generate_response_streaming(
-            user_text, conversation_history
-        ):
-            chunk_count += 1
-            sentence_buffer += chunk
-            full_response.append(chunk)
-            logger.info(f"🔄 [LLM] 청크[{chunk_count}] 수신: '{chunk}' (길이: {len(chunk)})")
-            
-            # 문장 종료 감지 (마침표, 느낌표, 물음표, 줄바꿈)
-            if re.search(r'[.!?\n]', chunk):
-                logger.info(f"🔍 [문장분할] 문장 종료 감지 - 현재 버퍼: '{sentence_buffer}'")
-                sentences = re.split(r'([.!?\n]+)', sentence_buffer)
-                logger.info(f"🔍 [문장분할] 분할된 문장들: {sentences}")
-                
-                for i in range(0, len(sentences)-1, 2):
-                    sentence = sentences[i] + (sentences[i+1] if i+1 < len(sentences) else "")
-                    sentence = sentence.strip()
-                    
-                    if sentence:
-                        current_idx = sentence_index[0]
-                        elapsed = time.time() - pipeline_start
-                        
-                        logger.info(f"✅ [LLM] 문장[{current_idx}] 생성 완료: {sentence[:40]}...")
-                        logger.info(f"🚀 [TTS] 문장[{current_idx}] TTS 태스크 시작 예정")
-                        
-                        # 핵심: 즉시 TTS 태스크 시작 (대기하지 않음!)
-                        task = asyncio.create_task(
-                            process_tts_and_send(
-                                websocket, stream_sid,
-                                current_idx, sentence,
-                                completed_audio, next_send_index, send_lock,
-                                pipeline_start
-                            )
-                        )
-                        tts_tasks.append(task)
-                        sentence_index[0] += 1
-                        
-                        logger.info(f"✅ [TTS] 문장[{current_idx}] TTS 태스크 생성 완료 (총 {len(tts_tasks)}개 태스크)")
-                        
-                        # 🔑 핵심: 이벤트 루프에 제어권을 넘겨서 TTS가 즉시 실행되도록 함
-                        await asyncio.sleep(0)
-                        logger.info(f"🚀 [TTS] 문장[{current_idx}] TTS 즉시 실행 시작")
-                
-                sentence_buffer = sentences[-1] if len(sentences) % 2 == 1 else ""
-                logger.info(f"🔍 [문장분할] 남은 버퍼: '{sentence_buffer}'")
+        session = call_sessions[call_sid]
         
-        logger.info(f"✅ [LLM] 스트리밍 완료 - 총 {chunk_count}개 청크 수신")
+        # WebSocket 연결 상태 확인
+        if not session.is_connected or session.cartesia_ws is None:
+            logger.warning("⚠️ WebSocket 연결이 끊어짐 - 재연결 시도")
+            connection_success = await session.initialize_cartesia_connection()
+            if not connection_success:
+                logger.error("❌ WebSocket 재연결 실패 - 폴백 모드 사용")
+                return await process_fallback_response(websocket, stream_sid, user_text, audio_processor)
         
-        # 마지막 문장 처리
-        if sentence_buffer.strip():
-            current_idx = sentence_index[0]
-            elapsed = time.time() - pipeline_start
-            logger.info(f"[+{elapsed:.2f}초] 문장[{current_idx}] 생성(마지막): {sentence_buffer[:40]}...")
-            
-            task = asyncio.create_task(
-                process_tts_and_send(
-                    websocket, stream_sid,
-                    current_idx, sentence_buffer,
-                    completed_audio, next_send_index, send_lock,
-                    pipeline_start
-                )
+        logger.info("🚀 실시간 스트리밍 파이프라인 시작 (사전 연결된 WebSocket 사용)")
+        
+        # 사전 연결된 WebSocket 사용
+        cartesia_ws = session.cartesia_ws
+        
+        # 병렬 태스크 생성
+        # 1. LLM 텍스트 생성 + Cartesia 전송
+        # 2. Cartesia 음성 수신 + Twilio 전송
+        
+        send_task = asyncio.create_task(
+            llm_to_cartesia_sender(
+                cartesia_ws,
+                user_text,
+                conversation_history,
+                session.context_id,
+                full_response,
+                pipeline_start
             )
-            tts_tasks.append(task)
-            
-            # 🔑 핵심: 마지막 문장도 즉시 실행되도록 함
-            await asyncio.sleep(0)
-            logger.info(f"🚀 [TTS] 문장[{current_idx}] TTS 즉시 실행 시작 (마지막)")
+        )
         
-        # 모든 TTS 완료 대기
-        results = await asyncio.gather(*tts_tasks, return_exceptions=True)
-        total_playback_duration = sum(r for r in results if isinstance(r, (int, float)))
+        receive_task = asyncio.create_task(
+            cartesia_to_twilio_forwarder(
+                cartesia_ws,
+                websocket,
+                stream_sid,
+                pipeline_start
+            )
+        )
+        
+        # 두 태스크 완료 대기
+        send_result = await send_task
+        playback_duration = await receive_task
         
         pipeline_time = time.time() - pipeline_start
-        final_text = "".join(full_response)
         
-        logger.info(f"[+{pipeline_time:.2f}초] 전체 완료 (재생시간: {total_playback_duration:.2f}초)")
+        logger.info("=" * 60)
+        logger.info(f"✅ 전체 파이프라인 완료: {pipeline_time:.2f}초")
+        logger.info(f"   예상 재생 시간: {playback_duration:.2f}초")
+        logger.info("=" * 60)
         
-        # 음성 재생 완료 대기
-        actual_wait_time = total_playback_duration * 1.2
-        if actual_wait_time > 0:
-            await asyncio.sleep(actual_wait_time)
+        # 재생 완료 대기
+        # if playback_duration > 0:
+        #     await asyncio.sleep(playback_duration * 0.9)
         
-        return final_text
+        return "".join(full_response)
         
     except Exception as e:
-        logger.error(f"실시간 하이브리드 오류: {e}")
+        logger.error(f"❌ 실시간 스트리밍 오류: {e}")
         import traceback
         logger.error(traceback.format_exc())
         return ""
     finally:
         if audio_processor:
             audio_processor.stop_bot_speaking()
+
+async def llm_to_cartesia_sender(
+    cartesia_ws,
+    user_text: str,
+    conversation_history: list,
+    context_id: str,
+    full_response: list,
+    pipeline_start: float
+):
+    """
+    LLM 텍스트 생성 → Cartesia WebSocket 전송
+    
+    핵심: 문장이 완성되는 즉시 전송 (대기 없음)
+    """
+    import re
+
+    llm_service = LLMService()
+    
+    try:
+        sentence_buffer = ""
+        chunk_count = 0
+        sentence_count = 0
+        first_sentence_sent = False
+        
+        logger.info("🤖 [LLM] 스트리밍 시작")
+        
+        async for chunk in llm_service.generate_response_streaming(user_text, conversation_history):
+            chunk_count += 1
+            sentence_buffer += chunk
+            full_response.append(chunk)  # 전체 텍스트 수집
+            
+            # 문장 종료 감지
+            should_send = False
+            
+            # 1. 명확한 문장 종료 (마침표, 느낌표, 물음표)
+            if re.search(r'[.!?\n。！？]', chunk):
+                should_send = True
+            
+            # 2. 쉼표로 자연스럽게 끊기 (긴 문장 방지)
+            elif len(sentence_buffer) > 40 and re.search(r'[,，]', sentence_buffer[-5:]):
+                should_send = True
+            
+            # 3. 너무 긴 문장 강제 분할 (80자 이상)
+            elif len(sentence_buffer) > 80:
+                should_send = True
+            
+            if should_send and sentence_buffer.strip():
+                sentence = sentence_buffer.strip()
+                sentence_count += 1
+                
+                elapsed = time.time() - pipeline_start
+                
+                if not first_sentence_sent:
+                    logger.info(f"⚡ [첫 문장] +{elapsed:.2f}초에 생성 완료!")
+                    first_sentence_sent = True
+                
+                logger.info(f"📤 [문장 {sentence_count}] 전송: {sentence[:40]}...")
+                
+                # Cartesia로 즉시 전송
+                await cartesia_tts_service._send_text_chunk(
+                    cartesia_ws,
+                    sentence,
+                    context_id,
+                    continue_=True
+                )
+                
+                sentence_buffer = ""
+        
+        # 마지막 문장 처리
+        if sentence_buffer.strip():
+            sentence_count += 1
+            logger.info(f"📤 [마지막 문장 {sentence_count}] 전송: {sentence_buffer[:40]}...")
+            
+            await cartesia_tts_service._send_text_chunk(
+                cartesia_ws,
+                sentence_buffer.strip(),
+                context_id,
+                continue_=False  # 마지막 신호
+            )
+        
+        logger.info(f"✅ [LLM] 총 {sentence_count}개 문장 전송 완료")
+        
+    except Exception as e:
+        logger.error(f"❌ LLM → Cartesia 전송 오류: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+
+async def cartesia_to_twilio_forwarder(
+    cartesia_ws,
+    twilio_ws: WebSocket,
+    stream_sid: str,
+    pipeline_start: float
+) -> float:
+    """
+    Cartesia 음성 수신 → Twilio 즉시 전송
+    
+    핵심: 청크 받는 즉시 전송 (버퍼링 없음)
+    
+    Returns:
+        float: 총 재생 시간
+    """
+    import audioop
+    import base64
+    
+    try:
+        chunk_count = 0
+        total_audio_bytes = 0
+        first_audio_received = False
+        
+        logger.info("📡 [수신] Cartesia 음성 청크 대기 중...")
+        
+        async for message in cartesia_ws:
+            try:
+                data = json.loads(message)
+                
+                # 오디오 청크 수신
+                if "data" in data:
+                    chunk_count += 1
+                    
+                    elapsed = time.time() - pipeline_start
+                    
+                    if not first_audio_received:
+                        logger.info(f"⚡ [첫 음성] +{elapsed:.2f}초에 수신 시작!")
+                        first_audio_received = True
+                    
+                    # Base64 디코딩 (Cartesia는 PCM 24kHz 반환)
+                    audio_chunk = base64.b64decode(data["data"])
+                    total_audio_bytes += len(audio_chunk)
+                    
+                    # PCM 24kHz → 8kHz 변환 (Twilio 요구사항)
+                    resampled_pcm, _ = audioop.ratecv(
+                        audio_chunk, 2, 1, 24000, 8000, None
+                    )
+                    
+                    # PCM → mulaw 변환
+                    mulaw_data = audioop.lin2ulaw(resampled_pcm, 2)
+                    
+                    # Base64 인코딩
+                    audio_base64 = base64.b64encode(mulaw_data).decode('utf-8')
+                    
+                    # Twilio로 즉시 전송
+                    message = {
+                        "event": "media",
+                        "streamSid": stream_sid,
+                        "media": {"payload": audio_base64}
+                    }
+                    
+                    await twilio_ws.send_text(json.dumps(message))
+                    
+                    if chunk_count % 10 == 0:
+                        logger.debug(f"📤 [청크 {chunk_count}] Twilio 전송 완료")
+                
+                # 완료 신호
+                elif data.get("done"):
+                    logger.info(f"✅ [수신] Cartesia 음성 생성 완료 ({chunk_count}개 청크)")
+                    break
+                
+                # 에러 처리
+                elif "error" in data:
+                    logger.error(f"❌ Cartesia 오류: {data['error']}")
+                    break
+                    
+            except json.JSONDecodeError:
+                logger.warning("⚠️ JSON 파싱 실패, 건너뜀")
+                continue
+        
+        # 재생 시간 계산 (24kHz, 16-bit)
+        playback_duration = total_audio_bytes / (24000 * 2)
+        
+        logger.info(f"✅ [전송] Twilio 전송 완료: {chunk_count}개 청크, {playback_duration:.2f}초")
+        
+        return playback_duration
+        
+    except Exception as e:
+        logger.error(f"❌ Cartesia → Twilio 전송 오류: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return 0.0
 
 
 async def process_tts_and_send(
@@ -759,35 +981,23 @@ async def process_tts_and_send(
     pipeline_start: float
 ) -> float:
     """
-    단일 문장을 TTS 변환하고 순서에 맞춰 전송
-    
-    동작:
-    1. TTS 변환 (병렬 실행)
-    2. 완료되면 completed_audio에 저장
-    3. 자신의 순서가 되면 즉시 전송
-    
-    Args:
-        index: 문장 순서 번호
-        sentence: 변환할 문장
-        completed_audio: 완료된 오디오 저장소
-        next_send_index: 다음 전송 순서
-        send_lock: 전송 동기화 락
-        pipeline_start: 파이프라인 시작 시간
-    
-    Returns:
-        float: 재생 시간
+    TTS 변환 및 전송 (오디오 변환 병렬화)
     """
     try:
-        import wave
-        import io
-        
         tts_start = time.time()
         elapsed_start = tts_start - pipeline_start
         logger.info(f"🔊 [TTS] 문장[{index}] 변환 시작: {sentence[:30]}...")
         logger.info(f"⏰ [TTS] 문장[{index}] 실제 TTS 함수 진입 시간: +{elapsed_start:.2f}초")
         
-        # TTS 변환 (이 부분이 병렬로 실행됨)
-        audio_data, tts_time = await tts_service.text_to_speech_sentence(sentence)
+        # TTS 변환 (타임아웃 10초)
+        try:
+            audio_data, tts_time = await asyncio.wait_for(
+                cartesia_tts_service.text_to_speech_sentence(sentence),
+                timeout=10.0
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"문장[{index}] TTS 타임아웃")
+            return 0.0
         
         # 🔑 추가: audio_data 유효성 검증 강화
         if not audio_data or not isinstance(audio_data, bytes) or len(audio_data) == 0:
@@ -797,37 +1007,23 @@ async def process_tts_and_send(
             return 0.0
         
         elapsed_tts_done = time.time() - pipeline_start
-        logger.info(f"✅ [TTS] 문장[{index}] 변환 완료 ({tts_time:.2f}초 소요)")
+        logger.info(f"[+{elapsed_tts_done:.2f}초] 문장[{index}] TTS 완료 ({tts_time:.2f}초)")
         
-        # WAV → mulaw 변환
-        # 🔑 추가: WAV 파일 검증
-        if len(audio_data) < 44:  # WAV 헤더는 최소 44 bytes
-            logger.error(f"❌ 문장[{index}] TTS 응답이 너무 짧습니다 ({len(audio_data)} bytes)")
-            return 0.0
+        # 최적화: 오디오 변환을 별도 스레드로 처리 (CPU 집약적 작업)
+        if len(audio_data) > 100000:
+            loop = asyncio.get_event_loop()
+            mulaw_data, playback_duration = await loop.run_in_executor(
+                None,  # 기본 ThreadPoolExecutor 사용
+                convert_to_mulaw_optimized,
+                audio_data
+            )
+        else:
+            mulaw_data, playback_duration = convert_to_mulaw_optimized(audio_data)
         
-        wav_io = io.BytesIO(audio_data)
-        with wave.open(wav_io, 'rb') as wav_file:
-            channels = wav_file.getnchannels()
-            sample_width = wav_file.getsampwidth()
-            framerate = wav_file.getframerate()
-            pcm_data = wav_file.readframes(wav_file.getnframes())
-        
-        # Stereo → Mono 변환 (필요 시)
-        if channels == 2:
-            pcm_data = audioop.tomono(pcm_data, sample_width, 1, 1)
-        
-        # 샘플레이트 변환: Twilio는 8kHz 요구
-        if framerate != 8000:
-            pcm_data, _ = audioop.ratecv(pcm_data, sample_width, 1, framerate, 8000, None)
-        
-        # PCM → mulaw 변환
-        mulaw_data = audioop.lin2ulaw(pcm_data, 2)
-        playback_duration = len(mulaw_data) / 8000.0
-        
-        # 완료된 오디오를 저장소에 저장
+        # 완료된 오디오 저장
         completed_audio[index] = (mulaw_data, playback_duration)
         
-        # 순서에 맞춰 전송 시도
+        # 순서에 맞춰 전송
         await try_send_in_order(
             websocket, stream_sid,
             completed_audio, next_send_index, send_lock,
@@ -839,6 +1035,52 @@ async def process_tts_and_send(
     except Exception as e:
         logger.error(f"문장[{index}] 처리 오류: {e}")
         return 0.0
+
+
+def convert_to_mulaw_optimized(audio_data: bytes) -> tuple[bytes, float]:
+    """
+    오디오 변환 최적화
+    
+    최적화 포인트:
+    1. ✅ ThreadPool로 병렬 처리 (속도 향상)
+    2. ✅ audioop 사용 유지 (음질 보장)
+    """
+    import wave
+    import io
+    import audioop
+    
+    # WAV 파일 읽기
+    wav_io = io.BytesIO(audio_data)
+    with wave.open(wav_io, 'rb') as wav_file:
+        channels = wav_file.getnchannels()
+        sample_width = wav_file.getsampwidth()
+        framerate = wav_file.getframerate()
+        n_frames = wav_file.getnframes()
+        pcm_data = wav_file.readframes(n_frames)
+    
+    logger.info(f"원본 오디오: {framerate}Hz, {channels}ch, {sample_width}바이트, {n_frames}프레임")
+    
+    # Stereo → Mono (평균)
+    if channels == 2:
+        pcm_data = audioop.tomono(pcm_data, sample_width, 1, 1)
+        logger.info(f"Mono 변환 완료")
+    
+    if sample_width != 2:
+        pcm_data = audioop.lin2lin(pcm_data, sample_width, 2)
+        sample_width = 2
+        logger.info(f"16-bit 변환 완료")
+    
+    if framerate != 8000:
+        logger.info(f"샘플레이트 변환: {framerate}Hz → 8000Hz")
+        pcm_data, _ = audioop.ratecv(
+            pcm_data, sample_width, 1, framerate, 8000, None
+        )
+        logger.info(f"샘플레이트 변환 완료")
+
+    mulaw_data = audioop.lin2ulaw(pcm_data, 2)
+    playback_duration = len(mulaw_data) / 8000.0
+    
+    return mulaw_data, playback_duration
 
 
 async def try_send_in_order(
@@ -889,6 +1131,100 @@ async def try_send_in_order(
             next_send_index[0] += 1
 
 
+async def _generate_welcome_audio_async(text: str) -> bytes:
+    """환영 메시지 오디오를 미리 생성"""
+    try:
+        start_time = time.time()
+        
+        # 이미 준비된 토큰 사용
+        access_token = await cartesia_tts_service._get_access_token()
+        
+        # 최적화된 HTTP 클라이언트 사용
+        client = await cartesia_tts_service._get_http_client()
+        
+        response = await client.post(
+            "https://api.cartesia.ai/tts/bytes",
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json",
+                "Cartesia-Version": "2025-04-16",
+            },
+            json={
+                "model_id": cartesia_tts_service.model,
+                "transcript": text,
+                "voice": {
+                    "mode": "id",
+                    "id": cartesia_tts_service.voice
+                },
+                "language": "ko",
+                "output_format": {
+                    "container": "raw",
+                    "encoding": "pcm_s16le",
+                    "sample_rate": 24000
+                }
+            }
+        )
+        
+        response.raise_for_status()
+        pcm_data = response.content
+        
+        # 오디오 변환 (μ-law 변환은 필수이므로 유지)
+        resampled_pcm, _ = audioop.ratecv(
+            pcm_data, 2, 1, 24000, 8000, None
+        )
+        mulaw_data = audioop.lin2ulaw(resampled_pcm, 2)
+        
+        tts_time = time.time() - start_time
+        logger.info(f"✅ [환영] 사전 생성 완료 ({tts_time:.2f}초)")
+        
+        return mulaw_data
+        
+    except Exception as e:
+        logger.error(f"❌ 환영 메시지 사전 생성 실패: {e}")
+        return None
+
+async def _send_prepared_audio_to_twilio(
+    websocket: WebSocket, 
+    stream_sid: str, 
+    mulaw_data: bytes, 
+    audio_processor=None
+):
+    """준비된 오디오를 Twilio로 전송"""
+    if not mulaw_data:
+        return
+    
+    try:
+        if audio_processor:
+            audio_processor.start_bot_speaking()
+        
+        # Base64 인코딩 및 전송
+        audio_base64 = base64.b64encode(mulaw_data).decode('utf-8')
+        
+        logger.info(f"📤 [환영] 즉시 전송: {len(mulaw_data)} bytes")
+        
+        # 청크 단위 전송 (지연 시간 단축)
+        chunk_size = 8000
+        for i in range(0, len(audio_base64), chunk_size):
+            chunk = audio_base64[i:i + chunk_size]
+            
+            message = {
+                "event": "media",
+                "streamSid": stream_sid,
+                "media": {"payload": chunk}
+            }
+            
+            await websocket.send_text(json.dumps(message))
+            await asyncio.sleep(0.01)  # 0.02초 → 0.01초로 단축
+        
+        logger.info(f"✅ [환영] 즉시 전송 완료")
+        
+    except Exception as e:
+        logger.error(f"❌ 준비된 오디오 전송 실패: {e}")
+    finally:
+        if audio_processor:
+            audio_processor.stop_bot_speaking()
+
+
 async def send_audio_to_twilio_with_tts(websocket: WebSocket, stream_sid: str, text: str, audio_processor=None):
     """
     TTS Service를 사용하여 텍스트를 음성으로 변환 후 Twilio WebSocket으로 전송
@@ -900,141 +1236,96 @@ async def send_audio_to_twilio_with_tts(websocket: WebSocket, stream_sid: str, t
         text: 변환할 텍스트
         audio_processor: AudioProcessor 인스턴스 (에코 방지용)
     """
-    # TTS 시작 알림 (에코 방지)
+    import httpx
+    
     if audio_processor:
         audio_processor.start_bot_speaking()
     
-    logger.info(f"🔊 [TTS] 텍스트 변환 시작: {text[:30]}...")
+    logger.info(f"🎙️ [환영] 빠른 음성 생성: {text}")
     
     try:
-        import wave
-        import io
+        start_time = time.time()
         
-        # TTS Service로 음성 생성 (WAV 파일로 저장됨)
-        audio_file_path, tts_time = tts_service.text_to_speech(text)
-        
-        # TTS 실패 체크
-        if not audio_file_path or tts_time == 0:
-            logger.error("❌ TTS 변환 실패 - 응답이 None이거나 시간이 0초")
-            return
-        
-        logger.info(f"✅ [TTS] 텍스트 변환 완료 ({tts_time:.2f}초)")
-        
-        # 파일 존재 확인
-        if not os.path.exists(audio_file_path):
-            logger.error(f"❌ TTS 파일이 존재하지 않음: {audio_file_path}")
-            return
-        
-        # 파일 크기 확인
-        file_size = os.path.getsize(audio_file_path)
-        logger.info(f"📁 생성된 파일 크기: {file_size} bytes")
-        
-        if file_size == 0:
-            logger.error("❌ 파일이 비어있습니다! TTS API 문제 가능성")
-            return
+        # Cartesia HTTP API 직접 호출 (최적화된 클라이언트 사용)
+        access_token = await cartesia_tts_service._get_access_token()
+        client = await cartesia_tts_service._get_http_client()
         
         try:
-            # 파일 헤더 확인
-            with open(audio_file_path, 'rb') as f:
-                header = f.read(12)
-                logger.info(f"📄 파일 헤더: {header.hex() if header else 'EMPTY'}")
-                
-                if len(header) == 0:
-                    logger.error("❌ 헤더를 읽을 수 없습니다!")
-                    return
-                
-                # WAV 파일 검증
-                if header[:4] == b'RIFF' and header[8:12] == b'WAVE':
-                    logger.info("✅ 정상 WAV 파일 확인")
-                elif header[:3] == b'ID3' or header[:2] == b'\xff\xfb':
-                    logger.error("❌ MP3 파일입니다! response_format이 wav로 설정되지 않았습니다.")
-                    return
-                else:
-                    logger.error(f"❌ 알 수 없는 파일 형식: {header[:4]}")
-                    return
-
-            # WAV 파일 읽기 (wave 모듈만 사용)
-            with wave.open(audio_file_path, 'rb') as wav_file:
-                channels = wav_file.getnchannels()
-                sample_width = wav_file.getsampwidth()
-                framerate = wav_file.getframerate()
-                n_frames = wav_file.getnframes()
-                
-                logger.info(f"🎵 TTS WAV 정보:")
-                logger.info(f"  - 채널: {channels}ch")
-                logger.info(f"  - 비트: {sample_width*8}bit")
-                logger.info(f"  - 샘플레이트: {framerate}Hz")
-                logger.info(f"  - 프레임 수: {n_frames}")
-                
-                pcm_data = wav_file.readframes(n_frames)
-                logger.info(f"  - PCM 데이터: {len(pcm_data)} bytes")
-
-            # Stereo → Mono 변환 (필요시)
-            if channels == 2:
-                logger.info("🔄 Stereo → Mono 변환 중...")
-                pcm_data = audioop.tomono(pcm_data, sample_width, 1, 1)
-                logger.info(f"✅ Mono 변환 완료: {len(pcm_data)} bytes")
-
-            # 샘플레이트 변환 (Twilio는 8kHz 요구)
-            if framerate != 8000:
-                logger.info(f"🔄 샘플레이트 변환: {framerate}Hz → 8000Hz")
-                pcm_data, _ = audioop.ratecv(pcm_data, sample_width, 1, framerate, 8000, None)
-                logger.info(f"✅ 샘플레이트 변환 완료: {len(pcm_data)} bytes")
-
-            # PCM → mulaw 변환
-            logger.info("🔄 PCM → mulaw 변환 중...")
-            mulaw_data = audioop.lin2ulaw(pcm_data, 2)
-            logger.info(f"✅ mulaw 변환 완료: {len(mulaw_data)} bytes")
-            
-        except wave.Error as wave_err:
-            logger.error(f"❌ WAV 파일 읽기 오류: {wave_err}")
-            import traceback
-            logger.error(traceback.format_exc())
-            return
-        except Exception as conv_error:
-            logger.error(f"❌ 오디오 변환 오류: {type(conv_error).__name__}: {conv_error}")
-            import traceback
-            logger.error(traceback.format_exc())
-            return
-        finally:
-            # TTS로 생성된 임시 MP3 파일 삭제
-            if os.path.exists(audio_file_path):
-                os.unlink(audio_file_path)
-
-                
-        
-        # mulaw 데이터를 Base64로 인코딩
-        audio_base64 = base64.b64encode(mulaw_data).decode('utf-8')
-        
-        logger.info(f"📤 [AUDIO] 음성 전송 시작: {len(mulaw_data)} bytes")
-        
-        # 청크로 나누어 전송 (Twilio 제한 고려)
-        chunk_size = 8000  # 8KB chunks
-        for i in range(0, len(audio_base64), chunk_size):
-            chunk = audio_base64[i:i + chunk_size]
-            
-            message = {
-                "event": "media",
-                "streamSid": stream_sid,
-                "media": {
-                    "payload": chunk
+            response = await client.post(
+                "https://api.cartesia.ai/tts/bytes",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json",
+                    "Cartesia-Version": "2025-04-16",
+                },
+                json={
+                    "model_id": cartesia_tts_service.model,
+                    "transcript": text,
+                    "voice": {
+                        "mode": "id",
+                        "id": cartesia_tts_service.voice
+                    },
+                    "language": "ko",
+                    "output_format": {
+                        "container": "raw",
+                        "encoding": "pcm_s16le",
+                        "sample_rate": 24000
+                    }
                 }
-            }
+            )
             
-            await websocket.send_text(json.dumps(message))
-            await asyncio.sleep(0.02)  # 작은 지연으로 부드러운 재생
-        
-        logger.info("✅ [AUDIO] 음성 출력 종료")
-        
+            response.raise_for_status()
+            pcm_data = response.content
+            
+            tts_time = time.time() - start_time
+            logger.info(f"✅ [환영] TTS 완료 ({tts_time:.2f}초)")
+            
+            if not pcm_data or len(pcm_data) == 0:
+                logger.error("❌ 음성 데이터 없음")
+                return
+            
+            # PCM 24kHz → 8kHz mulaw (Twilio)
+            resampled_pcm, _ = audioop.ratecv(
+                pcm_data, 2, 1, 24000, 8000, None
+            )
+            mulaw_data = audioop.lin2ulaw(resampled_pcm, 2)
+            
+            # Base64 인코딩 및 전송
+            audio_base64 = base64.b64encode(mulaw_data).decode('utf-8')
+            
+            logger.info(f"📤 [환영] 음성 전송 시작: {len(mulaw_data)} bytes")
+            
+            # 청크 단위 전송
+            chunk_size = 8000
+            for i in range(0, len(audio_base64), chunk_size):
+                chunk = audio_base64[i:i + chunk_size]
+                
+                message = {
+                    "event": "media",
+                    "streamSid": stream_sid,
+                    "media": {"payload": chunk}
+                }
+                
+                await websocket.send_text(json.dumps(message))
+                # await asyncio.sleep(0.02)
+            
+            total_time = time.time() - start_time
+            logger.info(f"✅ [환영] 전송 완료 (총 {total_time:.2f}초)")
+            
+        except httpx.HTTPStatusError as e:
+            logger.error(f"❌ Cartesia API 오류: {e.response.status_code}")
+            logger.error(f"응답: {e.response.text}")
+        except Exception as e:
+            logger.error(f"❌ 환영 메시지 전송 오류: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
     except Exception as e:
-        logger.error(f"❌ 음성 전송 오류: {str(e)}")
+        logger.error(f"❌ 전체 환영 메시지 처리 오류: {e}")
         import traceback
         logger.error(traceback.format_exc())
     finally:
-        # TTS 종료 알림 (에코 방지)
         if audio_processor:
             audio_processor.stop_bot_speaking()
-
 
 # Lifespan 이벤트 (startup/shutdown)
 @asynccontextmanager
@@ -1061,10 +1352,24 @@ async def lifespan(app: FastAPI):
         )
         logger.info("✅ Sentry initialized")
     
+    # Cartesia TTS 서비스 초기화
+    try:
+        await cartesia_tts_service.ensure_token_ready()
+        logger.info("🚀 Cartesia TTS 서비스 초기화 완료")
+    except Exception as e:
+        logger.error(f"❌ Cartesia 서비스 초기화 실패: {e}")
+    
     yield
     
     # Shutdown
     logger.info("👋 Shutting down Grandby API Server...")
+    
+    # Cartesia 서비스 정리
+    try:
+        await cartesia_tts_service.close()
+        logger.info("🔄 Cartesia TTS 서비스 정리 완료")
+    except Exception as e:
+        logger.error(f"❌ Cartesia 서비스 정리 실패: {e}")
 
 
 # FastAPI 앱 생성
@@ -1449,9 +1754,38 @@ async def media_stream_handler(
                 logger.info(f"│ Elderly ID: {elderly_id:41} │")
                 logger.info(f"└{'─'*58}┘")
                 
-                # 시작 안내 메시지 (TTS 서비스 사용)
+                # 🚀 개선: 통화 세션 생성 및 Cartesia WebSocket 연결
+                call_session = CallSession(call_sid, stream_sid)
+                call_sessions[call_sid] = call_session
+                
+                # Cartesia WebSocket 연결을 백그라운드에서 시작
+                connection_success = await call_session.initialize_cartesia_connection()
+                
+                if connection_success:
+                    logger.info("🎉 Cartesia WebSocket 연결 준비 완료 - 즉시 응답 가능!")
+                else:
+                    logger.warning("⚠️ Cartesia WebSocket 연결 실패 - 폴백 모드 사용")
+                
+                # 🚀 개선: 토큰과 환영 메시지를 병렬로 준비
                 welcome_text = "안녕하세요! 무엇을 도와드릴까요?"
-                await send_audio_to_twilio_with_tts(websocket, stream_sid, welcome_text, None)
+                
+                # 토큰 미리 준비 (백그라운드)
+                token_task = asyncio.create_task(
+                    cartesia_tts_service._get_access_token()
+                )
+                
+                # 환영 메시지 TTS 미리 생성 (병렬 처리)
+                welcome_audio_task = asyncio.create_task(
+                    _generate_welcome_audio_async(welcome_text)
+                )
+                
+                # 모든 준비 작업 완료 대기
+                await asyncio.gather(token_task, welcome_audio_task)
+                
+                # 준비된 오디오로 즉시 전송
+                await _send_prepared_audio_to_twilio(
+                    websocket, stream_sid, welcome_audio_task.result(), None
+                )
                 
                 # ========== RTZR 스트리밍 시작 ==========
                 logger.info("🎤 RTZR 실시간 STT 스트리밍 시작")
@@ -1624,6 +1958,12 @@ async def media_stream_handler(
                 logger.info(f"📞 Twilio 통화 종료 - Call: {call_sid}")
                 logger.info(f"{'='*60}")
                 
+                # 🚀 개선: Cartesia WebSocket 연결 정리
+                if call_sid in call_sessions:
+                    await call_sessions[call_sid].close()
+                    del call_sessions[call_sid]
+                    logger.info("🔄 Cartesia WebSocket 연결 정리 완료")
+                
                 # ✅ RTZR 백그라운드 태스크 취소
                 if 'rtzr_task' in locals() and rtzr_task:
                     logger.info("🛑 RTZR 백그라운드 태스크 취소 중...")
@@ -1660,8 +2000,18 @@ async def media_stream_handler(
                 
     except WebSocketDisconnect:
         logger.info(f"📞 Twilio WebSocket 연결 해제 (Call: {call_sid})")
+        # WebSocket 연결 해제 시에도 정리
+        if call_sid and call_sid in call_sessions:
+            await call_sessions[call_sid].close()
+            del call_sessions[call_sid]
+            logger.info("🔄 Cartesia WebSocket 연결 정리 완료 (연결 해제)")
     except Exception as e:
         logger.error(f"❌ Twilio WebSocket 오류: {str(e)}")
+        # 오류 발생 시에도 정리
+        if call_sid and call_sid in call_sessions:
+            await call_sessions[call_sid].close()
+            del call_sessions[call_sid]
+            logger.info("🔄 Cartesia WebSocket 연결 정리 완료 (오류 발생)")
         import traceback
         logger.error(traceback.format_exc())
     finally:
