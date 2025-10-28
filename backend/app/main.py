@@ -452,7 +452,7 @@ class AudioProcessor:
     
     def stop_bot_speaking(self):
         """AI 응답 종료 - 1초 대기 후 사용자 입력 재개"""
-        self.bot_silence_delay = 50  # 50개 청크 = 1초 대기
+        self.bot_silence_delay = 5
         self.is_bot_speaking = False
         logger.info("🤖 [에코 방지] AI 응답 종료 - 1초 후 사용자 입력 재개")
     
@@ -777,8 +777,8 @@ async def process_streaming_response(
         logger.info("=" * 60)
         
         # 재생 완료 대기
-        if playback_duration > 0:
-            await asyncio.sleep(playback_duration * 1.1)
+        # if playback_duration > 0:
+        #     await asyncio.sleep(playback_duration * 0.9)
         
         return "".join(full_response)
         
