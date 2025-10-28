@@ -28,24 +28,26 @@ class LLMService:
 
 [Core]
 - First acknowledge the user's feelings about the situation.
-- Ask at most one light follow-up question only when appropriate.
+- Ask ONE question only when user explicitly needs help or asks for something.
+- Most of the time, just empathize without asking.
 - Do NOT give advice by default.
-- Anti-echo rule: Even if the user asks “what/which” (무슨/어떤), do NOT mirror that form. Prefer a brief feeling reflection or a concrete state-check instead (e.g., “지금은 속 괜찮으세요?”).
 
-[Good examples]
-"여보세요" → "안녕하세요! 오늘 기분은 괜찮으세요?"
+[Examples - Empathize WITHOUT questions]
+"TV 고장났어" → "TV 고장나셔서 많이 답답하시겠어요."
+"대청소 했어" → "대청소를 하셨군요! 수고하셨어요."
 "길 잊어버렸어" → "집에 오는 길이 잠시 헷갈리셨군요. 얼마나 놀라셨을지 걱정돼요."
-"넘어졌어" → "넘어지셔서 많이 놀라셨겠어요. 지금은 괜찮으세요?"
-"자식이 안 와" → "보고 싶으시겠어요. 많이 서운하셨을 것 같아요."
-"밥맛없어" → "입맛이 없으시군요. 많이 힘드셨겠어요."
-"무릎아파" → "무릎이 아프셔서 불편하셨겠어요. 오늘은 좀 어떠세요?"
-"뭘 먹으면 기분 나아질까?" → "입맛이 없으셨군요. 지금은 속 괜찮으세요?"
+
+[Examples - Ask ONLY when user asks for help]
+"어떤 약 먹어야 해?" → "약은 의사 선생님과 상의하시는 게 좋아요."
+"뭘 해야 할까?" → "지금은 어떻게 생각하고 계세요?"
 
 [Do NOT]
-- Ignore the situation and switch topics (예: "산책은 즐거우셨나요?")
-- Give advice/solutions (예: "~해보세요", "~하시면 좋겠어요")
-- Ask abstract/meta questions ("어떤/무슨/왜/언제/혹시 …?", "어떤 이야기를 더 나누고 싶으세요?")
-- End the conversation yourself ("통화 종료", "끊을게요")"""
+- Ask questions when just empathizing is enough
+- Repeat same question pattern ("어떠세요?", "어떠신가요?", "어떻게 되셨어요?")
+- Ask abstract questions ("어떤/무슨/왜/언제", "~어떠신가요?")
+- Ignore the situation and switch topics
+- Give advice/solutions
+- End the conversation yourself"""
     
     def _post_process_response(self, response: str, user_message: str) -> str:
         """
@@ -60,7 +62,7 @@ class LLMService:
         """
         import re
         
-        # 1. 문장 수 제한 (최대 2문장)
+        # 1. 문장 수 제한 (최대 2문장) - 강제 적용
         # 문장 끝 마침표/느낌표/물음표로 분리
         sentences = re.split(r'([.!?])\s*', response.strip())
         
@@ -77,7 +79,7 @@ class LLMService:
         if len(sentences) > 0 and sentences[-1] and sentences[-1] not in '.!?':
             complete_sentences.append(sentences[-1])
         
-        # 2문장으로 제한
+        # 2문장으로 제한 (강제)
         if len(complete_sentences) > 2:
             response = " ".join(complete_sentences[:2])
             logger.info(f"🔧 문장 수 제한: {len(complete_sentences)}개 → 2개")
@@ -88,7 +90,7 @@ class LLMService:
         if response and response[-1] not in '.!?':
             response += "."
         
-        # 2. 금지 패턴 감지 및 제거
+        # 2. 금지 패턴 감지 및 제거 (구체적 대화 품질 문제)
         banned_patterns = [
             # 대화 끝내려는 시도
             (r'(그럼|그러면|이제)\s*(끊|통화\s*종료|전화\s*끊|헤어지|그만)', '금지: 대화 끝내기'),
@@ -103,6 +105,16 @@ class LLMService:
             
             # 무거운 조언
             (r'(계획|목표|운동|다이어트).*세요', '금지: 무거운 조언'),
+            
+            # 금지 키워드: 추상적 질문 (대화 품질 저하)
+            (r'어떤.*물어보', '금지: 추상적 질문'),
+            (r'무슨.*궁금', '금지: 추상적 질문'),
+            (r'어떤 기분인지', '금지: 추상적 질문'),
+            (r'어떻게.*되셨는지', '금지: 추상적 질문'),
+            (r'왜.*그런지', '금지: 원인 추궁'),
+            (r'언제.*되셨는지', '금지: 시간 추궁'),
+            (r'어떤.*보고.*신가요', '금지: 추상적 질문'),
+            (r'어떤.*프로그램.*봐', '금지: 추상적 질문'),
         ]
         
         for pattern, reason in banned_patterns:
@@ -235,9 +247,9 @@ JSON 형식으로 응답:
                     messages.append({"role": "system", "content": f"일정:{schedule_context}"})
                     logger.info(f"📅 {schedule_context}")
             
-            # 대화 기록이 있으면 추가 (최근 3턴 = 6개 메시지, 맥락 유지)
+            # 대화 기록이 있으면 추가 (최근 4턴 = 8개 메시지, 맥락 유지)
             if conversation_history:
-                messages.extend(conversation_history[-6:])
+                messages.extend(conversation_history[-8:])
             
             # 현재 사용자 메시지 추가
             messages.append({"role": "user", "content": user_message})
@@ -318,9 +330,9 @@ JSON 형식으로 응답:
                     messages.append({"role": "system", "content": f"일정:{schedule_context}"})
                     logger.info(f"📅 {schedule_context}")
             
-            # 대화 기록이 있으면 추가 (최근 3턴 = 6개 메시지, 맥락 유지)
+            # 대화 기록이 있으면 추가 (최근 4턴 = 8개 메시지, 맥락 유지)
             if conversation_history:
-                messages.extend(conversation_history[-6:])
+                messages.extend(conversation_history[-8:])
             
             # 현재 사용자 메시지 추가
             messages.append({"role": "user", "content": user_message})
