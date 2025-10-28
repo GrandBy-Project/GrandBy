@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     OPENAI_TTS_MODEL: str = "tts-1"
     OPENAI_TTS_VOICE: str = "nova"
     
+    # ==================== Cartesia TTS ====================
+    CARTESIA_API_KEY: str | None = None
+    CARTESIA_TTS_MODEL: str = "sonic-2"  # 공식 문서 기준 sonic-2 사용
+    CARTESIA_TTS_VOICE: str = "304fdbd8-65e6-40d6-ab78-f9d18b9efdf9"  # Jihyun - Anchorwoman
+    CARTESIA_ACCESS_TOKEN_EXPIRES_IN: int = 60  # Access Token 만료 시간 (초)
+    
     # ==================== Speech-to-Text ====================
     # STT 제공자 선택: "google", "openai", "rtzr"
     STT_PROVIDER: str = "rtzr"
