@@ -37,6 +37,9 @@ firebase-admin==6.4.0
 # ==================== Twilio (Voice Calls) ====================
 twilio==9.3.0
 
+# ==================== RTZR STT (Korean Speech Recognition) ====================
+websockets==13.1
+
 # ==================== Audio Processing ====================
 pydub==0.25.1
 
