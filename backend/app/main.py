@@ -33,6 +33,9 @@ from app.services.ai_call.cartesia_tts_service import cartesia_tts_service
 from app.services.ai_call.llm_service import LLMService
 from app.services.ai_call.twilio_service import TwilioService
 from app.services.ai_call.rtzr_stt_realtime import RTZRRealtimeSTT, LLMPartialCollector
+from app.services.ai_call.audio_converter import AudioConverter
+from app.services.ai_call.twilio_media_stream_handler import TwilioMediaStreamHandler
+from app.config.audio_config import AudioConfig
 
 # 로거 설정 (시간 포함)
 logging.basicConfig(
@@ -216,31 +219,31 @@ class AudioProcessor:
         
         # ========== PCM 기반 동적 임계값 설정 ==========
         # PCM RMS 값은 μ-law보다 훨씬 큼 (16-bit vs 8-bit)
-        self.base_silence_threshold = 1000  # 기본 임계값 (PCM 16-bit 기준)
-        self.silence_threshold = 1000  # 현재 임계값 (동적으로 변경됨)
+        self.base_silence_threshold = AudioConfig.BASE_SILENCE_THRESHOLD  # 기본 임계값 (PCM 16-bit 기준)
+        self.silence_threshold = AudioConfig.BASE_SILENCE_THRESHOLD  # 현재 임계값 (동적으로 변경됨)
         
         # 배경 소음 측정
         self.noise_samples = []  # 배경 소음 RMS 샘플
-        self.noise_calibration_chunks = 50  # 처음 1초(50*20ms) 동안 배경 소음 측정
+        self.noise_calibration_chunks = AudioConfig.NOISE_CALIBRATION_CHUNKS  # 처음 1초(50*20ms) 동안 배경 소음 측정
         self.is_calibrated = False  # 보정 완료 여부
         self.background_noise_level = 0  # 측정된 배경 소음 레벨
         
         # 적응형 조정 설정 (PCM 값에 맞게 조정)
-        self.noise_margin = 200  # 배경 소음 + 마진 = 임계값 (PCM 기준)
-        self.min_threshold = 500  # 최소 임계값 (PCM 기준)
-        self.max_threshold = 5000  # 최대 임계값 (PCM 기준)
+        self.noise_margin = AudioConfig.NOISE_MARGIN  # 배경 소음 + 마진 = 임계값 (PCM 기준)
+        self.min_threshold = AudioConfig.MIN_THRESHOLD  # 최소 임계값 (PCM 기준)
+        self.max_threshold = AudioConfig.MAX_THRESHOLD  # 최대 임계값 (PCM 기준)
         # ======================================
         
         self.silence_duration = 0  # 현재 침묵 지속 시간
-        self.max_silence = 0.5  # ⭐ 1.5초 침묵 후 STT 처리 (충분한 발화 수집)
+        self.max_silence = AudioConfig.MAX_SILENCE  # ⭐ 1.5초 침묵 후 STT 처리 (충분한 발화 수집)
 
         # 초기 노이즈 필터링
         self.warmup_chunks = 0  # 받은 청크 수
-        self.warmup_threshold = 25  # 처음 0.5초 무시
+        self.warmup_threshold = AudioConfig.WARMUP_THRESHOLD  # 처음 0.5초 무시
         
         # 연속 음성 감지
         self.voice_chunks = 0  # 연속 음성 감지 카운터
-        self.voice_threshold = 3  # 최소 3번 연속 감지
+        self.voice_threshold = AudioConfig.VOICE_THRESHOLD  # 최소 3번 연속 감지
         
         # TTS 재생 상태 (에코 방지)
         self.is_bot_speaking = False
@@ -248,7 +251,7 @@ class AudioProcessor:
         
         # 통계 정보 (디버깅용)
         self.rms_history = []  # 최근 RMS 기록
-        self.max_rms_history = 100  # 최근 100개만 유지
+        self.max_rms_history = AudioConfig.MAX_RMS_HISTORY  # 최근 100개만 유지
     
     def _calibrate_noise_level(self, rms: float):
         """
@@ -262,7 +265,7 @@ class AudioProcessor:
         """
         if not self.is_calibrated:
             # 비정상적으로 큰 값은 제외 (연결음 등) - PCM 기준으로 조정
-            if rms < 10000:  # PCM 16-bit 기준으로 조정
+            if rms < AudioConfig.MAX_RMS_VALUE:  # PCM 16-bit 기준으로 조정
                 self.noise_samples.append(rms)
             
             # 충분한 샘플이 모이면 평균 계산
@@ -372,7 +375,7 @@ class AudioProcessor:
         # ======================================
         
         # 비정상적으로 큰 RMS 값 필터링 (PCM 기준으로 조정)
-        if rms > 20000:  # PCM 16-bit 기준으로 조정
+        if rms > AudioConfig.MAX_RMS_VALUE:  # PCM 16-bit 기준으로 조정
             logger.warning(f"⚠️  비정상적인 RMS 무시: {rms}")
             self.voice_chunks = 0
             return
@@ -583,94 +586,14 @@ async def transcribe_audio_realtime(audio_data: bytes, audio_processor=None) -> 
         return "", 0
 
 
-async def convert_and_send_audio(websocket: WebSocket, stream_sid: str, text: str) -> float:
-    """
-    단일 문장을 TTS 변환하고 Twilio로 즉시 전송 (병렬 처리용)
-    
-    이 함수는 LLM 스트리밍 중 문장이 완성될 때마다 호출됩니다.
-    사용자는 AI가 말하는 것을 거의 실시간으로 들을 수 있습니다.
-    
-    처리 플로우:
-    1. 문장 TTS 변환 (비동기)
-    2. WAV → mulaw 변환
-    3. Base64 인코딩
-    4. Twilio WebSocket으로 전송
-    
-    Args:
-        websocket: Twilio WebSocket 연결
-        stream_sid: Twilio Stream SID
-        text: 변환할 문장
-    
-    Returns:
-        float: 이 문장의 예상 재생 시간 (초)
-    """
-    try:
-        import wave
-        import io
-        
-        # 1. TTS 변환 (문장 단위, 비동기)
-        audio_data, tts_time = await cartesia_tts_service.text_to_speech_sentence(text)
-        
-        if not audio_data:
-            logger.warning(f"⚠️ TTS 변환 실패, 건너뜀: {text[:30]}...")
-            return 0.0
-        
-        # 2. WAV → mulaw 변환 (Twilio 호환)
-        wav_io = io.BytesIO(audio_data)
-        with wave.open(wav_io, 'rb') as wav_file:
-            channels = wav_file.getnchannels()
-            sample_width = wav_file.getsampwidth()
-            framerate = wav_file.getframerate()
-            pcm_data = wav_file.readframes(wav_file.getnframes())
-        
-        # Stereo → Mono 변환 (필요 시)
-        if channels == 2:
-            pcm_data = audioop.tomono(pcm_data, sample_width, 1, 1)
-        
-        # 샘플레이트 변환: Twilio는 8kHz 요구
-        if framerate != 8000:
-            pcm_data, _ = audioop.ratecv(pcm_data, sample_width, 1, framerate, 8000, None)
-        
-        # PCM → mulaw 변환
-        mulaw_data = audioop.lin2ulaw(pcm_data, 2)
-        
-        # ⭐ 재생 시간 계산 (mulaw 8kHz: 1초 = 8000 bytes)
-        playback_duration = len(mulaw_data) / 8000.0
-        
-        # 3. Base64 인코딩
-        audio_base64 = base64.b64encode(mulaw_data).decode('utf-8')
-        
-        # 4. Twilio로 청크 단위 전송
-        chunk_size = 8000  # 8KB 청크
-        for i in range(0, len(audio_base64), chunk_size):
-            chunk = audio_base64[i:i + chunk_size]
-            
-            message = {
-                "event": "media",
-                "streamSid": stream_sid,
-                "media": {
-                    "payload": chunk
-                }
-            }
-            
-            await websocket.send_text(json.dumps(message))
-            await asyncio.sleep(0.02)  # 부드러운 재생을 위한 작은 지연
-        
-        logger.info(f"✅ 문장 전송 완료 ({tts_time:.2f}초, 재생: {playback_duration:.2f}초): {text[:30]}...")
-        
-        return playback_duration  # 재생 시간 반환
-        
-    except Exception as e:
-        logger.error(f"❌ 오디오 변환/전송 오류: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
-        return 0.0
+# convert_and_send_audio 함수는 AudioConverter 클래스로 이동됨
 
 
 async def process_fallback_response(
     websocket: WebSocket,
     stream_sid: str,
     user_text: str,
+    audio_converter: AudioConverter,
     audio_processor=None
 ) -> str:
     """폴백 모드 - 기존 방식으로 처리"""
@@ -681,7 +604,7 @@ async def process_fallback_response(
         response_text = await llm_service.generate_response(user_text, [])
         
         if response_text:
-            await send_audio_to_twilio_with_tts(websocket, stream_sid, response_text, audio_processor)
+            await audio_converter.send_audio_to_twilio_with_tts(websocket, stream_sid, response_text, audio_processor)
             return response_text
         
         return ""
@@ -694,6 +617,7 @@ async def process_streaming_response(
     stream_sid: str,
     user_text: str,
     conversation_history: list,
+    audio_converter: AudioConverter,
     audio_processor=None
 ) -> str:
     """
@@ -724,7 +648,7 @@ async def process_streaming_response(
         
         if not call_sid or call_sid not in call_sessions:
             logger.error("❌ 통화 세션을 찾을 수 없음 - 폴백 모드 사용")
-            return await process_fallback_response(websocket, stream_sid, user_text, audio_processor)
+            return await process_fallback_response(websocket, stream_sid, user_text, audio_converter, audio_processor)
         
         session = call_sessions[call_sid]
         
@@ -734,7 +658,7 @@ async def process_streaming_response(
             connection_success = await session.initialize_cartesia_connection()
             if not connection_success:
                 logger.error("❌ WebSocket 재연결 실패 - 폴백 모드 사용")
-                return await process_fallback_response(websocket, stream_sid, user_text, audio_processor)
+                return await process_fallback_response(websocket, stream_sid, user_text, audio_converter, audio_processor)
         
         logger.info("🚀 실시간 스트리밍 파이프라인 시작 (사전 연결된 WebSocket 사용)")
         
@@ -1131,201 +1055,7 @@ async def try_send_in_order(
             next_send_index[0] += 1
 
 
-async def _generate_welcome_audio_async(text: str) -> bytes:
-    """환영 메시지 오디오를 미리 생성"""
-    try:
-        start_time = time.time()
-        
-        # 이미 준비된 토큰 사용
-        access_token = await cartesia_tts_service._get_access_token()
-        
-        # 최적화된 HTTP 클라이언트 사용
-        client = await cartesia_tts_service._get_http_client()
-        
-        response = await client.post(
-            "https://api.cartesia.ai/tts/bytes",
-            headers={
-                "Authorization": f"Bearer {access_token}",
-                "Content-Type": "application/json",
-                "Cartesia-Version": "2025-04-16",
-            },
-            json={
-                "model_id": cartesia_tts_service.model,
-                "transcript": text,
-                "voice": {
-                    "mode": "id",
-                    "id": cartesia_tts_service.voice
-                },
-                "language": "ko",
-                "output_format": {
-                    "container": "raw",
-                    "encoding": "pcm_s16le",
-                    "sample_rate": 24000
-                }
-            }
-        )
-        
-        response.raise_for_status()
-        pcm_data = response.content
-        
-        # 오디오 변환 (μ-law 변환은 필수이므로 유지)
-        resampled_pcm, _ = audioop.ratecv(
-            pcm_data, 2, 1, 24000, 8000, None
-        )
-        mulaw_data = audioop.lin2ulaw(resampled_pcm, 2)
-        
-        tts_time = time.time() - start_time
-        logger.info(f"✅ [환영] 사전 생성 완료 ({tts_time:.2f}초)")
-        
-        return mulaw_data
-        
-    except Exception as e:
-        logger.error(f"❌ 환영 메시지 사전 생성 실패: {e}")
-        return None
-
-async def _send_prepared_audio_to_twilio(
-    websocket: WebSocket, 
-    stream_sid: str, 
-    mulaw_data: bytes, 
-    audio_processor=None
-):
-    """준비된 오디오를 Twilio로 전송"""
-    if not mulaw_data:
-        return
-    
-    try:
-        if audio_processor:
-            audio_processor.start_bot_speaking()
-        
-        # Base64 인코딩 및 전송
-        audio_base64 = base64.b64encode(mulaw_data).decode('utf-8')
-        
-        logger.info(f"📤 [환영] 즉시 전송: {len(mulaw_data)} bytes")
-        
-        # 청크 단위 전송 (지연 시간 단축)
-        chunk_size = 8000
-        for i in range(0, len(audio_base64), chunk_size):
-            chunk = audio_base64[i:i + chunk_size]
-            
-            message = {
-                "event": "media",
-                "streamSid": stream_sid,
-                "media": {"payload": chunk}
-            }
-            
-            await websocket.send_text(json.dumps(message))
-            await asyncio.sleep(0.01)  # 0.02초 → 0.01초로 단축
-        
-        logger.info(f"✅ [환영] 즉시 전송 완료")
-        
-    except Exception as e:
-        logger.error(f"❌ 준비된 오디오 전송 실패: {e}")
-    finally:
-        if audio_processor:
-            audio_processor.stop_bot_speaking()
-
-
-async def send_audio_to_twilio_with_tts(websocket: WebSocket, stream_sid: str, text: str, audio_processor=None):
-    """
-    TTS Service를 사용하여 텍스트를 음성으로 변환 후 Twilio WebSocket으로 전송
-    WAV → mulaw 변환 포함
-    
-    Args:
-        websocket: Twilio WebSocket 연결
-        stream_sid: Twilio Stream SID
-        text: 변환할 텍스트
-        audio_processor: AudioProcessor 인스턴스 (에코 방지용)
-    """
-    import httpx
-    
-    if audio_processor:
-        audio_processor.start_bot_speaking()
-    
-    logger.info(f"🎙️ [환영] 빠른 음성 생성: {text}")
-    
-    try:
-        start_time = time.time()
-        
-        # Cartesia HTTP API 직접 호출 (최적화된 클라이언트 사용)
-        access_token = await cartesia_tts_service._get_access_token()
-        client = await cartesia_tts_service._get_http_client()
-        
-        try:
-            response = await client.post(
-                "https://api.cartesia.ai/tts/bytes",
-                headers={
-                    "Authorization": f"Bearer {access_token}",
-                    "Content-Type": "application/json",
-                    "Cartesia-Version": "2025-04-16",
-                },
-                json={
-                    "model_id": cartesia_tts_service.model,
-                    "transcript": text,
-                    "voice": {
-                        "mode": "id",
-                        "id": cartesia_tts_service.voice
-                    },
-                    "language": "ko",
-                    "output_format": {
-                        "container": "raw",
-                        "encoding": "pcm_s16le",
-                        "sample_rate": 24000
-                    }
-                }
-            )
-            
-            response.raise_for_status()
-            pcm_data = response.content
-            
-            tts_time = time.time() - start_time
-            logger.info(f"✅ [환영] TTS 완료 ({tts_time:.2f}초)")
-            
-            if not pcm_data or len(pcm_data) == 0:
-                logger.error("❌ 음성 데이터 없음")
-                return
-            
-            # PCM 24kHz → 8kHz mulaw (Twilio)
-            resampled_pcm, _ = audioop.ratecv(
-                pcm_data, 2, 1, 24000, 8000, None
-            )
-            mulaw_data = audioop.lin2ulaw(resampled_pcm, 2)
-            
-            # Base64 인코딩 및 전송
-            audio_base64 = base64.b64encode(mulaw_data).decode('utf-8')
-            
-            logger.info(f"📤 [환영] 음성 전송 시작: {len(mulaw_data)} bytes")
-            
-            # 청크 단위 전송
-            chunk_size = 8000
-            for i in range(0, len(audio_base64), chunk_size):
-                chunk = audio_base64[i:i + chunk_size]
-                
-                message = {
-                    "event": "media",
-                    "streamSid": stream_sid,
-                    "media": {"payload": chunk}
-                }
-                
-                await websocket.send_text(json.dumps(message))
-                # await asyncio.sleep(0.02)
-            
-            total_time = time.time() - start_time
-            logger.info(f"✅ [환영] 전송 완료 (총 {total_time:.2f}초)")
-            
-        except httpx.HTTPStatusError as e:
-            logger.error(f"❌ Cartesia API 오류: {e.response.status_code}")
-            logger.error(f"응답: {e.response.text}")
-        except Exception as e:
-            logger.error(f"❌ 환영 메시지 전송 오류: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-    except Exception as e:
-        logger.error(f"❌ 전체 환영 메시지 처리 오류: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
-    finally:
-        if audio_processor:
-            audio_processor.stop_bot_speaking()
+# TTS 관련 함수들은 AudioConverter 클래스로 이동됨
 
 # Lifespan 이벤트 (startup/shutdown)
 @asynccontextmanager
@@ -1668,370 +1398,14 @@ async def media_stream_handler(
     """
     Twilio Media Streams WebSocket 핸들러 (RTZR 실시간 STT 적용)
     
-    실시간 오디오 데이터 양방향 처리 (RTZR 기반):
-    1. RTZR 실시간 STT 스트리밍 시작
-    2. 부분 인식 결과를 LLM에 백그라운드 전송 (대기 상태 유지)
-    3. 최종 인식 결과(is_final: true) 감지
-    4. 즉시 AI 응답 생성 및 TTS 재생
-    5. 통화 종료 시 전체 대화 내용 저장
-    
-    RTZR 실시간 STT → LLM (백그라운드) → 최종 문장 → 즉시 응답
+    TwilioMediaStreamHandler 클래스를 사용하여 깔끔하게 분리된 구조
     """
-    await websocket.accept()
-    logger.info("📞 Twilio WebSocket 연결됨")
+    # AudioConverter 인스턴스 생성
+    audio_converter = AudioConverter(cartesia_tts_service)
     
-    call_sid = None
-    stream_sid = None
-    rtzr_stt = None  # RTZR 실시간 STT
-    llm_collector = None  # LLM 부분 결과 수집기
-    call_log = None  # DB에 저장할 CallLog 객체
-    elderly_id = None  # 통화 대상 어르신 ID
-    partial_response_context = ""  # 부분 결과 컨텍스트 (LLM 메모리)
-    
-    try:
-        async for message in websocket.iter_text():
-            data = json.loads(message)
-            event_type = data.get('event')
-            
-            # ========== 1. 스트림 시작 ==========
-            if event_type == 'start':
-                call_sid = data['start']['callSid']
-                stream_sid = data['start']['streamSid']
-                
-                # customParameters에서 elderly_id 추출 (Twilio 통화 시작 시 전달)
-                custom_params = data['start'].get('customParameters', {})
-                elderly_id = custom_params.get('elderly_id', 'unknown')
-                
-                active_connections[call_sid] = websocket
-                
-                # 대화 세션 초기화 (LLM 대화 히스토리 관리)
-                if call_sid not in conversation_sessions:
-                    conversation_sessions[call_sid] = []
-                
-                # RTZR 실시간 STT 초기화
-                rtzr_stt = RTZRRealtimeSTT()
-                
-                # LLM 부분 결과 수집기 초기화 (백그라운드 전송)
-                async def llm_partial_callback(partial_text: str):
-                    """부분 인식 결과를 LLM에 백그라운드 전송"""
-                    nonlocal partial_response_context, call_sid
-                    # LLM이 미리 준비할 수 있도록 컨텍스트 업데이트
-                    partial_response_context = partial_text
-                    logger.debug(f"💭 [LLM 백그라운드] 부분 결과 업데이트: {partial_text}")
-                
-                llm_collector = LLMPartialCollector(llm_partial_callback)
-                
-                # DB에 통화 시작 기록 저장 (status: initiated만)
-                try:
-                    from app.models.call import CallLog, CallStatus
-                    db = next(get_db())
-                    
-                    # 기존 CallLog가 있는지 확인
-                    existing_call = db.query(CallLog).filter(CallLog.call_id == call_sid).first()
-                    
-                    if not existing_call:
-                        call_log = CallLog(
-                            call_id=call_sid,
-                            elderly_id=elderly_id,
-                            call_status=CallStatus.INITIATED,
-                            twilio_call_sid=call_sid
-                        )
-                        db.add(call_log)
-                        db.commit()
-                        db.refresh(call_log)
-                        logger.info(f"✅ DB에 통화 시작 기록 저장: {call_sid}")
-                    else:
-                        logger.info(f"⏭️  이미 존재하는 통화 기록: {call_sid}")
-                    
-                    db.close()
-                except Exception as e:
-                    logger.error(f"❌ 통화 시작 기록 저장 실패: {e}")
-                
-                logger.info(f"┌{'─'*58}┐")
-                logger.info(f"│ 🎙️  Twilio 통화 시작 (RTZR STT)                     │")
-                logger.info(f"│ Call SID: {call_sid:43} │")
-                logger.info(f"│ Stream SID: {stream_sid:41} │")
-                logger.info(f"│ Elderly ID: {elderly_id:41} │")
-                logger.info(f"└{'─'*58}┘")
-                
-                # 🚀 개선: 통화 세션 생성 및 Cartesia WebSocket 연결
-                call_session = CallSession(call_sid, stream_sid)
-                call_sessions[call_sid] = call_session
-                
-                # Cartesia WebSocket 연결을 백그라운드에서 시작
-                connection_success = await call_session.initialize_cartesia_connection()
-                
-                if connection_success:
-                    logger.info("🎉 Cartesia WebSocket 연결 준비 완료 - 즉시 응답 가능!")
-                else:
-                    logger.warning("⚠️ Cartesia WebSocket 연결 실패 - 폴백 모드 사용")
-                
-                # 🚀 개선: 토큰과 환영 메시지를 병렬로 준비
-                welcome_text = "안녕하세요! 무엇을 도와드릴까요?"
-                
-                # 토큰 미리 준비 (백그라운드)
-                token_task = asyncio.create_task(
-                    cartesia_tts_service._get_access_token()
-                )
-                
-                # 환영 메시지 TTS 미리 생성 (병렬 처리)
-                welcome_audio_task = asyncio.create_task(
-                    _generate_welcome_audio_async(welcome_text)
-                )
-                
-                # 모든 준비 작업 완료 대기
-                await asyncio.gather(token_task, welcome_audio_task)
-                
-                # 준비된 오디오로 즉시 전송
-                await _send_prepared_audio_to_twilio(
-                    websocket, stream_sid, welcome_audio_task.result(), None
-                )
-                
-                # ========== RTZR 스트리밍 시작 ==========
-                logger.info("🎤 RTZR 실시간 STT 스트리밍 시작")
-                
-                # STT 응답 속도 측정 변수
-                last_partial_time = None
-                
-                async def process_rtzr_results():
-                    """RTZR 인식 결과 처리"""
-                    nonlocal last_partial_time, call_sid
-                    stt_complete_time = None
-                    try:
-                        async for result in rtzr_stt.start_streaming():
-                            # ✅ 통화 종료 체크
-                            if call_sid not in conversation_sessions:
-                                logger.info("⚠️ 통화 종료로 인한 RTZR 처리 중단")
-                                break
-                            
-                            if not result or 'text' not in result:
-                                continue
-                            
-                            text = result.get('text', '')
-                            is_final = result.get('is_final', False)
-                            partial_only = result.get('partial_only', False)
-                            
-                            current_time = time.time()
-                            
-                            # 부분 결과는 무시하되 시간 기록
-                            if partial_only and text:
-                                logger.debug(f"📝 [RTZR 부분 인식] {text}")
-                                last_partial_time = current_time
-                                continue
-                            
-                            # 최종 결과 처리
-                            if is_final and text:
-                                # ✅ 통화 종료 체크
-                                if call_sid not in conversation_sessions:
-                                    logger.info("⚠️ 통화 종료로 인한 최종 처리 중단")
-                                    break
-                                # STT 응답 속도 측정
-                                # 말이 끝난 시점부터 최종 인식까지의 시간
-                                if last_partial_time:
-                                    speech_to_final_delay = current_time - last_partial_time
-                                    logger.info(f"⏱️ [STT 지연] 말 끝 → 최종 인식: {speech_to_final_delay:.2f}초")
-                                
-                                # 최종 발화 완료
-                                logger.info(f"✅ [RTZR 최종] {text}")
-                                
-                                # 최종 인식 시점 기록 (LLM 전달 전 시간 측정용)
-                                stt_complete_time = current_time
-                                
-                                # 종료 키워드 확인
-                                if '그랜비 통화를 종료합니다' in text:
-                                    logger.info(f"🛑 종료 키워드 감지")
-                                    
-                                    # 대화 세션에 사용자 메시지 추가
-                                    if call_sid not in conversation_sessions:
-                                        conversation_sessions[call_sid] = []
-                                    conversation_sessions[call_sid].append({"role": "user", "content": text})
-                                    
-                                    goodbye_text = "그랜비 통화를 종료합니다. 감사합니다. 좋은 하루 보내세요!"
-                                    conversation_sessions[call_sid].append({"role": "assistant", "content": goodbye_text})
-                                    
-                                    logger.info("🔊 [TTS] 종료 메시지 전송")
-                                    await send_audio_to_twilio_with_tts(websocket, stream_sid, goodbye_text, None)
-                                    await asyncio.sleep(2)
-                                    await websocket.close()
-                                    return
-                                
-                                # 발화 처리 사이클
-                                cycle_start = time.time()
-                                logger.info(f"{'='*60}")
-                                logger.info(f"🎯 발화 완료 → 즉시 응답 생성")
-                                logger.info(f"{'='*60}")
-                                
-                                # 대화 세션에 사용자 메시지 추가
-                                if call_sid not in conversation_sessions:
-                                    conversation_sessions[call_sid] = []
-                                conversation_sessions[call_sid].append({"role": "user", "content": text})
-                                
-                                conversation_history = conversation_sessions[call_sid]
-                                
-                                # LLM 전달까지의 시간 측정
-                                llm_delivery_start = time.time()
-                                if stt_complete_time:
-                                    stt_to_llm_delay = llm_delivery_start - stt_complete_time
-                                    logger.info(f"⏱️ [지연시간] 최종 인식 → LLM 전달: {stt_to_llm_delay:.2f}초")
-                                
-                                # ✅ AI 응답 시작 (사용자 입력 차단)
-                                rtzr_stt.start_bot_speaking()
-                                
-                                # LLM 응답 생성
-                                logger.info("🤖 [LLM] 응답 생성 시작")
-                                llm_start_time = time.time()
-                                ai_response = await process_streaming_response(
-                                    websocket,
-                                    stream_sid,
-                                    text,
-                                    conversation_history,
-                                    None
-                                )
-                                llm_end_time = time.time()
-                                llm_duration = llm_end_time - llm_start_time
-                                
-                                # ✅ AI 응답 종료 (1초 후 사용자 입력 재개)
-                                rtzr_stt.stop_bot_speaking()
-                                
-                                logger.info("✅ [LLM] 응답 생성 완료")
-                                
-                                # 전체 처리 시간 로깅
-                                if stt_complete_time:
-                                    total_delay = llm_end_time - stt_complete_time
-                                    logger.info(f"⏱️ [전체 지연] 최종 인식 → LLM 완료: {total_delay:.2f}초 (LLM 응답 생성: {llm_duration:.2f}초)")
-                                
-                                # AI 응답을 대화 세션에 추가 (안전하게)
-                                try:
-                                    if ai_response and ai_response.strip():
-                                        # conversation_sessions에 여전히 존재하는지 확인
-                                        if call_sid in conversation_sessions:
-                                            conversation_sessions[call_sid].append({"role": "assistant", "content": ai_response})
-                                        
-                                        # 대화 히스토리 관리
-                                        if call_sid in conversation_sessions and len(conversation_sessions[call_sid]) > 20:
-                                            conversation_sessions[call_sid] = conversation_sessions[call_sid][-20:]
-                                    
-                                    total_cycle_time = time.time() - cycle_start
-                                    logger.info(f"⏱️  전체 응답 사이클: {total_cycle_time:.2f}초")
-                                    logger.info(f"{'='*60}\n\n")
-                                except KeyError:
-                                    # 세션이 이미 삭제된 경우 (통화 종료)
-                                    logger.info("⚠️  세션이 이미 삭제됨 (통화 종료 중)")
-                                    break
-                                except Exception as e:
-                                    logger.error(f"❌ 응답 저장 오류: {e}")
-                                
-                            elif text:
-                                # 부분 결과를 LLM에 백그라운드 전송
-                                llm_collector.add_partial(text)
-                                logger.debug(f"📝 [RTZR 부분] {text}")
-                    
-                    except Exception as e:
-                        logger.error(f"❌ RTZR 처리 오류: {e}")
-                        import traceback
-                        logger.error(traceback.format_exc())
-                
-                # RTZR 스트리밍 태스크 시작 (백그라운드)
-                rtzr_task = asyncio.create_task(process_rtzr_results())
-                
-            # ========== 2. 오디오 데이터 수신 및 RTZR로 전송 ==========
-            elif event_type == 'media':
-                if rtzr_stt and rtzr_stt.is_active:
-                    # ✅ AI 응답 중이면 오디오 무시 (에코 방지)
-                    if rtzr_stt.is_bot_speaking:
-                        continue
-                    
-                    # ✅ AI 응답 종료 후 1초 대기 중이면 무시
-                    if rtzr_stt.bot_silence_delay > 0:
-                        rtzr_stt.bot_silence_delay -= 1
-                        continue
-                    
-                    # Base64 디코딩 (Twilio는 mulaw 8kHz로 전송)
-                    audio_payload = base64.b64decode(data['media']['payload'])
-                    
-                    # RTZR로 오디오 청크 전송
-                    await rtzr_stt.add_audio_chunk(audio_payload)
-                        
-            # ========== 3. 스트림 종료 ==========
-            elif event_type == 'stop':
-                logger.info(f"\n{'='*60}")
-                logger.info(f"📞 Twilio 통화 종료 - Call: {call_sid}")
-                logger.info(f"{'='*60}")
-                
-                # 🚀 개선: Cartesia WebSocket 연결 정리
-                if call_sid in call_sessions:
-                    await call_sessions[call_sid].close()
-                    del call_sessions[call_sid]
-                    logger.info("🔄 Cartesia WebSocket 연결 정리 완료")
-                
-                # ✅ RTZR 백그라운드 태스크 취소
-                if 'rtzr_task' in locals() and rtzr_task:
-                    logger.info("🛑 RTZR 백그라운드 태스크 취소 중...")
-                    rtzr_task.cancel()
-                    try:
-                        await asyncio.wait_for(rtzr_task, timeout=2.0)
-                    except (asyncio.CancelledError, asyncio.TimeoutError):
-                        logger.info("✅ RTZR 백그라운드 태스크 종료 완료")
-                
-                # RTZR 스트리밍 종료
-                if rtzr_stt:
-                    await rtzr_stt.end_streaming()
-                    logger.info("🛑 RTZR 스트리밍 종료")
-                
-                # ✅ 대화 세션을 DB에 저장 (함수 호출)
-                if call_sid in conversation_sessions:
-                    conversation = conversation_sessions[call_sid]
-                    
-                    # 대화 내용 출력
-                    if conversation:
-                        logger.info(f"\n📋 전체 대화 내용:")
-                        logger.info(f"─" * 60)
-                        for msg in conversation:
-                            role = "👤 사용자" if msg['role'] == 'user' else "🤖 AI"
-                            logger.info(f"{role}: {msg['content']}")
-                        logger.info(f"─" * 60)
-                    
-                    await save_conversation_to_db(call_sid, conversation)
-                
-                logger.info(f"┌{'─'*58}┐")
-                logger.info(f"│ ✅ Twilio 통화 정리 완료                               │")
-                logger.info(f"└{'─'*58}┘\n")
-                break
-                
-    except WebSocketDisconnect:
-        logger.info(f"📞 Twilio WebSocket 연결 해제 (Call: {call_sid})")
-        # WebSocket 연결 해제 시에도 정리
-        if call_sid and call_sid in call_sessions:
-            await call_sessions[call_sid].close()
-            del call_sessions[call_sid]
-            logger.info("🔄 Cartesia WebSocket 연결 정리 완료 (연결 해제)")
-    except Exception as e:
-        logger.error(f"❌ Twilio WebSocket 오류: {str(e)}")
-        # 오류 발생 시에도 정리
-        if call_sid and call_sid in call_sessions:
-            await call_sessions[call_sid].close()
-            del call_sessions[call_sid]
-            logger.info("🔄 Cartesia WebSocket 연결 정리 완료 (오류 발생)")
-        import traceback
-        logger.error(traceback.format_exc())
-    finally:
-        # ✅ 연결 종료 시 항상 DB 저장 (핵심!)
-        # 사용자가 직접 전화를 끊어도 대화 내용 보존
-        if call_sid and call_sid in conversation_sessions:
-            try:
-                conversation = conversation_sessions[call_sid]
-                await save_conversation_to_db(call_sid, conversation)
-                logger.info(f"🔄 Finally 블록에서 DB 저장 완료: {call_sid}")
-            except Exception as e:
-                logger.error(f"❌ Finally 블록 DB 저장 실패: {e}")
-        
-        # 정리 작업 (메모리에서 제거)
-        if call_sid and call_sid in active_connections:
-            del active_connections[call_sid]
-        if call_sid and call_sid in conversation_sessions:
-            del conversation_sessions[call_sid]
-        
-        logger.info(f"🧹 WebSocket 정리 완료: {call_sid}")
+    # TwilioMediaStreamHandler 인스턴스 생성 및 처리
+    handler = TwilioMediaStreamHandler(websocket, db, audio_converter)
+    await handler.handle_stream()
 
 
 @app.post("/api/twilio/call-status", tags=["Twilio"])
