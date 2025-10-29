@@ -31,6 +31,11 @@ import time
 import json
 import sys
 import os
+from datetime import datetime
+from pytz import timezone
+
+# 한국 시간대 (KST, UTC+9)
+KST = timezone('Asia/Seoul')
 
 # 캐싱 서비스 import (직접 import로 __init__.py 우회)
 import importlib.util
@@ -50,11 +55,13 @@ class SimpleLLMTest:
     def __init__(self, api_key: str):
         self.client = OpenAI(api_key=api_key)
         self.model = "gpt-4o"
-        # 응답 캐싱 서비스
-        self.response_cache = get_response_cache()
+        # 캐싱 제거: 단답형 응답도 매번 LLM으로 생성
+        # self.response_cache = get_response_cache()  # 사용하지 않음
         
         # GRANDBY AI LLM System Prompt: Warm Neighbor Friend Character
         self.elderly_care_prompt = """You are a warm neighbor friend to Korean seniors. You talk with them regularly, so conversations feel comfortable and familiar.
+
+⚠️ CRITICAL: Keep responses SHORT - Maximum 2 sentences or 60 characters. Be concise and natural, avoid cutting off mid-sentence.
 
 [Character - Warm Neighbor Friend]
 - Chat casually and warmly like a friend who meets regularly with the elderly
@@ -111,7 +118,8 @@ class SimpleLLMTest:
 2. React naturally like a friend ("그러게요", "아이고", "그렇구나")
 3. Naturally bring up time or situation-appropriate comments
 4. React personally while remembering previous conversations
-5. Never end the conversation yourself"""
+5. NEVER end the conversation yourself - Wait for the elderly to explicitly say they want to end the call
+6. Do NOT say goodbye, "안녕히 가세요", "다음에 다시 전화 드릴게요" unless the elderly explicitly wants to end the conversation"""
     
     def _post_process_response(self, response: str, user_message: str) -> str:
         """
@@ -119,28 +127,44 @@ class SimpleLLMTest:
         """
         import re
         
-        # 1. 문장 수 제한 (최대 2문장)
+        # 1. 문장 수 제한 (최대 2문장) + 문자 수 제한 (최대 60자) - 적절한 길이 유지
+        # 문장 끝 마침표/느낌표/물음표로 분리
         sentences = re.split(r'([.!?])\s*', response.strip())
         
         # 구두점과 문장을 다시 합치기
         complete_sentences = []
         for i in range(0, len(sentences)-1, 2):
-            if sentences[i]:
+            if sentences[i]:  # 빈 문장 제외
                 if i+1 < len(sentences) and sentences[i+1] in '.!?':
                     complete_sentences.append(sentences[i] + sentences[i+1])
                 else:
                     complete_sentences.append(sentences[i])
         
-        # 마지막 문장이 구두점 없이 끝나는 경우
+        # 마지막 문장이 구두점 없이 끝나는 경우 처리
         if len(sentences) > 0 and sentences[-1] and sentences[-1] not in '.!?':
             complete_sentences.append(sentences[-1])
         
-        # 2문장으로 제한
-        if len(complete_sentences) > 2:
-            response = " ".join(complete_sentences[:2])
-            logger.info(f"🔧 문장 수 제한: {len(complete_sentences)}개 → 2개")
+        # 2문장으로 제한 + 60자 제한 (통화 중 끊김 방지)
+        max_sentences = 2
+        max_chars = 60
+        
+        if len(complete_sentences) > max_sentences:
+            # 2문장까지만 사용, 문자 수도 체크
+            limited_sentences = complete_sentences[:max_sentences]
+            response = " ".join(limited_sentences)
+            if len(response) > max_chars:
+                # 60자 초과 시 첫 번째 문장만 사용
+                response = complete_sentences[0]
+                logger.info(f"🔧 문장 수/길이 제한: {len(complete_sentences)}개 → 1개, {len(' '.join(limited_sentences))}자 → {len(response)}자")
+            else:
+                logger.info(f"🔧 문장 수 제한: {len(complete_sentences)}개 → {max_sentences}개")
         else:
             response = " ".join(complete_sentences)
+            # 문자 수 초과 체크 (2문장 이하여도)
+            if len(response) > max_chars:
+                # 첫 번째 문장만 사용
+                response = complete_sentences[0] if complete_sentences else response[:max_chars]
+                logger.info(f"🔧 문자 수 제한: {len(' '.join(complete_sentences))}자 → {len(response)}자")
         
         # 마지막에 구두점이 없으면 추가
         if response and response[-1] not in '.!?':
@@ -157,8 +181,10 @@ class SimpleLLMTest:
             (r'할.*수.*있습니다', '금지: AI 봇 표현'),
             (r'통화.*종료|전화.*끊겠', '금지: AI 봇 표현'),
             
-            # 대화 끝내려는 시도
-            (r'(그럼|그러면|이제)\s*(끊|통화\s*종료|전화\s*끊|헤어지|그만)', '금지: 대화 끝내기'),
+            # 대화 끝내려는 시도 (강화: AI가 먼저 통화를 끊으려는 모든 표현 차단)
+            (r'(그럼|그러면|이제|나중에|다음에|다음번에)\s*(끊|통화\s*종료|전화\s*끊|헤어지|그만|끊을|끊고)', '금지: 대화 끝내기'),
+            (r'(그럼|그러면|이제|나중에|다음에)\s*(다시|또)\s*(연락|전화|통화)', '금지: 대화 끝내기'),
+            (r'(안녕히|잘\s*가|다음에\s*봐)', '금지: 대화 끝내기 (어르신이 직접 말하지 않는 한)'),
             
             # 금융/개인정보
             (r'(계좌|비밀번호|카드|돈|금융|송금|이체)', '금지: 금융정보'),
@@ -212,6 +238,35 @@ class SimpleLLMTest:
         else:
             return "그러시구나. 잘 듣고 있어요."
     
+    def _get_korean_time_now(self) -> datetime:
+        """현재 한국 시간(KST) 반환"""
+        return datetime.now(KST)
+    
+    def _get_korean_time_info(self) -> str:
+        """현재 한국 시간/날짜 정보를 문자열로 반환"""
+        kst_now = self._get_korean_time_now()
+        
+        # 요일 한글 변환
+        weekdays_kr = ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일']
+        weekday_kr = weekdays_kr[kst_now.weekday()]
+        
+        # 오전/오후 구분
+        hour = kst_now.hour
+        if hour < 12:
+            time_period = "오전"
+            hour_display = hour
+        elif hour == 12:
+            time_period = "오후"
+            hour_display = 12
+        else:
+            time_period = "오후"
+            hour_display = hour - 12
+        
+        # 분 표시
+        minute = kst_now.minute
+        
+        return f"{kst_now.year}년 {kst_now.month}월 {kst_now.day}일 {weekday_kr} {time_period} {hour_display}시 {minute}분"
+    
     def generate_response(self, user_message: str, conversation_history: list = None):
         """
         응답 생성 및 시간 측정 (llm_service.py와 동일한 로직)
@@ -226,15 +281,16 @@ class SimpleLLMTest:
         try:
             start_time = time.time()
             
-            # ⚡ 캐시 체크 (초고속 응답)
-            cached_response = self.response_cache.get_cached_response(user_message)
-            if cached_response:
-                elapsed_time = time.time() - start_time
-                logger.info(f"⚡ 캐시 적중! 즉시 응답 ({elapsed_time:.3f}초)")
-                return cached_response, elapsed_time
+            # ⚡ 캐시 제거: 단답형 응답도 매번 LLM으로 생성 (어르신이 단순 대답할 수 있으므로)
+            # 캐시는 어르신의 다양한 응답 패턴을 제한할 수 있어 사용하지 않음
             
             # 메시지 구성 (llm_service.py와 동일)
             messages = [{"role": "system", "content": self.elderly_care_prompt}]
+            
+            # 한국 시간 정보 추가 (시간/날짜 질문 대응)
+            korean_time_info = self._get_korean_time_info()
+            messages.append({"role": "system", "content": f"[현재 시간] {korean_time_info} - 시간/날짜 질문 시 정확히 이 정보를 사용하세요"})
+            logger.info(f"🕐 현재 한국 시간: {korean_time_info}")
             
             # 대화 기록이 있으면 추가 (최근 4턴 = 8개 메시지, 맥락 유지)
             if conversation_history:
@@ -247,7 +303,7 @@ class SimpleLLMTest:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                max_tokens=40,  # 2문장 충분 (더 빠름)
+                max_tokens=50,  # 2문장 또는 60자 정도 (충분한 길이 확보)
                 temperature=0.5,  # 속도 우선 (0.3은 느림)
             )
             

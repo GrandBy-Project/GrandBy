@@ -9,8 +9,12 @@ import logging
 import time
 import json
 from datetime import datetime
+from pytz import timezone
 
 logger = logging.getLogger(__name__)
+
+# 한국 시간대 (KST, UTC+9)
+KST = timezone('Asia/Seoul')
 
 
 class LLMService:
@@ -24,7 +28,7 @@ class LLMService:
         # GRANDBY AI LLM System Prompt: Warm Neighbor Friend Character
         self.elderly_care_prompt = """You are a warm neighbor friend to Korean seniors. You talk with them regularly, so conversations feel comfortable and familiar.
 
-⚠️ CRITICAL: Keep responses SHORT - Maximum 30 characters or 1 short sentence. Be concise and brief.
+⚠️ CRITICAL: Keep responses SHORT - Maximum 2 sentences or 60 characters. Be concise and natural, avoid cutting off mid-sentence.
 
 [Character - Warm Neighbor Friend]
 - Chat casually and warmly like a friend who meets regularly with the elderly
@@ -81,7 +85,8 @@ class LLMService:
 2. React naturally like a friend ("그러게요", "아이고", "그렇구나")
 3. Naturally bring up time or situation-appropriate comments
 4. React personally while remembering previous conversations
-5. Never end the conversation yourself"""
+5. NEVER end the conversation yourself - Wait for the elderly to explicitly say they want to end the call
+6. Do NOT say goodbye, "안녕히 가세요", "다음에 다시 전화 드릴게요" unless the elderly explicitly wants to end the conversation"""
     
     def _post_process_response(self, response: str, user_message: str) -> str:
         """
@@ -96,7 +101,7 @@ class LLMService:
         """
         import re
         
-        # 1. 문장 수 제한 (최대 1문장) - 강제 적용 (통화 중 끊김 방지)
+        # 1. 문장 수 제한 (최대 2문장) + 문자 수 제한 (최대 60자) - 적절한 길이 유지
         # 문장 끝 마침표/느낌표/물음표로 분리
         sentences = re.split(r'([.!?])\s*', response.strip())
         
@@ -113,12 +118,27 @@ class LLMService:
         if len(sentences) > 0 and sentences[-1] and sentences[-1] not in '.!?':
             complete_sentences.append(sentences[-1])
         
-        # 1문장으로 제한 (강제) - 통화 중 끊김 방지
-        if len(complete_sentences) > 1:
-            response = complete_sentences[0]  # 첫 번째 문장만 사용
-            logger.info(f"🔧 문장 수 제한: {len(complete_sentences)}개 → 1개 (통화 끊김 방지)")
+        # 2문장으로 제한 + 60자 제한 (통화 중 끊김 방지)
+        max_sentences = 2
+        max_chars = 60
+        
+        if len(complete_sentences) > max_sentences:
+            # 2문장까지만 사용, 문자 수도 체크
+            limited_sentences = complete_sentences[:max_sentences]
+            response = " ".join(limited_sentences)
+            if len(response) > max_chars:
+                # 60자 초과 시 첫 번째 문장만 사용
+                response = complete_sentences[0]
+                logger.info(f"🔧 문장 수/길이 제한: {len(complete_sentences)}개 → 1개, {len(' '.join(limited_sentences))}자 → {len(response)}자")
+            else:
+                logger.info(f"🔧 문장 수 제한: {len(complete_sentences)}개 → {max_sentences}개")
         else:
             response = " ".join(complete_sentences)
+            # 문자 수 초과 체크 (2문장 이하여도)
+            if len(response) > max_chars:
+                # 첫 번째 문장만 사용
+                response = complete_sentences[0] if complete_sentences else response[:max_chars]
+                logger.info(f"🔧 문자 수 제한: {len(' '.join(complete_sentences))}자 → {len(response)}자")
         
         # 마지막에 구두점이 없으면 추가
         if response and response[-1] not in '.!?':
@@ -135,8 +155,10 @@ class LLMService:
             (r'할.*수.*있습니다', '금지: AI 봇 표현'),
             (r'통화.*종료|전화.*끊겠', '금지: AI 봇 표현'),
             
-            # 대화 끝내려는 시도
-            (r'(그럼|그러면|이제)\s*(끊|통화\s*종료|전화\s*끊|헤어지|그만)', '금지: 대화 끝내기'),
+            # 대화 끝내려는 시도 (강화: AI가 먼저 통화를 끊으려는 모든 표현 차단)
+            (r'(그럼|그러면|이제|나중에|다음에|다음번에)\s*(끊|통화\s*종료|전화\s*끊|헤어지|그만|끊을|끊고)', '금지: 대화 끝내기'),
+            (r'(그럼|그러면|이제|나중에|다음에)\s*(다시|또)\s*(연락|전화|통화)', '금지: 대화 끝내기'),
+            (r'(안녕히|잘\s*가|다음에\s*봐)', '금지: 대화 끝내기 (어르신이 직접 말하지 않는 한)'),
             
             # 금융/개인정보
             (r'(계좌|비밀번호|카드|돈|금융|송금|이체)', '금지: 금융정보'),
@@ -395,18 +417,63 @@ JSON 형식으로 응답:
             return " | ".join(context_parts)
         return ""
     
+    def _get_korean_time_now(self) -> datetime:
+        """
+        현재 한국 시간(KST) 반환
+        
+        Returns:
+            datetime: 한국 시간대의 현재 시간
+        """
+        return datetime.now(KST)
+    
+    def _get_korean_time_info(self) -> str:
+        """
+        현재 한국 시간/날짜 정보를 문자열로 반환
+        
+        Returns:
+            str: "2025년 10월 29일 오후 5시 58분" 형식
+        """
+        kst_now = self._get_korean_time_now()
+        
+        # 요일 한글 변환
+        weekdays_kr = ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일']
+        weekday_kr = weekdays_kr[kst_now.weekday()]
+        
+        # 오전/오후 구분
+        hour = kst_now.hour
+        if hour < 12:
+            time_period = "오전"
+            hour_display = hour
+        elif hour == 12:
+            time_period = "오후"
+            hour_display = 12
+        else:
+            time_period = "오후"
+            hour_display = hour - 12
+        
+        # 분 표시
+        minute = kst_now.minute
+        
+        return f"{kst_now.year}년 {kst_now.month}월 {kst_now.day}일 {weekday_kr} {time_period} {hour_display}시 {minute}분"
+    
     def _get_time_based_context(self, current_time: datetime = None) -> str:
         """
         현재 시간을 기반으로 시간대별 맞춤 응답 컨텍스트 생성
         
         Args:
-            current_time: 현재 시간 (기본값: 현재 시간)
+            current_time: 현재 시간 (기본값: 한국 현재 시간)
             
         Returns:
             str: 시간대별 응답 지시사항
         """
         if not current_time:
-            current_time = datetime.now()
+            current_time = self._get_korean_time_now()
+        else:
+            # 시간대 정보가 없으면 한국 시간대로 변환
+            if current_time.tzinfo is None:
+                current_time = KST.localize(current_time)
+            else:
+                current_time = current_time.astimezone(KST)
         
         hour = current_time.hour
         weekday = current_time.weekday()  # 0=월요일, 6=일요일
@@ -469,15 +536,9 @@ JSON 형식으로 응답:
         if weekday_info:
             time_context += f" {weekday_info}"
         
-        # 구체적인 시간 언급
-        if hour < 12:
-            time_context += f" 현재 {hour}시입니다."
-        elif hour < 18:
-            time_context += f" 현재 오후 {hour-12}시입니다."
-        elif hour < 22:
-            time_context += f" 현재 저녁 {hour-12}시입니다."
-        else:
-            time_context += f" 현재 밤 {hour-12}시입니다."
+        # 구체적인 시간 언급 (한국 시간 기준)
+        korean_time_info = self._get_korean_time_info()
+        time_context += f" 현재 한국 시간: {korean_time_info} (정확히 이 시간을 기준으로 답변하세요)"
         
         return time_context
     
@@ -524,11 +585,13 @@ JSON 형식으로 응답:
                     messages.append({"role": "system", "content": f"[개인화 맥락] {personalization_context}"})
                     logger.info(f"👤 개인화 맥락 적용: {len(contextual_info.get('keywords', []))}개 키워드")
             
-            # 시간대별 맞춤 응답 컨텍스트
+            # 시간대별 맞춤 응답 컨텍스트 (한국 시간 기준)
             time_context = self._get_time_based_context()
+            korean_time_info = self._get_korean_time_info()
             if time_context:
                 messages.append({"role": "system", "content": f"[시간대별 컨텍스트] {time_context}"})
-                logger.info(f"🕐 시간대별 컨텍스트 적용")
+                messages.append({"role": "system", "content": f"[현재 시간] {korean_time_info} - 시간/날짜 질문 시 정확히 이 정보를 사용하세요"})
+                logger.info(f"🕐 시간대별 컨텍스트 적용: {korean_time_info}")
             
             # 오늘 일정이 있으면 컨텍스트로 추가 (최대 2개, 더 간결하게)
             if today_schedule:
@@ -552,12 +615,12 @@ JSON 형식으로 응답:
             # 현재 사용자 메시지 추가
             messages.append({"role": "user", "content": user_message})
             
-            # GPT-4o-mini로 응답 생성 (Speed Priority)
+            # GPT-4o로 응답 생성 (적절한 길이 유지)
             api_start_time = time.time()
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                max_tokens=25,  # 짧고 간결하게 (1문장 권장)
+                max_tokens=50,  # 2문장 또는 60자 정도 (충분한 길이 확보)
                 temperature=0.5,  # 속도 우선 (0.3은 느림)
             )
             
@@ -631,11 +694,13 @@ JSON 형식으로 응답:
                     messages.append({"role": "system", "content": f"[개인화 맥락] {personalization_context}"})
                     logger.info(f"👤 개인화 맥락 적용: {len(contextual_info.get('keywords', []))}개 키워드")
             
-            # 시간대별 맞춤 응답 컨텍스트
+            # 시간대별 맞춤 응답 컨텍스트 (한국 시간 기준)
             time_context = self._get_time_based_context()
+            korean_time_info = self._get_korean_time_info()
             if time_context:
                 messages.append({"role": "system", "content": f"[시간대별 컨텍스트] {time_context}"})
-                logger.info(f"🕐 시간대별 컨텍스트 적용")
+                messages.append({"role": "system", "content": f"[현재 시간] {korean_time_info} - 시간/날짜 질문 시 정확히 이 정보를 사용하세요"})
+                logger.info(f"🕐 시간대별 컨텍스트 적용: {korean_time_info}")
             
             # 오늘 일정이 있으면 컨텍스트로 추가 (최대 2개, 더 간결하게)
             if today_schedule:
@@ -665,7 +730,7 @@ JSON 형식으로 응답:
             stream = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                max_tokens=25,  # 짧고 간결하게 (1문장 권장)
+                max_tokens=50,  # 2문장 또는 60자 정도 (충분한 길이 확보)
                 temperature=0.5,  # 속도 우선 (0.3은 느림)
                 stream=True  # ⭐ 핵심: 스트리밍 활성화
             )
