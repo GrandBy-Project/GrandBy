@@ -33,6 +33,7 @@ from app.services.ai_call.cartesia_tts_service import cartesia_tts_service
 from app.services.ai_call.llm_service import LLMService
 from app.services.ai_call.twilio_service import TwilioService
 from app.services.ai_call.rtzr_stt_realtime import RTZRRealtimeSTT, LLMPartialCollector
+from app.services.ai_call.naver_clova_tts_service import naver_clova_tts_service
 
 # 로거 설정 (시간 포함)
 logging.basicConfig(
@@ -452,7 +453,7 @@ class AudioProcessor:
     
     def stop_bot_speaking(self):
         """AI 응답 종료 - 1초 대기 후 사용자 입력 재개"""
-        self.bot_silence_delay = 50  # 50개 청크 = 1초 대기
+        self.bot_silence_delay = 5
         self.is_bot_speaking = False
         logger.info("🤖 [에코 방지] AI 응답 종료 - 1초 후 사용자 입력 재개")
     
@@ -609,7 +610,7 @@ async def convert_and_send_audio(websocket: WebSocket, stream_sid: str, text: st
         import io
         
         # 1. TTS 변환 (문장 단위, 비동기)
-        audio_data, tts_time = await cartesia_tts_service.text_to_speech_sentence(text)
+        audio_data, tts_time = await naver_clova_tts_service.text_to_speech_bytes(text)
         
         if not audio_data:
             logger.warning(f"⚠️ TTS 변환 실패, 건너뜀: {text[:30]}...")
@@ -736,38 +737,17 @@ async def process_streaming_response(
                 logger.error("❌ WebSocket 재연결 실패 - 폴백 모드 사용")
                 return await process_fallback_response(websocket, stream_sid, user_text, audio_processor)
         
-        logger.info("🚀 실시간 스트리밍 파이프라인 시작 (사전 연결된 WebSocket 사용)")
+        logger.info("🚀 실시간 스트리밍 파이프라인 시작 (Naver Clova TTS 사용)")
         
-        # 사전 연결된 WebSocket 사용
-        cartesia_ws = session.cartesia_ws
-        
-        # 병렬 태스크 생성
-        # 1. LLM 텍스트 생성 + Cartesia 전송
-        # 2. Cartesia 음성 수신 + Twilio 전송
-        
-        send_task = asyncio.create_task(
-            llm_to_cartesia_sender(
-                cartesia_ws,
-                user_text,
-                conversation_history,
-                session.context_id,
-                full_response,
-                pipeline_start
-            )
+        # Naver Clova TTS 스트리밍 파이프라인
+        playback_duration = await llm_to_clova_tts_pipeline(
+            websocket,
+            stream_sid,
+            user_text,
+            conversation_history,
+            full_response,
+            pipeline_start
         )
-        
-        receive_task = asyncio.create_task(
-            cartesia_to_twilio_forwarder(
-                cartesia_ws,
-                websocket,
-                stream_sid,
-                pipeline_start
-            )
-        )
-        
-        # 두 태스크 완료 대기
-        send_result = await send_task
-        playback_duration = await receive_task
         
         pipeline_time = time.time() - pipeline_start
         
@@ -777,8 +757,8 @@ async def process_streaming_response(
         logger.info("=" * 60)
         
         # 재생 완료 대기
-        if playback_duration > 0:
-            await asyncio.sleep(playback_duration * 1.1)
+        # if playback_duration > 0:
+        #     await asyncio.sleep(playback_duration * 0.9)
         
         return "".join(full_response)
         
@@ -790,6 +770,204 @@ async def process_streaming_response(
     finally:
         if audio_processor:
             audio_processor.stop_bot_speaking()
+
+
+async def llm_to_clova_tts_pipeline(
+    websocket: WebSocket,
+    stream_sid: str,
+    user_text: str,
+    conversation_history: list,
+    full_response: list,
+    pipeline_start: float
+) -> float:
+    """
+    LLM 텍스트 생성 → Naver Clova TTS → Twilio 전송 파이프라인
+    
+    핵심:
+    - LLM이 문장을 생성하는 즉시 Clova TTS로 변환
+    - 변환된 음성을 즉시 Twilio로 전송
+    - 실시간 스트리밍 효과
+    """
+    import re
+    import base64
+    import audioop
+    
+    llm_service = LLMService()
+    
+    try:
+        sentence_buffer = ""
+        chunk_count = 0
+        sentence_count = 0
+        first_audio_sent = False
+        total_playback_duration = 0.0
+        
+        logger.info("🤖 [LLM] Naver Clova TTS 스트리밍 시작")
+        
+        async for chunk in llm_service.generate_response_streaming(user_text, conversation_history):
+            chunk_count += 1
+            sentence_buffer += chunk
+            full_response.append(chunk)
+            
+            # 문장 종료 감지
+            should_send = False
+            
+            # 1. 명확한 문장 종료
+            if re.search(r'[.!?\n。！？]', chunk):
+                should_send = True
+            
+            # 2. 쉼표로 자연스럽게 끊기
+            elif len(sentence_buffer) > 40 and re.search(r'[,，]', sentence_buffer[-5:]):
+                should_send = True
+            
+            # 3. 너무 긴 문장 강제 분할
+            elif len(sentence_buffer) > 80:
+                should_send = True
+            
+            if should_send and sentence_buffer.strip():
+                sentence = sentence_buffer.strip()
+                sentence_count += 1
+                
+                elapsed = time.time() - pipeline_start
+                
+                if not first_audio_sent:
+                    logger.info(f"⚡ [첫 문장] +{elapsed:.2f}초에 생성 완료!")
+                    first_audio_sent = True
+                
+                logger.info(f"🔊 [문장 {sentence_count}] TTS 변환 시작: {sentence[:40]}...")
+                
+                # Naver Clova TTS로 즉시 변환
+                audio_data, tts_time = await naver_clova_tts_service.text_to_speech_bytes(sentence)
+                
+                if audio_data:
+                    elapsed_tts = time.time() - pipeline_start
+                    logger.info(f"✅ [문장 {sentence_count}] TTS 완료 (+{elapsed_tts:.2f}초, {tts_time:.2f}초)")
+                    
+                    # WAV → mulaw 변환 및 Twilio 전송
+                    playback_duration = await send_clova_audio_to_twilio(
+                        websocket,
+                        stream_sid,
+                        audio_data,
+                        sentence_count,
+                        pipeline_start
+                    )
+                    
+                    total_playback_duration += playback_duration
+                else:
+                    logger.warning(f"⚠️ [문장 {sentence_count}] TTS 실패, 건너뜀")
+                
+                sentence_buffer = ""
+        
+        # 마지막 문장 처리
+        if sentence_buffer.strip():
+            sentence_count += 1
+            logger.info(f"🔊 [마지막 문장] TTS 변환 시작: {sentence_buffer.strip()[:40]}...")
+            
+            audio_data, tts_time = await naver_clova_tts_service.text_to_speech_bytes(sentence_buffer.strip())
+            
+            if audio_data:
+                playback_duration = await send_clova_audio_to_twilio(
+                    websocket,
+                    stream_sid,
+                    audio_data,
+                    sentence_count,
+                    pipeline_start
+                )
+                total_playback_duration += playback_duration
+            else:
+                logger.warning("⚠️ 마지막 문장 TTS 실패, 건너뜀")
+        
+        logger.info(f"✅ [전체] 총 {sentence_count}개 문장 처리 완료")
+        
+        return total_playback_duration
+        
+    except Exception as e:
+        logger.error(f"❌ Naver Clova TTS 파이프라인 오류: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return 0.0
+
+
+async def send_clova_audio_to_twilio(
+    websocket: WebSocket,
+    stream_sid: str,
+    audio_data: bytes,
+    sentence_index: int,
+    pipeline_start: float
+) -> float:
+    """
+    Clova TTS로 생성된 WAV 오디오를 Twilio로 전송
+    
+    Args:
+        websocket: Twilio WebSocket
+        stream_sid: Twilio Stream SID
+        audio_data: WAV 오디오 데이터
+        sentence_index: 문장 번호
+        pipeline_start: 파이프라인 시작 시간
+    
+    Returns:
+        float: 재생 시간
+    """
+    import wave
+    import io
+    import base64
+    import audioop
+    
+    try:
+        # WAV 파일 파싱
+        wav_io = io.BytesIO(audio_data)
+        with wave.open(wav_io, 'rb') as wav_file:
+            channels = wav_file.getnchannels()
+            sample_width = wav_file.getsampwidth()
+            framerate = wav_file.getframerate()
+            n_frames = wav_file.getnframes()
+            pcm_data = wav_file.readframes(n_frames)
+        
+        logger.info(f"🎵 [문장 {sentence_index}] 원본: {framerate}Hz, {channels}ch")
+        
+        # Stereo → Mono 변환
+        if channels == 2:
+            pcm_data = audioop.tomono(pcm_data, sample_width, 1, 1)
+        
+        # 샘플레이트 변환: 8kHz (Twilio 요구사항)
+        if framerate != 8000:
+            pcm_data, _ = audioop.ratecv(pcm_data, sample_width, 1, framerate, 8000, None)
+        
+        # PCM → mulaw 변환
+        mulaw_data = audioop.lin2ulaw(pcm_data, 2)
+        
+        # 재생 시간 계산
+        playback_duration = len(mulaw_data) / 8000.0
+        
+        # Base64 인코딩
+        audio_base64 = base64.b64encode(mulaw_data).decode('utf-8')
+        
+        # Twilio로 청크 단위 전송
+        chunk_size = 8000  # 8KB 청크
+        chunk_count = 0
+        
+        for i in range(0, len(audio_base64), chunk_size):
+            chunk = audio_base64[i:i + chunk_size]
+            chunk_count += 1
+            
+            message = {
+                "event": "media",
+                "streamSid": stream_sid,
+                "media": {"payload": chunk}
+            }
+            
+            await websocket.send_text(json.dumps(message))
+        
+        elapsed = time.time() - pipeline_start
+        logger.info(f"📤 [문장 {sentence_index}] Twilio 전송 완료 ({chunk_count} 청크, +{elapsed:.2f}초)")
+        
+        return playback_duration
+        
+    except Exception as e:
+        logger.error(f"❌ [문장 {sentence_index}] Twilio 전송 오류: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return 0.0
+
 
 async def llm_to_cartesia_sender(
     cartesia_ws,
@@ -991,10 +1169,7 @@ async def process_tts_and_send(
         
         # TTS 변환 (타임아웃 10초)
         try:
-            audio_data, tts_time = await asyncio.wait_for(
-                cartesia_tts_service.text_to_speech_sentence(sentence),
-                timeout=10.0
-            )
+            audio_data, tts_time = await naver_clova_tts_service.text_to_speech_bytes(sentence)
         except asyncio.TimeoutError:
             logger.error(f"문장[{index}] TTS 타임아웃")
             return 0.0
@@ -1957,6 +2132,12 @@ async def media_stream_handler(
                 logger.info(f"\n{'='*60}")
                 logger.info(f"📞 Twilio 통화 종료 - Call: {call_sid}")
                 logger.info(f"{'='*60}")
+                
+                # 🚀 개선: Cartesia WebSocket 연결 정리
+                if call_sid in call_sessions:
+                    await call_sessions[call_sid].close()
+                    del call_sessions[call_sid]
+                    logger.info("🔄 Cartesia WebSocket 연결 정리 완료")
                 
                 # ✅ RTZR 백그라운드 태스크 취소
                 if 'rtzr_task' in locals() and rtzr_task:

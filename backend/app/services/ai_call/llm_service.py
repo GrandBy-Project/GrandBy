@@ -5,6 +5,7 @@ OpenAI GPT-4o-mini API 사용 (대화 생성 및 감정 분석)
 
 from openai import OpenAI
 from app.config import settings
+from app.services.ai_call.response_cache import get_response_cache
 import logging
 import time
 import json
@@ -19,22 +20,140 @@ class LLMService:
         self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
         # GPT-4o-mini 모델 사용 (빠르고 경제적)
         self.model = "gpt-4o-mini"
+        # 응답 캐싱 서비스
+        self.response_cache = get_response_cache()
         
-        # 어르신을 위한 기본 시스템 프롬프트
-        self.elderly_care_prompt = """당신은 어르신들의 외로움을 달래주는 따뜻한 AI 친구입니다.
-다음 역할을 수행합니다:
-1. 친근하고 존댓말을 사용하여 대화합니다
-2. 어르신의 감정을 이해하고 공감합니다
-3. 약 복용, 식사, 운동 등 건강 상태를 자연스럽게 확인합니다
-4. 대화는 짧고 명확하게, 한 번에 하나의 질문만 합니다
-5. 긍정적이고 따뜻한 분위기를 유지합니다
+        # GRANDBY AI LLM System Prompt: Empathetic Friend (EN)
+        self.elderly_care_prompt = """You are a warm friend for Korean seniors. Always respond in KOREAN using natural honorifics (e.g., ~세요, ~셔요, ~네요, ~어요, ~죠). Keep it to 1–2 sentences only.
 
-대화 예시:
-- "오늘은 어떻게 지내셨어요?"
-- "점심은 맛있게 드셨나요?"
-- "오늘 아침 약은 드셨나요?"
-- "날씨가 좋으니 잠깐 산책하시는 건 어떠세요?"
-"""
+[Core]
+- First acknowledge the user's feelings about the situation.
+- Ask ONE question only when user explicitly needs help or asks for something.
+- Most of the time, just empathize without asking.
+- Do NOT give advice by default.
+
+[Examples - Empathize WITHOUT questions]
+"TV 고장났어" → "TV 고장나셔서 많이 답답하시겠어요."
+"대청소 했어" → "대청소를 하셨군요! 수고하셨어요."
+"길 잊어버렸어" → "집에 오는 길이 잠시 헷갈리셨군요. 얼마나 놀라셨을지 걱정돼요."
+
+[Examples - Ask ONLY when user asks for help]
+"어떤 약 먹어야 해?" → "약은 의사 선생님과 상의하시는 게 좋아요."
+"뭘 해야 할까?" → "지금은 어떻게 생각하고 계세요?"
+
+[Do NOT]
+- Ask questions when just empathizing is enough
+- Repeat same question pattern ("어떠세요?", "어떠신가요?", "어떻게 되셨어요?")
+- Ask abstract questions ("어떤/무슨/왜/언제", "~어떠신가요?")
+- Ignore the situation and switch topics
+- Give advice/solutions
+- End the conversation yourself"""
+    
+    def _post_process_response(self, response: str, user_message: str) -> str:
+        """
+        GPT 응답 후처리: 규칙 강제 적용
+        
+        Args:
+            response: GPT가 생성한 원본 응답
+            user_message: 사용자 메시지 (맥락 파악용)
+        
+        Returns:
+            str: 규칙을 준수하도록 수정된 응답
+        """
+        import re
+        
+        # 1. 문장 수 제한 (최대 2문장) - 강제 적용
+        # 문장 끝 마침표/느낌표/물음표로 분리
+        sentences = re.split(r'([.!?])\s*', response.strip())
+        
+        # 구두점과 문장을 다시 합치기
+        complete_sentences = []
+        for i in range(0, len(sentences)-1, 2):
+            if sentences[i]:  # 빈 문장 제외
+                if i+1 < len(sentences) and sentences[i+1] in '.!?':
+                    complete_sentences.append(sentences[i] + sentences[i+1])
+                else:
+                    complete_sentences.append(sentences[i])
+        
+        # 마지막 문장이 구두점 없이 끝나는 경우 처리
+        if len(sentences) > 0 and sentences[-1] and sentences[-1] not in '.!?':
+            complete_sentences.append(sentences[-1])
+        
+        # 2문장으로 제한 (강제)
+        if len(complete_sentences) > 2:
+            response = " ".join(complete_sentences[:2])
+            logger.info(f"🔧 문장 수 제한: {len(complete_sentences)}개 → 2개")
+        else:
+            response = " ".join(complete_sentences)
+        
+        # 마지막에 구두점이 없으면 추가
+        if response and response[-1] not in '.!?':
+            response += "."
+        
+        # 2. 금지 패턴 감지 및 제거 (구체적 대화 품질 문제)
+        banned_patterns = [
+            # 대화 끝내려는 시도
+            (r'(그럼|그러면|이제)\s*(끊|통화\s*종료|전화\s*끊|헤어지|그만)', '금지: 대화 끝내기'),
+            
+            # 금융/개인정보
+            (r'(계좌|비밀번호|카드|돈|금융|송금|이체)', '금지: 금융정보'),
+            (r'(주민등록|주소|전화번호|개인정보)', '금지: 개인정보'),
+            
+            # 진단/강요
+            (r'(병원\s*가|진료\s*받|검사\s*받|의사\s*만나).*세요', '금지: 의료 강요'),
+            (r'(해야\s*해|하셔야|반드시|꼭\s*해)', '금지: 강요'),
+            
+            # 무거운 조언
+            (r'(계획|목표|운동|다이어트).*세요', '금지: 무거운 조언'),
+            
+            # 금지 키워드: 추상적 질문 (대화 품질 저하)
+            (r'어떤.*물어보', '금지: 추상적 질문'),
+            (r'무슨.*궁금', '금지: 추상적 질문'),
+            (r'어떤 기분인지', '금지: 추상적 질문'),
+            (r'어떻게.*되셨는지', '금지: 추상적 질문'),
+            (r'왜.*그런지', '금지: 원인 추궁'),
+            (r'언제.*되셨는지', '금지: 시간 추궁'),
+            (r'어떤.*보고.*신가요', '금지: 추상적 질문'),
+            (r'어떤.*프로그램.*봐', '금지: 추상적 질문'),
+        ]
+        
+        for pattern, reason in banned_patterns:
+            if re.search(pattern, response, re.IGNORECASE):
+                logger.warning(f"⚠️ {reason} 감지: '{response}' → 재생성 필요")
+                # 금지 패턴 발견 시 안전한 공감 응답으로 대체
+                response = self._generate_safe_response(user_message)
+                break
+        
+        # 3. 자연스러운 존댓말 확인 (강제 변환 X, 경고만)
+        jondaemal_markers = ['세요', '셔요', '습니다', '네요', '어요', '죠']
+        has_jondaemal = any(marker in response for marker in jondaemal_markers)
+        
+        if not has_jondaemal:
+            logger.warning(f"⚠️ 존댓말 미흡: '{response}'")
+        
+        return response
+    
+    def _generate_safe_response(self, user_message: str) -> str:
+        """
+        금지 패턴 발견 시 안전한 공감 응답 생성
+        
+        Args:
+            user_message: 사용자 메시지
+            
+        Returns:
+            str: 안전한 공감 응답
+        """
+        # 감정 키워드 기반 공감 응답
+        if any(word in user_message for word in ['아프', '힘들', '고통', '통증']):
+            return "많이 힘드시겠어요. 제가 옆에 있을게요."
+        elif any(word in user_message for word in ['외롭', '쓸쓸', '혼자', '아무도']):
+            return "외로우시군요. 저랑 얘기하시면 좋겠어요."
+        elif any(word in user_message for word in ['슬프', '우울', '속상', '걱정']):
+            return "속상하시겠어요. 무슨 일이 있으셨나요?"
+        elif any(word in user_message for word in ['자식', '아들', '딸', '손주']):
+            return "가족 보고 싶으시군요. 많이 생각나시겠어요."
+        else:
+            return "그러시군요. 제가 잘 듣고 있어요."
     
     def analyze_emotion(self, user_message: str):
         """
@@ -84,7 +203,81 @@ JSON 형식으로 응답:
             logger.error(f"❌ 감정 분석 실패: {e}")
             raise
     
-    async def generate_response_streaming(self, user_message: str, conversation_history: list = None):
+    def generate_response(self, user_message: str, conversation_history: list = None, today_schedule: list = None):
+        """
+        LLM 응답 생성 (실행 시간 측정 포함)
+        
+        Args:
+            user_message: 사용자의 메시지
+            conversation_history: 이전 대화 기록 (옵션)
+            today_schedule: 어르신의 오늘 일정 리스트 (옵션)
+                예: [{"task": "병원 검진", "time": "오전 10시"}, {"task": "약 먹기", "time": "오후 2시"}]
+        
+        Returns:
+            tuple: (AI 응답, 실행 시간)
+        """
+        try:
+            start_time = time.time()
+            logger.info(f"🤖 LLM 응답 생성 시작")
+            logger.info(f"📥 사용자 입력: {user_message}")
+            
+            # ⚡ 캐시 체크 (초고속 응답)
+            cached_response = self.response_cache.get_cached_response(user_message)
+            if cached_response:
+                elapsed_time = time.time() - start_time
+                logger.info(f"⚡ 캐시 적중! 즉시 응답 ({elapsed_time:.3f}초)")
+                logger.info(f"📤 캐시된 응답: {cached_response}")
+                return cached_response, elapsed_time
+            
+            # 메시지 구성
+            messages = [{"role": "system", "content": self.elderly_care_prompt}]
+            
+            # 오늘 일정이 있으면 컨텍스트로 추가 (최대 2개, 더 간결하게)
+            if today_schedule:
+                schedule_items = []
+                for item in today_schedule[:2]:  # 최대 2개만 (토큰 절약)
+                    task = item.get('task') or item.get('title')
+                    if task:
+                        time_str = item.get('time', '')
+                        schedule_items.append(f"{task}({time_str})" if time_str else task)
+                
+                if schedule_items:
+                    # 더 간결한 컨텍스트
+                    schedule_context = ", ".join(schedule_items)
+                    messages.append({"role": "system", "content": f"일정:{schedule_context}"})
+                    logger.info(f"📅 {schedule_context}")
+            
+            # 대화 기록이 있으면 추가 (최근 4턴 = 8개 메시지, 맥락 유지)
+            if conversation_history:
+                messages.extend(conversation_history[-8:])
+            
+            # 현재 사용자 메시지 추가
+            messages.append({"role": "user", "content": user_message})
+            
+            # GPT-4o-mini로 응답 생성 (Speed Priority)
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                max_tokens=40,  # 2문장 충분 (더 빠름)
+                temperature=0.5,  # 속도 우선 (0.3은 느림)
+            )
+            
+            ai_response = response.choices[0].message.content
+            
+            # 후처리: 규칙 강제 적용
+            ai_response = self._post_process_response(ai_response, user_message)
+            
+            elapsed_time = time.time() - start_time
+            
+            logger.info(f"✅ LLM 응답 생성 완료 (소요 시간: {elapsed_time:.2f}초)")
+            logger.info(f"📤 AI 응답: {ai_response}")
+            
+            return ai_response, elapsed_time
+        except Exception as e:
+            logger.error(f"❌ LLM 응답 생성 실패: {e}")
+            raise
+    
+    async def generate_response_streaming(self, user_message: str, conversation_history: list = None, today_schedule: list = None):
         """
         스트리밍 방식으로 LLM 응답 생성 (실시간 최적화)
         
@@ -95,6 +288,8 @@ JSON 형식으로 응답:
         Args:
             user_message: 사용자(어르신)의 메시지
             conversation_history: 이전 대화 기록 (옵션)
+            today_schedule: 어르신의 오늘 일정 리스트 (옵션)
+                예: [{"task": "병원 검진", "time": "오전 10시"}, {"task": "약 먹기", "time": "오후 2시"}]
         
         Yields:
             str: 생성된 텍스트 청크 (단어 또는 구 단위)
@@ -108,12 +303,36 @@ JSON 형식으로 응답:
             logger.info(f"🤖 LLM 스트리밍 응답 생성 시작")
             logger.info(f"📥 사용자 입력: {user_message}")
             
+            # ⚡ 캐시 체크 (초고속 응답)
+            cached_response = self.response_cache.get_cached_response(user_message)
+            if cached_response:
+                elapsed_time = time.time() - start_time
+                logger.info(f"⚡ 캐시 적중! 즉시 응답 ({elapsed_time:.3f}초)")
+                logger.info(f"📤 캐시된 응답: {cached_response}")
+                yield cached_response
+                return
+            
             # 메시지 구성
             messages = [{"role": "system", "content": self.elderly_care_prompt}]
             
-            # 대화 기록이 있으면 추가 (최근 5개만)
+            # 오늘 일정이 있으면 컨텍스트로 추가 (최대 2개, 더 간결하게)
+            if today_schedule:
+                schedule_items = []
+                for item in today_schedule[:2]:  # 최대 2개만 (토큰 절약)
+                    task = item.get('task') or item.get('title')
+                    if task:
+                        time_str = item.get('time', '')
+                        schedule_items.append(f"{task}({time_str})" if time_str else task)
+                
+                if schedule_items:
+                    # 더 간결한 컨텍스트
+                    schedule_context = ", ".join(schedule_items)
+                    messages.append({"role": "system", "content": f"일정:{schedule_context}"})
+                    logger.info(f"📅 {schedule_context}")
+            
+            # 대화 기록이 있으면 추가 (최근 4턴 = 8개 메시지, 맥락 유지)
             if conversation_history:
-                messages.extend(conversation_history[-5:])
+                messages.extend(conversation_history[-8:])
             
             # 현재 사용자 메시지 추가
             messages.append({"role": "user", "content": user_message})
@@ -123,8 +342,8 @@ JSON 형식으로 응답:
             stream = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                max_tokens=100,
-                temperature=0.8,
+                max_tokens=40,  # 2문장 충분 (더 빠름)
+                temperature=0.5,  # 속도 우선 (0.3은 느림)
                 stream=True  # ⭐ 핵심: 스트리밍 활성화
             )
             
@@ -271,3 +490,66 @@ JSON 형식으로 응답:
             except Exception as e:
                 logger.error(f"❌ 일정 추출 실패: {e}")
                 return '{"schedules": []}'
+    
+    def test_conversation_quality(self, test_messages: list):
+        """
+        대화 품질 테스트 함수 (개선 전후 비교용)
+        
+        Args:
+            test_messages: 테스트할 사용자 메시지 리스트
+        
+        Returns:
+            dict: 테스트 결과 (존댓말 준수율, 응답 적절성, 응답 속도)
+        """
+        results = {
+            "total_tests": len(test_messages),
+            "polite_responses": 0,
+            "appropriate_responses": 0,
+            "response_times": [],
+            "responses": []
+        }
+        
+        for i, message in enumerate(test_messages):
+            logger.info(f"🧪 테스트 {i+1}/{len(test_messages)}: {message}")
+            
+            # 응답 생성 및 시간 측정
+            response, elapsed_time = self.generate_response(message)
+            results["response_times"].append(elapsed_time)
+            
+            # 존댓말 체크 (한국어 존댓말 패턴)
+            polite_patterns = ["습니다", "세요", "시어요", "시지요", "시죠", "세요", "시네요", "시구나"]
+            is_polite = any(pattern in response for pattern in polite_patterns)
+            if is_polite:
+                results["polite_responses"] += 1
+            
+            # 응답 적절성 체크 (간단한 키워드 기반)
+            appropriate_keywords = ["어르신", "건강", "약", "식사", "운동", "날씨", "안녕", "어떻게", "지내"]
+            is_appropriate = any(keyword in response for keyword in appropriate_keywords)
+            if is_appropriate:
+                results["appropriate_responses"] += 1
+            
+            results["responses"].append({
+                "input": message,
+                "output": response,
+                "is_polite": is_polite,
+                "is_appropriate": is_appropriate,
+                "response_time": elapsed_time
+            })
+            
+            logger.info(f"📝 응답: {response}")
+            logger.info(f"⏱️ 응답 시간: {elapsed_time:.2f}초")
+            logger.info(f"🙏 존댓말 사용: {'✅' if is_polite else '❌'}")
+            logger.info(f"💬 적절한 응답: {'✅' if is_appropriate else '❌'}")
+            logger.info("-" * 50)
+        
+        # 최종 결과 계산
+        results["polite_rate"] = (results["polite_responses"] / results["total_tests"]) * 100
+        results["appropriate_rate"] = (results["appropriate_responses"] / results["total_tests"]) * 100
+        results["avg_response_time"] = sum(results["response_times"]) / len(results["response_times"])
+        
+        logger.info(f"📊 테스트 결과 요약:")
+        logger.info(f"   존댓말 준수율: {results['polite_rate']:.1f}%")
+        logger.info(f"   응답 적절성: {results['appropriate_rate']:.1f}%")
+        logger.info(f"   평균 응답 시간: {results['avg_response_time']:.2f}초")
+        
+        return results
