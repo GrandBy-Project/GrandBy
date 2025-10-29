@@ -25,6 +25,8 @@ class NaverClovaTTSService:
         self.speed = settings.NAVER_CLOVA_TTS_SPEED
         self.pitch = settings.NAVER_CLOVA_TTS_PITCH
         self.volume = settings.NAVER_CLOVA_TTS_VOLUME
+        self.alpha = settings.NAVER_CLOVA_TTS_ALPHA
+        self.emotion = settings.NAVER_CLOVA_TTS_EMOTION
 
         self.api_url = "https://naveropenapi.apigw.ntruss.com/tts-premium/v1/tts"
 
@@ -48,6 +50,8 @@ class NaverClovaTTSService:
         logger.info(f"  - Speed: {self.speed}")
         logger.info(f"  - Pitch: {self.pitch}")
         logger.info(f"  - Volume: {self.volume}")
+        logger.info(f"  - Alpha: {self.alpha}")
+        logger.info(f"  - Emotion: {self.emotion}")
     
     async def text_to_speech_bytes(self, text: str) -> Tuple[Optional[bytes], float]:
         try:
@@ -68,6 +72,8 @@ class NaverClovaTTSService:
                 "speed": str(self.speed),
                 "pitch": str(self.pitch),
                 "volume": str(self.volume),
+                "alpha": str(self.alpha),
+                "emotion": str(self.emotion),
                 "text": text,
                 "format": "wav"
             }
@@ -119,6 +125,8 @@ class NaverClovaTTSService:
                 "speed": str(self.speed),
                 "pitch": str(self.pitch),
                 "volume": str(self.volume),
+                "alpha": str(self.alpha),
+                "emotion": str(self.emotion),
                 "text": text,
                 "format": "wav"
             }

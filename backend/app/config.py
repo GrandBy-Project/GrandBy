@@ -118,10 +118,12 @@ class Settings(BaseSettings):
     # ==================== Naver Clova TTS ====================
     NAVER_CLOVA_CLIENT_ID: str
     NAVER_CLOVA_CLIENT_SECRET: str
-    NAVER_CLOVA_TTS_SPEAKER: str = "njiyun"  # mijin, jinho, clara, matt, shinji, meimei
+    NAVER_CLOVA_TTS_SPEAKER: str = "nara"  # mijin, jinho, clara, matt, shinji, meimei
     NAVER_CLOVA_TTS_SPEED: int = -1  # -5 ~ 5
-    NAVER_CLOVA_TTS_PITCH: int = -1  # -5 ~ 5
+    NAVER_CLOVA_TTS_PITCH: int = +1  # -5 ~ 5
+    NAVER_CLOVA_TTS_ALPHA: int = -1  # 0 ~ 2
     NAVER_CLOVA_TTS_VOLUME: int = 0  # -5 ~ 5
+    NAVER_CLOVA_TTS_EMOTION: int = 2  # 0 ~ 2 (감정 강도)
     
     model_config = SettingsConfigDict(
         env_file=".env",
