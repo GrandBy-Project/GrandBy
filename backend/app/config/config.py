@@ -3,6 +3,7 @@
 Pydantic Settings를 사용한 타입 안전 환경 변수 관리
 """
 
+import os
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List
 
@@ -113,6 +114,14 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = "uploads/profiles"
     MAX_IMAGE_SIZE: int = 5 * 1024 * 1024  # 5MB
     PROFILE_IMAGE_SIZE: tuple = (512, 512)  # 리사이징 크기
+    
+    # ==================== Naver Clova TTS ====================
+    NAVER_CLOVA_CLIENT_ID: str
+    NAVER_CLOVA_CLIENT_SECRET: str
+    NAVER_CLOVA_TTS_SPEAKER: str = "njiyun"  # mijin, jinho, clara, matt, shinji, meimei
+    NAVER_CLOVA_TTS_SPEED: int = -1  # -5 ~ 5
+    NAVER_CLOVA_TTS_PITCH: int = -1  # -5 ~ 5
+    NAVER_CLOVA_TTS_VOLUME: int = 0  # -5 ~ 5
     
     model_config = SettingsConfigDict(
         env_file=".env",
