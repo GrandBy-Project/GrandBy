@@ -153,7 +153,6 @@ async def process_streaming_response(
     stream_sid: str,
     user_text: str,
     conversation_history: list,
-    audio_converter: AudioConverter,
     audio_processor=None
 ) -> str:
     """
@@ -945,7 +944,7 @@ async def initiate_realtime_call(
         
         # Callback URL 설정 (WebSocket 연결)
         api_base_url = settings.API_BASE_URL
-        voice_url = f"https://{api_base_url}/api/twilio/voice"  # WebSocket 시작 엔드포인트
+        voice_url = f"https://{api_base_url}/api/twilio/voice?elderly_id={request.user_id}"  # WebSocket 시작 엔드포인트
         status_callback_url = f"https://{api_base_url}/api/twilio/call-status"
         
         logger.info(f"📞 실시간 AI 대화 통화 발신 시작: {request.to_number}")
@@ -999,18 +998,13 @@ async def initiate_realtime_call(
 
 
 @app.post("/api/twilio/voice", response_class=PlainTextResponse, tags=["Twilio"])
-async def voice_handler():
+async def voice_handler(request: Request):
     """
     Twilio 전화 연결 시 WebSocket 스트림 시작
     """
     response = VoiceResponse()
-    
-    # 환영 메시지
-    # response.say(
-    #     "안녕하세요. AI 어시스턴트에 연결되었습니다.",
-    #     language='ko-KR'
-    # )
-    
+    elderly_id = request.query_params.get("elderly_id", "unknown")
+
     # WebSocket 스트림 연결 설정
     if not settings.API_BASE_URL:
         logger.error("⚠️ API_BASE_URL이 설정되지 않았습니다!")
@@ -1022,9 +1016,14 @@ async def voice_handler():
     
     connect = Connect()
     stream = Stream(url=websocket_url)
+    
+    if elderly_id and elderly_id != "unknown":
+        stream.parameter(name="elderly_id", value=elderly_id)
+    
     connect.append(stream)
     response.append(connect)
     
+
     logger.info(f"🎙️ Twilio WebSocket 스트림 시작: {websocket_url}")
     return str(response)
 
@@ -1125,19 +1124,32 @@ async def media_stream_handler(
                 
                 # 🚀 개선: 토큰과 환영 메시지를 병렬로 준비
                 welcome_text = "안녕하세요! 무엇을 도와드릴까요?"
-                
-                # # 환영 메시지 TTS 미리 생성 (병렬 처리)
-                # welcome_audio_task = asyncio.create_task(
-                #     _generate_welcome_audio_async(welcome_text)
-                # )
-                
-                # # 모든 준비 작업 완료 대기
-                # await asyncio.gather(token_task, welcome_audio_task)
-                
-                # # 준비된 오디오로 즉시 전송
-                # await _send_prepared_audio_to_twilio(
-                #     websocket, stream_sid, welcome_audio_task.result(), None
-                # )
+
+                try:
+                    # 에코 방지
+                    if rtzr_stt:
+                        rtzr_stt.start_bot_speaking()
+
+                    audio_data, tts_time = await naver_clova_tts_service.text_to_speech_bytes(welcome_text)
+
+                    if audio_data:
+                        playback_duration = await send_clova_audio_to_twilio(
+                            websocket=websocket,
+                            stream_sid=stream_sid,
+                            audio_data=audio_data,
+                            sentence_index=0,
+                            pipeline_start=time.time()
+                        )
+
+                        if playback_duration > 0:
+                            await asyncio.sleep(playback_duration * 0.9)
+                    else:
+                        logger.warning(f" 환영 멘트 TTS 합성 실패, 건너뜀")
+                except Exception as e:
+                    logger.error(f"❌ 환영 멘트 TTS 합성 오류: {e}")
+                finally:
+                    if rtzr_stt:
+                        rtzr_stt.stop_bot_speaking()
                 
                 # ========== RTZR 스트리밍 시작 ==========
                 logger.info("🎤 RTZR 실시간 STT 스트리밍 시작")
