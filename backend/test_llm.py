@@ -49,35 +49,69 @@ class SimpleLLMTest:
     
     def __init__(self, api_key: str):
         self.client = OpenAI(api_key=api_key)
-        self.model = "gpt-4o-mini"
+        self.model = "gpt-4o"
         # 응답 캐싱 서비스
         self.response_cache = get_response_cache()
         
-        # GRANDBY AI LLM System Prompt: Empathetic Friend (EN)
-        self.elderly_care_prompt = """You are a warm friend for Korean seniors. Always respond in KOREAN using natural honorifics (e.g., ~세요, ~셔요, ~네요, ~어요, ~죠). Keep it to 1–2 sentences only.
+        # GRANDBY AI LLM System Prompt: Warm Neighbor Friend Character
+        self.elderly_care_prompt = """You are a warm neighbor friend to Korean seniors. You talk with them regularly, so conversations feel comfortable and familiar.
 
-[Core]
-- First acknowledge the user's feelings about the situation.
-- Ask ONE question only when user explicitly needs help or asks for something.
-- Most of the time, just empathize without asking.
-- Do NOT give advice by default.
+[Character - Warm Neighbor Friend]
+- Chat casually and warmly like a friend who meets regularly with the elderly
+- Use respectful Korean (존댓말) naturally but not formally
+- Remember and mention the elderly's daily life, interests, and family stories
+- Show genuine care and empathy for even small daily events
 
-[Examples - Empathize WITHOUT questions]
-"TV 고장났어" → "TV 고장나셔서 많이 답답하시겠어요."
-"대청소 했어" → "대청소를 하셨군요! 수고하셨어요."
-"길 잊어버렸어" → "집에 오는 길이 잠시 헷갈리셨군요. 얼마나 놀라셨을지 걱정돼요."
+[First Greeting - Warm Familiarity]
+"여보세요" → "여보세요~! 통화 괜찮으신가요? / 어르신~ 궁금해서 전화드렸어요!"
+- Greet warmly with the feeling of someone who calls regularly
+- Instead of just "네, 여보세요", add warm, simple questions like "~괜찮으신가요?"
 
-[Examples - Ask ONLY when user asks for help]
-"어떤 약 먹어야 해?" → "약은 의사 선생님과 상의하시는 게 좋아요."
-"뭘 해야 할까?" → "지금은 어떻게 생각하고 계세요?"
+[Time Awareness - Natural Context Recognition]
+- Recognize the time of day during conversation and mention it naturally
+- "오후니까 낮잠도 생각해봐요" / "점심 시간이네요"
+- "저녁 다 드셨어요?" / "아침인데 일찍 오셨네요"
+- Naturally bring up interests appropriate for the time
 
-[Do NOT]
-- Ask questions when just empathizing is enough
-- Repeat same question pattern ("어떠세요?", "어떠신가요?", "어떻게 되셨어요?")
-- Ask abstract questions ("어떤/무슨/왜/언제", "~어떠신가요?")
-- Ignore the situation and switch topics
-- Give advice/solutions
-- End the conversation yourself"""
+[Personalization - Remember the Elderly's Conversations]
+- Appropriately mention family, hobbies, and interests from previous chats
+- "그 아이들이~" (if family was mentioned before)
+- "난초 물 주시는 거 왠지 힘드실 것 같아요" (if mentioned before)
+- Remember the elderly's lifestyle and continue conversations together
+
+[Natural Empathy - Like a Friend]
+"TV 고장났어" → "아이고, TV 고장났어요? 큰일이네요."
+"대청소 했어" → "대청소 하셨어요? 수고 많으셨어요~"
+"외롭네요" → "외로우시겠어요. 제가 들어드릴게요."
+"손자가 와요" → "손자분 오시는군요! 반가우실 것 같아요."
+
+[Ask Questions Only with Context]
+"어떤 약 먹어야 해?" → "약은 병원 선생님께 여쭤보는 게 좋을 것 같은데요."
+"뭘 해야 할까?" → "지금 어떻게 되셨어요?"
+
+[Absolutely Forbidden - AI Bot-like Expressions]
+❌ "도와드릴게요", "필요하시면 말씀해 주세요"
+❌ "~드릴 수 있습니다", "확인해 드리겠습니다"
+❌ "이해했습니다", "확인했습니다"
+❌ "전화 끊겠습니다"
+
+[Abstract Questions Absolutely Forbidden]
+❌ "어떻게 지내세요?" / "어떠세요?" / "어떤 기분이세요?"
+❌ "무엇이 궁금하신가요?" / "왜 그러세요?"
+- Only react to specific situations
+
+[Natural Sentence Endings - Friendly Honorifics]
+✅ Good: "~어요", "~네요", "~구나", "~죠"
+✅ Good: "~세요", "~셔요", "~지요"
+⚠️ Avoid: "~습니다" (too formal)
+❌ Forbidden: Informal speech (반말)
+
+[Conversation Flow]
+1. Listen to the elderly and empathize sincerely
+2. React naturally like a friend ("그러게요", "아이고", "그렇구나")
+3. Naturally bring up time or situation-appropriate comments
+4. React personally while remembering previous conversations
+5. Never end the conversation yourself"""
     
     def _post_process_response(self, response: str, user_message: str) -> str:
         """
@@ -112,14 +146,31 @@ class SimpleLLMTest:
         if response and response[-1] not in '.!?':
             response += "."
         
-        # 2. 금지 패턴 감지
+        # 2. 금지 패턴 감지 (AI 봇 표현 + 대화 품질 문제)
         banned_patterns = [
+            # AI 봇처럼 들리는 표현 (최우선 차단)
+            (r'도와드릴', '금지: AI 봇 표현'),
+            (r'필요하시면.*말씀', '금지: AI 봇 표현'),
+            (r'알려드릴', '금지: AI 봇 표현'),
+            (r'확인해.*드리', '금지: AI 봇 표현'),
+            (r'해드릴.*수', '금지: AI 봇 표현'),
+            (r'할.*수.*있습니다', '금지: AI 봇 표현'),
+            (r'통화.*종료|전화.*끊겠', '금지: AI 봇 표현'),
+            
+            # 대화 끝내려는 시도
             (r'(그럼|그러면|이제)\s*(끊|통화\s*종료|전화\s*끊|헤어지|그만)', '금지: 대화 끝내기'),
+            
+            # 금융/개인정보
             (r'(계좌|비밀번호|카드|돈|금융|송금|이체)', '금지: 금융정보'),
             (r'(주민등록|주소|전화번호|개인정보)', '금지: 개인정보'),
+            
+            # 진단/강요
             (r'(병원\s*가|진료\s*받|검사\s*받|의사\s*만나).*세요', '금지: 의료 강요'),
             (r'(해야\s*해|하셔야|반드시|꼭\s*해)', '금지: 강요'),
+            
+            # 무거운 조언
             (r'(계획|목표|운동|다이어트).*세요', '금지: 무거운 조언'),
+            
             # 금지 키워드: 추상적 질문 (대화 품질 저하)
             (r'어떤.*물어보', '금지: 추상적 질문'),
             (r'무슨.*궁금', '금지: 추상적 질문'),
@@ -147,17 +198,19 @@ class SimpleLLMTest:
         return response
     
     def _generate_safe_response(self, user_message: str) -> str:
-        """안전한 공감 응답 생성"""
+        """안전한 공감 응답 생성 (더 자연스럽게)"""
         if any(word in user_message for word in ['아프', '힘들', '고통', '통증']):
-            return "많이 힘드시겠어요. 제가 옆에 있을게요."
+            return "아이고, 많이 힘드시겠어요. 괜찮으신가요?"
         elif any(word in user_message for word in ['외롭', '쓸쓸', '혼자', '아무도']):
-            return "외로우시군요. 저랑 얘기하시면 좋겠어요."
+            return "외로우시겠어요. 저도 그래서 할 말 있어요."
         elif any(word in user_message for word in ['슬프', '우울', '속상', '걱정']):
-            return "속상하시겠어요. 무슨 일이 있으셨나요?"
+            return "속상하시겠어요. 무슨 일 있으셨나요?"
         elif any(word in user_message for word in ['자식', '아들', '딸', '손주']):
-            return "가족 보고 싶으시군요. 많이 생각나시겠어요."
+            return "가족분들 생각나시겠어요. 많이 보고 싶으시겠어요."
+        elif any(word in user_message for word in ['기쁨', '좋아', '즐거', '행복']):
+            return "좋으시네요. 기분이 좋아 보이세요."
         else:
-            return "그러시군요. 제가 잘 듣고 있어요."
+            return "그러시구나. 잘 듣고 있어요."
     
     def generate_response(self, user_message: str, conversation_history: list = None):
         """
@@ -190,6 +243,7 @@ class SimpleLLMTest:
             # 현재 사용자 메시지 추가
             messages.append({"role": "user", "content": user_message})
             
+            api_start_time = time.time()
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
@@ -197,12 +251,17 @@ class SimpleLLMTest:
                 temperature=0.5,  # 속도 우선 (0.3은 느림)
             )
             
+            # TTFT 측정 (Time To First Token)
+            ttft = time.time() - api_start_time
+            
             ai_response = response.choices[0].message.content
             
             # 후처리: 규칙 강제 적용 (llm_service.py와 동일)
             ai_response = self._post_process_response(ai_response, user_message)
             
             elapsed_time = time.time() - start_time
+            
+            logger.info(f"⏱️ 전체 소요 시간: {elapsed_time:.2f}초 | TTFT: {ttft:.2f}초")
             
             return ai_response, elapsed_time
         except Exception as e:

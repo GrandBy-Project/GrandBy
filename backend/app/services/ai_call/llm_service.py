@@ -1,14 +1,14 @@
 """
 LLM (Large Language Model) 서비스
-OpenAI GPT-4o-mini API 사용 (대화 생성 및 감정 분석)
+OpenAI GPT-4o 사용 (대화 생성 및 감정 분석)
 """
 
 from openai import OpenAI
 from app.config import settings
-from app.services.ai_call.response_cache import get_response_cache
 import logging
 import time
 import json
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -19,35 +19,69 @@ class LLMService:
     def __init__(self):
         self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
         # GPT-4o-mini 모델 사용 (빠르고 경제적)
-        self.model = "gpt-4o-mini"
-        # 응답 캐싱 서비스
-        self.response_cache = get_response_cache()
+        self.model = "gpt-4o"
         
-        # GRANDBY AI LLM System Prompt: Empathetic Friend (EN)
-        self.elderly_care_prompt = """You are a warm friend for Korean seniors. Always respond in KOREAN using natural honorifics (e.g., ~세요, ~셔요, ~네요, ~어요, ~죠). Keep it to 1–2 sentences only.
+        # GRANDBY AI LLM System Prompt: Warm Neighbor Friend Character
+        self.elderly_care_prompt = """You are a warm neighbor friend to Korean seniors. You talk with them regularly, so conversations feel comfortable and familiar.
 
-[Core]
-- First acknowledge the user's feelings about the situation.
-- Ask ONE question only when user explicitly needs help or asks for something.
-- Most of the time, just empathize without asking.
-- Do NOT give advice by default.
+⚠️ CRITICAL: Keep responses SHORT - Maximum 30 characters or 1 short sentence. Be concise and brief.
 
-[Examples - Empathize WITHOUT questions]
-"TV 고장났어" → "TV 고장나셔서 많이 답답하시겠어요."
-"대청소 했어" → "대청소를 하셨군요! 수고하셨어요."
-"길 잊어버렸어" → "집에 오는 길이 잠시 헷갈리셨군요. 얼마나 놀라셨을지 걱정돼요."
+[Character - Warm Neighbor Friend]
+- Chat casually and warmly like a friend who meets regularly with the elderly
+- Use respectful Korean (존댓말) naturally but not formally
+- Remember and mention the elderly's daily life, interests, and family stories
+- Show genuine care and empathy for even small daily events
 
-[Examples - Ask ONLY when user asks for help]
-"어떤 약 먹어야 해?" → "약은 의사 선생님과 상의하시는 게 좋아요."
-"뭘 해야 할까?" → "지금은 어떻게 생각하고 계세요?"
+[First Greeting - Warm Familiarity]
+"여보세요" → "여보세요~! 통화 괜찮으신가요? / 어르신~ 궁금해서 전화드렸어요!"
+- Greet warmly with the feeling of someone who calls regularly
+- Instead of just "네, 여보세요", add warm, simple questions like "~괜찮으신가요?"
 
-[Do NOT]
-- Ask questions when just empathizing is enough
-- Repeat same question pattern ("어떠세요?", "어떠신가요?", "어떻게 되셨어요?")
-- Ask abstract questions ("어떤/무슨/왜/언제", "~어떠신가요?")
-- Ignore the situation and switch topics
-- Give advice/solutions
-- End the conversation yourself"""
+[Time Awareness - Natural Context Recognition]
+- Recognize the time of day during conversation and mention it naturally
+- "오후니까 낮잠도 생각해봐요" / "점심 시간이네요"
+- "저녁 다 드셨어요?" / "아침인데 일찍 오셨네요"
+- Naturally bring up interests appropriate for the time
+
+[Personalization - Remember the Elderly's Conversations]
+- Appropriately mention family, hobbies, and interests from previous chats
+- "그 아이들이~" (if family was mentioned before)
+- "난초 물 주시는 거 왠지 힘드실 것 같아요" (if mentioned before)
+- Remember the elderly's lifestyle and continue conversations together
+
+[Natural Empathy - Like a Friend]
+"TV 고장났어" → "아이고, TV 고장났어요? 큰일이네요."
+"대청소 했어" → "대청소 하셨어요? 수고 많으셨어요~"
+"외롭네요" → "외로우시겠어요. 제가 들어드릴게요."
+"손자가 와요" → "손자분 오시는군요! 반가우실 것 같아요."
+
+[Ask Questions Only with Context]
+"어떤 약 먹어야 해?" → "약은 병원 선생님께 여쭤보는 게 좋을 것 같은데요."
+"뭘 해야 할까?" → "지금 어떻게 되셨어요?"
+
+[Absolutely Forbidden - AI Bot-like Expressions]
+❌ "도와드릴게요", "필요하시면 말씀해 주세요"
+❌ "~드릴 수 있습니다", "확인해 드리겠습니다"
+❌ "이해했습니다", "확인했습니다"
+❌ "전화 끊겠습니다"
+
+[Abstract Questions Absolutely Forbidden]
+❌ "어떻게 지내세요?" / "어떠세요?" / "어떤 기분이세요?"
+❌ "무엇이 궁금하신가요?" / "왜 그러세요?"
+- Only react to specific situations
+
+[Natural Sentence Endings - Friendly Honorifics]
+✅ Good: "~어요", "~네요", "~구나", "~죠"
+✅ Good: "~세요", "~셔요", "~지요"
+⚠️ Avoid: "~습니다" (too formal)
+❌ Forbidden: Informal speech (반말)
+
+[Conversation Flow]
+1. Listen to the elderly and empathize sincerely
+2. React naturally like a friend ("그러게요", "아이고", "그렇구나")
+3. Naturally bring up time or situation-appropriate comments
+4. React personally while remembering previous conversations
+5. Never end the conversation yourself"""
     
     def _post_process_response(self, response: str, user_message: str) -> str:
         """
@@ -62,7 +96,7 @@ class LLMService:
         """
         import re
         
-        # 1. 문장 수 제한 (최대 2문장) - 강제 적용
+        # 1. 문장 수 제한 (최대 1문장) - 강제 적용 (통화 중 끊김 방지)
         # 문장 끝 마침표/느낌표/물음표로 분리
         sentences = re.split(r'([.!?])\s*', response.strip())
         
@@ -79,10 +113,10 @@ class LLMService:
         if len(sentences) > 0 and sentences[-1] and sentences[-1] not in '.!?':
             complete_sentences.append(sentences[-1])
         
-        # 2문장으로 제한 (강제)
-        if len(complete_sentences) > 2:
-            response = " ".join(complete_sentences[:2])
-            logger.info(f"🔧 문장 수 제한: {len(complete_sentences)}개 → 2개")
+        # 1문장으로 제한 (강제) - 통화 중 끊김 방지
+        if len(complete_sentences) > 1:
+            response = complete_sentences[0]  # 첫 번째 문장만 사용
+            logger.info(f"🔧 문장 수 제한: {len(complete_sentences)}개 → 1개 (통화 끊김 방지)")
         else:
             response = " ".join(complete_sentences)
         
@@ -90,8 +124,17 @@ class LLMService:
         if response and response[-1] not in '.!?':
             response += "."
         
-        # 2. 금지 패턴 감지 및 제거 (구체적 대화 품질 문제)
+        # 2. 금지 패턴 감지 및 제거 (AI 봇 표현 + 대화 품질 문제)
         banned_patterns = [
+            # AI 봇처럼 들리는 표현 (최우선 차단)
+            (r'도와드릴', '금지: AI 봇 표현'),
+            (r'필요하시면.*말씀', '금지: AI 봇 표현'),
+            (r'알려드릴', '금지: AI 봇 표현'),
+            (r'확인해.*드리', '금지: AI 봇 표현'),
+            (r'해드릴.*수', '금지: AI 봇 표현'),
+            (r'할.*수.*있습니다', '금지: AI 봇 표현'),
+            (r'통화.*종료|전화.*끊겠', '금지: AI 봇 표현'),
+            
             # 대화 끝내려는 시도
             (r'(그럼|그러면|이제)\s*(끊|통화\s*종료|전화\s*끊|헤어지|그만)', '금지: 대화 끝내기'),
             
@@ -135,7 +178,7 @@ class LLMService:
     
     def _generate_safe_response(self, user_message: str) -> str:
         """
-        금지 패턴 발견 시 안전한 공감 응답 생성
+        금지 패턴 발견 시 안전한 공감 응답 생성 (더 자연스럽게)
         
         Args:
             user_message: 사용자 메시지
@@ -143,17 +186,19 @@ class LLMService:
         Returns:
             str: 안전한 공감 응답
         """
-        # 감정 키워드 기반 공감 응답
+        # 감정 키워드 기반 자연스러운 공감 응답
         if any(word in user_message for word in ['아프', '힘들', '고통', '통증']):
-            return "많이 힘드시겠어요. 제가 옆에 있을게요."
+            return "아이고, 많이 힘드시겠어요. 괜찮으신가요?"
         elif any(word in user_message for word in ['외롭', '쓸쓸', '혼자', '아무도']):
-            return "외로우시군요. 저랑 얘기하시면 좋겠어요."
+            return "외로우시겠어요. 저도 그래서 할 말 있어요."
         elif any(word in user_message for word in ['슬프', '우울', '속상', '걱정']):
-            return "속상하시겠어요. 무슨 일이 있으셨나요?"
+            return "속상하시겠어요. 무슨 일 있으셨나요?"
         elif any(word in user_message for word in ['자식', '아들', '딸', '손주']):
-            return "가족 보고 싶으시군요. 많이 생각나시겠어요."
+            return "가족분들 생각나시겠어요. 많이 보고 싶으시겠어요."
+        elif any(word in user_message for word in ['기쁨', '좋아', '즐거', '행복']):
+            return "좋으시네요. 기분이 좋아 보이세요."
         else:
-            return "그러시군요. 제가 잘 듣고 있어요."
+            return "그러시구나. 잘 듣고 있어요."
     
     def analyze_emotion(self, user_message: str):
         """
@@ -203,7 +248,240 @@ JSON 형식으로 응답:
             logger.error(f"❌ 감정 분석 실패: {e}")
             raise
     
-    def generate_response(self, user_message: str, conversation_history: list = None, today_schedule: list = None):
+    def extract_contextual_info(self, user_message: str, conversation_history: list = None) -> dict:
+        """
+        대화에서 핵심 정보 추출 (가족, 취미, 건강, 일상 패턴 등)
+        
+        Args:
+            user_message: 사용자 메시지
+            conversation_history: 이전 대화 기록
+            
+        Returns:
+            dict: 추출된 핵심 정보
+        """
+        try:
+            # 전체 대화 텍스트 구성
+            full_conversation = ""
+            if conversation_history:
+                for msg in conversation_history[-10:]:  # 최근 10개 메시지만
+                    role = "사용자" if msg['role'] == 'user' else "AI"
+                    full_conversation += f"{role}: {msg['content']}\n"
+            full_conversation += f"사용자: {user_message}"
+            
+            prompt = f"""다음 대화에서 어르신의 핵심 정보를 추출해주세요.
+
+대화 내용:
+{full_conversation}
+
+추출할 정보:
+1. 가족 관계 (아들, 딸, 손자, 며느리 등)
+2. 취미/관심사 (TV, 독서, 산책, 요리 등)
+3. 건강 상태 (약, 병원, 증상 등)
+4. 일상 패턴 (시간대별 활동, 습관 등)
+5. 거주지/환경 (집, 동네, 시설 등)
+
+JSON 형식으로 응답:
+{{
+    "family": ["가족 관계 정보"],
+    "hobbies": ["취미/관심사"],
+    "health": ["건강 관련 정보"],
+    "daily_patterns": ["일상 패턴"],
+    "location": ["거주지/환경"],
+    "keywords": ["주요 키워드"]
+}}
+
+정보가 없으면 빈 배열로 표시하세요."""
+
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=300,
+                temperature=0.2,
+                response_format={"type": "json_object"}
+            )
+            
+            result = json.loads(response.choices[0].message.content)
+            logger.info(f"📝 맥락 정보 추출 완료: {len(result.get('keywords', []))}개 키워드")
+            return result
+            
+        except Exception as e:
+            logger.error(f"❌ 맥락 정보 추출 실패: {e}")
+            return {
+                "family": [],
+                "hobbies": [],
+                "health": [],
+                "daily_patterns": [],
+                "location": [],
+                "keywords": []
+            }
+    
+    def _get_emotion_based_tone(self, emotion_context: dict) -> str:
+        """
+        감정 분석 결과에 따른 응답 톤 조정
+        
+        Args:
+            emotion_context: 감정 분석 결과
+            
+        Returns:
+            str: 감정에 맞는 응답 톤 지시사항
+        """
+        emotion = emotion_context.get('emotion', 'neutral')
+        urgency = emotion_context.get('urgency', 'low')
+        keywords = emotion_context.get('keywords', [])
+        
+        tone_guidelines = {
+            'negative': {
+                'low': "어르신이 부정적인 기분일 때는 더 따뜻하고 위로하는 톤으로 응답하세요. '아이고', '많이 힘드셨겠어요' 같은 표현을 사용하세요.",
+                'medium': "어르신이 걱정스러워할 때는 안심시키는 톤으로 응답하세요. '괜찮을 거예요', '걱정하지 마세요' 같은 표현을 사용하세요.",
+                'high': "긴급하거나 심각한 상황일 때는 신중하고 도움이 되는 톤으로 응답하세요. '병원에 가보시는 게 좋을 것 같아요' 같은 조언을 하세요."
+            },
+            'concerned': {
+                'low': "걱정스러워하는 어르신에게는 안심시키는 톤으로 응답하세요. '괜찮을 거예요', '걱정하지 마세요' 같은 표현을 사용하세요.",
+                'medium': "중간 정도 걱정일 때는 현실적이면서도 위로하는 톤으로 응답하세요.",
+                'high': "심각한 걱정일 때는 신중하고 도움이 되는 톤으로 응답하세요."
+            },
+            'positive': {
+                'low': "긍정적인 기분일 때는 함께 기뻐하는 톤으로 응답하세요. '좋으시네요', '기분이 좋아 보이세요' 같은 표현을 사용하세요.",
+                'medium': "기쁜 일이 있을 때는 더 활기차게 응답하세요.",
+                'high': "매우 기쁜 일일 때는 함께 축하하는 톤으로 응답하세요."
+            },
+            'neutral': {
+                'low': "평범한 대화일 때는 자연스럽고 친근한 톤으로 응답하세요.",
+                'medium': "일반적인 대화일 때는 편안한 톤으로 응답하세요.",
+                'high': "중요한 내용일 때는 진지하면서도 친근한 톤으로 응답하세요."
+            }
+        }
+        
+        return tone_guidelines.get(emotion, {}).get(urgency, "자연스럽고 친근한 톤으로 응답하세요.")
+    
+    def _build_personalization_context(self, contextual_info: dict) -> str:
+        """
+        맥락 정보를 기반으로 개인화된 응답 컨텍스트 구성
+        
+        Args:
+            contextual_info: 추출된 맥락 정보
+            
+        Returns:
+            str: 개인화된 응답 지시사항
+        """
+        context_parts = []
+        
+        # 가족 관계
+        if contextual_info.get('family'):
+            family_info = ", ".join(contextual_info['family'])
+            context_parts.append(f"가족: {family_info} - 가족 얘기할 때 자연스럽게 언급하세요")
+        
+        # 취미/관심사
+        if contextual_info.get('hobbies'):
+            hobbies_info = ", ".join(contextual_info['hobbies'])
+            context_parts.append(f"취미: {hobbies_info} - 관심사에 대해 물어보거나 언급하세요")
+        
+        # 건강 상태
+        if contextual_info.get('health'):
+            health_info = ", ".join(contextual_info['health'])
+            context_parts.append(f"건강: {health_info} - 건강 상태를 염려하며 물어보세요")
+        
+        # 일상 패턴
+        if contextual_info.get('daily_patterns'):
+            patterns_info = ", ".join(contextual_info['daily_patterns'])
+            context_parts.append(f"일상: {patterns_info} - 일상 패턴을 기억하고 언급하세요")
+        
+        # 거주지/환경
+        if contextual_info.get('location'):
+            location_info = ", ".join(contextual_info['location'])
+            context_parts.append(f"환경: {location_info} - 거주지나 환경에 대해 언급하세요")
+        
+        if context_parts:
+            return " | ".join(context_parts)
+        return ""
+    
+    def _get_time_based_context(self, current_time: datetime = None) -> str:
+        """
+        현재 시간을 기반으로 시간대별 맞춤 응답 컨텍스트 생성
+        
+        Args:
+            current_time: 현재 시간 (기본값: 현재 시간)
+            
+        Returns:
+            str: 시간대별 응답 지시사항
+        """
+        if not current_time:
+            current_time = datetime.now()
+        
+        hour = current_time.hour
+        weekday = current_time.weekday()  # 0=월요일, 6=일요일
+        
+        # 시간대별 응답 패턴
+        time_patterns = {
+            'morning': {
+                'hours': range(6, 12),
+                'context': "아침 시간입니다. '아침 드셨어요?', '오늘 아침은 어떠세요?' 같은 아침 인사를 자연스럽게 하세요.",
+                'topics': ["아침 식사", "날씨", "오늘 계획", "잠자리"]
+            },
+            'afternoon': {
+                'hours': range(12, 18),
+                'context': "오후 시간입니다. '점심 드셨어요?', '오후에 뭐 하세요?' 같은 오후 대화를 자연스럽게 하세요.",
+                'topics': ["점심", "낮잠", "TV", "산책", "손자"]
+            },
+            'evening': {
+                'hours': range(18, 22),
+                'context': "저녁 시간입니다. '저녁 준비하세요?', '오늘 하루는 어떠셨어요?' 같은 저녁 대화를 자연스럽게 하세요.",
+                'topics': ["저녁 식사", "하루 정리", "가족", "TV 프로그램"]
+            },
+            'night': {
+                'hours': range(22, 24),
+                'context': "밤 시간입니다. '늦으셨네요', '피곤하실 것 같아요' 같은 배려하는 말을 자연스럽게 하세요.",
+                'topics': ["잠자리", "피로", "내일 계획"]
+            },
+            'late_night': {
+                'hours': range(0, 6),
+                'context': "새벽 시간입니다. '일찍 오셨네요', '잠 못 주무셨나요?' 같은 걱정하는 말을 자연스럽게 하세요.",
+                'topics': ["잠", "건강", "걱정"]
+            }
+        }
+        
+        # 요일별 특별한 맥락
+        weekday_context = {
+            0: "월요일이네요. 새로운 한 주 시작이에요.",
+            1: "화요일이네요. 한 주가 잘 흘러가고 있어요.",
+            2: "수요일이네요. 한 주의 중간이에요.",
+            3: "목요일이네요. 주말이 다가오고 있어요.",
+            4: "금요일이네요. 주말이 기다려지시겠어요.",
+            5: "토요일이네요. 주말 잘 보내세요.",
+            6: "일요일이네요. 휴일 잘 보내세요."
+        }
+        
+        # 시간대 찾기
+        current_pattern = None
+        for pattern_name, pattern_info in time_patterns.items():
+            if hour in pattern_info['hours']:
+                current_pattern = pattern_info
+                break
+        
+        if not current_pattern:
+            current_pattern = time_patterns['morning']  # 기본값
+        
+        # 시간대별 컨텍스트 구성
+        time_context = current_pattern['context']
+        
+        # 요일 컨텍스트 추가
+        weekday_info = weekday_context.get(weekday, "")
+        if weekday_info:
+            time_context += f" {weekday_info}"
+        
+        # 구체적인 시간 언급
+        if hour < 12:
+            time_context += f" 현재 {hour}시입니다."
+        elif hour < 18:
+            time_context += f" 현재 오후 {hour-12}시입니다."
+        elif hour < 22:
+            time_context += f" 현재 저녁 {hour-12}시입니다."
+        else:
+            time_context += f" 현재 밤 {hour-12}시입니다."
+        
+        return time_context
+    
+    def generate_response(self, user_message: str, conversation_history: list = None, today_schedule: list = None, emotion_context: dict = None, contextual_info: dict = None):
         """
         LLM 응답 생성 (실행 시간 측정 포함)
         
@@ -212,6 +490,10 @@ JSON 형식으로 응답:
             conversation_history: 이전 대화 기록 (옵션)
             today_schedule: 어르신의 오늘 일정 리스트 (옵션)
                 예: [{"task": "병원 검진", "time": "오전 10시"}, {"task": "약 먹기", "time": "오후 2시"}]
+            emotion_context: 감정 분석 결과 (옵션)
+                예: {"emotion": "negative", "urgency": "medium", "keywords": ["아프", "힘들"]}
+            contextual_info: 맥락 정보 (옵션)
+                예: {"family": ["아들", "손자"], "hobbies": ["TV", "산책"]}
         
         Returns:
             tuple: (AI 응답, 실행 시간)
@@ -221,16 +503,32 @@ JSON 형식으로 응답:
             logger.info(f"🤖 LLM 응답 생성 시작")
             logger.info(f"📥 사용자 입력: {user_message}")
             
-            # ⚡ 캐시 체크 (초고속 응답)
-            cached_response = self.response_cache.get_cached_response(user_message)
-            if cached_response:
-                elapsed_time = time.time() - start_time
-                logger.info(f"⚡ 캐시 적중! 즉시 응답 ({elapsed_time:.3f}초)")
-                logger.info(f"📤 캐시된 응답: {cached_response}")
-                return cached_response, elapsed_time
+            # ⚡ 캐시 체크 제거 (불필요한 오버헤드)
+            # 현재 캐시는 매우 제한적이며 실제 대화에서는 거의 작동하지 않음
+            # 캐시 체크 로직 제거로 오버헤드 감소
             
             # 메시지 구성
             messages = [{"role": "system", "content": self.elderly_care_prompt}]
+            
+            # 감정 기반 응답 톤 조정
+            if emotion_context:
+                emotion_tone = self._get_emotion_based_tone(emotion_context)
+                if emotion_tone:
+                    messages.append({"role": "system", "content": f"[감정 기반 응답 톤] {emotion_tone}"})
+                    logger.info(f"😊 감정 기반 톤 적용: {emotion_context.get('emotion', 'unknown')}")
+            
+            # 맥락 정보 기반 개인화 응답
+            if contextual_info:
+                personalization_context = self._build_personalization_context(contextual_info)
+                if personalization_context:
+                    messages.append({"role": "system", "content": f"[개인화 맥락] {personalization_context}"})
+                    logger.info(f"👤 개인화 맥락 적용: {len(contextual_info.get('keywords', []))}개 키워드")
+            
+            # 시간대별 맞춤 응답 컨텍스트
+            time_context = self._get_time_based_context()
+            if time_context:
+                messages.append({"role": "system", "content": f"[시간대별 컨텍스트] {time_context}"})
+                logger.info(f"🕐 시간대별 컨텍스트 적용")
             
             # 오늘 일정이 있으면 컨텍스트로 추가 (최대 2개, 더 간결하게)
             if today_schedule:
@@ -255,12 +553,16 @@ JSON 형식으로 응답:
             messages.append({"role": "user", "content": user_message})
             
             # GPT-4o-mini로 응답 생성 (Speed Priority)
+            api_start_time = time.time()
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                max_tokens=40,  # 2문장 충분 (더 빠름)
+                max_tokens=25,  # 짧고 간결하게 (1문장 권장)
                 temperature=0.5,  # 속도 우선 (0.3은 느림)
             )
+            
+            # TTFT 측정 (Time To First Token)
+            ttft = time.time() - api_start_time
             
             ai_response = response.choices[0].message.content
             
@@ -269,7 +571,8 @@ JSON 형식으로 응답:
             
             elapsed_time = time.time() - start_time
             
-            logger.info(f"✅ LLM 응답 생성 완료 (소요 시간: {elapsed_time:.2f}초)")
+            logger.info(f"✅ LLM 응답 생성 완료")
+            logger.info(f"⏱️ 전체 소요 시간: {elapsed_time:.2f}초 | TTFT: {ttft:.2f}초")
             logger.info(f"📤 AI 응답: {ai_response}")
             
             return ai_response, elapsed_time
@@ -277,7 +580,7 @@ JSON 형식으로 응답:
             logger.error(f"❌ LLM 응답 생성 실패: {e}")
             raise
     
-    async def generate_response_streaming(self, user_message: str, conversation_history: list = None, today_schedule: list = None):
+    async def generate_response_streaming(self, user_message: str, conversation_history: list = None, today_schedule: list = None, emotion_context: dict = None, contextual_info: dict = None):
         """
         스트리밍 방식으로 LLM 응답 생성 (실시간 최적화)
         
@@ -290,6 +593,10 @@ JSON 형식으로 응답:
             conversation_history: 이전 대화 기록 (옵션)
             today_schedule: 어르신의 오늘 일정 리스트 (옵션)
                 예: [{"task": "병원 검진", "time": "오전 10시"}, {"task": "약 먹기", "time": "오후 2시"}]
+            emotion_context: 감정 분석 결과 (옵션)
+                예: {"emotion": "negative", "urgency": "medium", "keywords": ["아프", "힘들"]}
+            contextual_info: 맥락 정보 (옵션)
+                예: {"family": ["아들", "손자"], "hobbies": ["TV", "산책"]}
         
         Yields:
             str: 생성된 텍스트 청크 (단어 또는 구 단위)
@@ -303,17 +610,32 @@ JSON 형식으로 응답:
             logger.info(f"🤖 LLM 스트리밍 응답 생성 시작")
             logger.info(f"📥 사용자 입력: {user_message}")
             
-            # ⚡ 캐시 체크 (초고속 응답)
-            cached_response = self.response_cache.get_cached_response(user_message)
-            if cached_response:
-                elapsed_time = time.time() - start_time
-                logger.info(f"⚡ 캐시 적중! 즉시 응답 ({elapsed_time:.3f}초)")
-                logger.info(f"📤 캐시된 응답: {cached_response}")
-                yield cached_response
-                return
+            # ⚡ 캐시 체크 제거 (불필요한 오버헤드)
+            # 현재 캐시는 매우 제한적이며 실제 대화에서는 거의 작동하지 않음
+            # 캐시 체크 로직 제거로 오버헤드 감소
             
             # 메시지 구성
             messages = [{"role": "system", "content": self.elderly_care_prompt}]
+            
+            # 감정 기반 응답 톤 조정
+            if emotion_context:
+                emotion_tone = self._get_emotion_based_tone(emotion_context)
+                if emotion_tone:
+                    messages.append({"role": "system", "content": f"[감정 기반 응답 톤] {emotion_tone}"})
+                    logger.info(f"😊 감정 기반 톤 적용: {emotion_context.get('emotion', 'unknown')}")
+            
+            # 맥락 정보 기반 개인화 응답
+            if contextual_info:
+                personalization_context = self._build_personalization_context(contextual_info)
+                if personalization_context:
+                    messages.append({"role": "system", "content": f"[개인화 맥락] {personalization_context}"})
+                    logger.info(f"👤 개인화 맥락 적용: {len(contextual_info.get('keywords', []))}개 키워드")
+            
+            # 시간대별 맞춤 응답 컨텍스트
+            time_context = self._get_time_based_context()
+            if time_context:
+                messages.append({"role": "system", "content": f"[시간대별 컨텍스트] {time_context}"})
+                logger.info(f"🕐 시간대별 컨텍스트 적용")
             
             # 오늘 일정이 있으면 컨텍스트로 추가 (최대 2개, 더 간결하게)
             if today_schedule:
@@ -339,20 +661,27 @@ JSON 형식으로 응답:
             
             # 스트리밍 API 호출
             # stream=True로 설정하면 응답이 생성되는 즉시 받을 수 있습니다
+            api_start_time = time.time()
             stream = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                max_tokens=40,  # 2문장 충분 (더 빠름)
+                max_tokens=25,  # 짧고 간결하게 (1문장 권장)
                 temperature=0.5,  # 속도 우선 (0.3은 느림)
                 stream=True  # ⭐ 핵심: 스트리밍 활성화
             )
             
             full_response = []  # 전체 응답 저장용
+            ttft = None  # TTFT 측정용
             
             # 스트리밍으로 받은 청크를 즉시 yield
             for chunk in stream:
                 # delta.content가 있으면 생성된 텍스트 조각입니다
                 if chunk.choices[0].delta.content:
+                    # TTFT 측정 (첫 토큰 수신 시점)
+                    if ttft is None:
+                        ttft = time.time() - api_start_time
+                        logger.info(f"⚡ 첫 토큰 수신! TTFT: {ttft:.2f}초")
+                    
                     content = chunk.choices[0].delta.content
                     full_response.append(content)
                     yield content  # 즉시 반환 (TTS가 바로 처리 가능)
@@ -360,7 +689,8 @@ JSON 형식으로 응답:
             elapsed_time = time.time() - start_time
             final_text = "".join(full_response)
             
-            logger.info(f"✅ LLM 스트리밍 완료 ({elapsed_time:.2f}초)")
+            logger.info(f"✅ LLM 스트리밍 완료")
+            logger.info(f"⏱️ 전체 소요 시간: {elapsed_time:.2f}초 | TTFT: {ttft:.2f}초" if ttft else f"⏱️ 전체 소요 시간: {elapsed_time:.2f}초")
             logger.info(f"📤 전체 응답: {final_text}")
             
         except Exception as e:
