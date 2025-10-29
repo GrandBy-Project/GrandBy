@@ -75,10 +75,12 @@ class SimpleLLMTest:
 - Instead of just "네, 여보세요", add warm, simple questions like "~괜찮으신가요?"
 
 [Time Awareness - Natural Context Recognition]
-- Recognize the time of day during conversation and mention it naturally
-- "오후니까 낮잠도 생각해봐요" / "점심 시간이네요"
-- "저녁 다 드셨어요?" / "아침인데 일찍 오셨네요"
-- Naturally bring up interests appropriate for the time
+- Recognize the time of day but DON'T be obsessed with it
+- Mention time naturally ONCE if relevant, then move on to other topics
+- Examples: "점심 시간이네요" (once) → then talk about TV, family, weather, hobbies, etc.
+- DO NOT keep asking about meals repeatedly (breakfast/lunch/dinner)
+- Be diverse: Talk about TV programs, family, weather, health, memories, daily routines
+- If the elderly doesn't want to talk about a topic, immediately switch to another
 
 [Personalization - Remember the Elderly's Conversations]
 - Appropriately mention family, hobbies, and interests from previous chats
@@ -87,10 +89,11 @@ class SimpleLLMTest:
 - Remember the elderly's lifestyle and continue conversations together
 
 [Natural Empathy - Like a Friend]
-"TV 고장났어" → "아이고, TV 고장났어요? 큰일이네요."
-"대청소 했어" → "대청소 하셨어요? 수고 많으셨어요~"
-"외롭네요" → "외로우시겠어요. 제가 들어드릴게요."
-"손자가 와요" → "손자분 오시는군요! 반가우실 것 같아요."
+"TV 고장났어" → "아이고, TV 고장났어요? 큰일이네요." / "어머, TV 고장났어요? 어떡하시겠어요."
+"대청소 했어" → "대청소 하셨어요? 수고 많으셨어요~" / "오호, 대청소 하셨어요? 힘드셨겠어요."
+"외롭네요" → "외로우시겠어요. 제가 들어드릴게요." / "아이, 외로우시겠어요. 제가 듣고 있어요."
+"손자가 와요" → "손자분 오시는군요! 반가우실 것 같아요." / "어머나, 손자분 오신다니 좋으시겠어요!"
+- Use varied interjections naturally: "아이고", "어머", "어머나", "오호", "아이", "그렇구나", "그렇군요", "으응", "그래"
 
 [Ask Questions Only with Context]
 "어떤 약 먹어야 해?" → "약은 병원 선생님께 여쭤보는 게 좋을 것 같은데요."
@@ -115,17 +118,66 @@ class SimpleLLMTest:
 
 [Conversation Flow]
 1. Listen to the elderly and empathize sincerely
-2. React naturally like a friend ("그러게요", "아이고", "그렇구나")
-3. Naturally bring up time or situation-appropriate comments
-4. React personally while remembering previous conversations
-5. NEVER end the conversation yourself - Wait for the elderly to explicitly say they want to end the call
-6. Do NOT say goodbye, "안녕히 가세요", "다음에 다시 전화 드릴게요" unless the elderly explicitly wants to end the conversation"""
+2. React naturally like a friend with varied interjections:
+   - Sympathy: "아이고", "어머", "어머나", "아이", "어머니"
+   - Understanding: "그러게요", "그렇구나", "그렇군요", "그래", "으응"
+   - Surprise/Interest: "오호", "오", "헐"
+   - Don't always use "아이고" - vary naturally
+3. Mention time/meal ONCE if relevant, then diversify topics (TV, family, weather, health, hobbies, memories)
+4. If the elderly shows disinterest or says "stop asking about X", immediately switch topics
+5. NEVER repeat the same question or topic more than once
+6. Keep conversation varied and natural, like chatting with a friend
+7. React personally while remembering previous conversations
+8. NEVER end the conversation yourself - Wait for the elderly to explicitly say they want to end the call
+9. Do NOT say goodbye, "안녕히 가세요", "다음에 다시 전화 드릴게요" unless the elderly explicitly wants to end the conversation
+
+[Topic Diversity - Prevent Repetition]
+❌ DO NOT ask about the same topic more than once (e.g., "저녁 먹었어요?" then "저녁 뭐 드실 거예요?" then "저녁 준비하세요?")
+❌ DO NOT be persistent if the elderly shows disinterest ("아직 안 먹었어" → stop asking about it)
+✅ Switch topics naturally: TV programs, family news, weather, health, hobbies, daily routines, memories
+✅ If meal comes up naturally, mention it once, then move on
+
+[Conversation Guidance - Encourage Dialogue]
+- If the elderly gives short answers ("네", "응", "그래", "아니", "아직 안", "모르겠어", "괜찮아"), actively guide the conversation
+- Ways to encourage: Share a new topic, ask about today's schedule/events, mention family/TV/weather/health naturally
+- Examples:
+  * "네" → "오늘 TV는 뭐 보셨어요?" / "가족분들은 잘 지내세요?" / "오늘 날씨 참 좋았어요"
+  * "아직 안" → "그렇군요~ 그럼 오늘은 뭐 하셨어요?" / "TV는 재미있게 보셨어요?"
+  * Short answer → Switch to a new interesting topic immediately
+- Keep the conversation flowing naturally, don't let it become stagnant
+- Check today's schedule if available, and mention events naturally (e.g., "오늘 병원 가셨다고 했었는데 어떠셨어요?")"""
     
-    def _post_process_response(self, response: str, user_message: str) -> str:
+    def _post_process_response(self, response: str, user_message: str, conversation_history: list = None) -> str:
         """
         GPT 응답 후처리: 규칙 강제 적용 (llm_service.py와 동일)
         """
         import re
+        
+        # 대화 기록에서 같은 주제 반복 체크 (식사 관련)
+        if conversation_history:
+            recent_topics = []
+            for msg in conversation_history[-6:]:  # 최근 3턴 확인
+                content = msg.get('content', '')
+                # 식사 관련 키워드 추출
+                if any(word in content for word in ['저녁', '점심', '아침', '식사', '밥', '먹']):
+                    recent_topics.append('meal')
+            
+            # 같은 주제가 2회 이상 나오면 경고
+            meal_count = recent_topics.count('meal')
+            meal_keywords_in_response = any(word in response for word in ['저녁', '점심', '아침', '식사', '밥', '먹', '드실', '드셨'])
+            
+            if meal_count >= 2 and meal_keywords_in_response:
+                logger.warning(f"⚠️ 같은 주제 반복 감지: 식사 관련 {meal_count+1}회 → 주제 전환 필요")
+                # 식사 관련 응답을 다른 주제로 전환
+                alternative_topics = [
+                    "TV 프로그램은 뭐 보세요?",
+                    "오늘 날씨가 어떠세요?",
+                    "가족분들은 잘 지내세요?",
+                    "오늘은 뭐 하셨어요?",
+                    "요즘 건강은 어떠세요?"
+                ]
+                import random
+                return random.choice(alternative_topics)
         
         # 1. 문장 수 제한 (최대 2문장) + 문자 수 제한 (최대 60자) - 적절한 길이 유지
         # 문장 끝 마침표/느낌표/물음표로 분리
@@ -224,19 +276,51 @@ class SimpleLLMTest:
         return response
     
     def _generate_safe_response(self, user_message: str) -> str:
-        """안전한 공감 응답 생성 (더 자연스럽게)"""
+        """안전한 공감 응답 생성 (더 자연스럽게, 다양한 추임새 사용)"""
+        import random
+        
         if any(word in user_message for word in ['아프', '힘들', '고통', '통증']):
-            return "아이고, 많이 힘드시겠어요. 괜찮으신가요?"
+            responses = [
+                "아이고, 많이 힘드시겠어요. 괜찮으신가요?",
+                "어머, 힘드시겠어요. 괜찮으신가요?",
+                "아이, 많이 힘드시겠어요."
+            ]
+            return random.choice(responses)
         elif any(word in user_message for word in ['외롭', '쓸쓸', '혼자', '아무도']):
-            return "외로우시겠어요. 저도 그래서 할 말 있어요."
+            responses = [
+                "외로우시겠어요. 제가 들어드릴게요.",
+                "어머나, 외로우시겠어요. 저도 듣고 있어요.",
+                "아이고, 외로우시겠어요. 제가 들어드릴게요."
+            ]
+            return random.choice(responses)
         elif any(word in user_message for word in ['슬프', '우울', '속상', '걱정']):
-            return "속상하시겠어요. 무슨 일 있으셨나요?"
+            responses = [
+                "속상하시겠어요. 무슨 일 있으셨나요?",
+                "어머, 속상하시겠어요. 어떤 일이에요?",
+                "아이고, 걱정되시겠어요. 괜찮으신가요?"
+            ]
+            return random.choice(responses)
         elif any(word in user_message for word in ['자식', '아들', '딸', '손주']):
-            return "가족분들 생각나시겠어요. 많이 보고 싶으시겠어요."
+            responses = [
+                "가족분들 생각나시겠어요. 많이 보고 싶으시겠어요.",
+                "어머나, 가족분들 이야기 나오시네요. 보고 싶으시겠어요.",
+                "오호, 가족 얘기 나오시는군요. 좋으시겠어요."
+            ]
+            return random.choice(responses)
         elif any(word in user_message for word in ['기쁨', '좋아', '즐거', '행복']):
-            return "좋으시네요. 기분이 좋아 보이세요."
+            responses = [
+                "좋으시네요. 기분이 좋아 보이세요.",
+                "오호, 좋으시군요. 기쁘시겠어요!",
+                "그래요? 좋으시겠어요."
+            ]
+            return random.choice(responses)
         else:
-            return "그러시구나. 잘 듣고 있어요."
+            responses = [
+                "그렇구나. 잘 듣고 있어요.",
+                "그러시군요. 잘 듣고 있어요.",
+                "그래요? 잘 듣고 있어요."
+            ]
+            return random.choice(responses)
     
     def _get_korean_time_now(self) -> datetime:
         """현재 한국 시간(KST) 반환"""
@@ -287,6 +371,16 @@ class SimpleLLMTest:
             # 메시지 구성 (llm_service.py와 동일)
             messages = [{"role": "system", "content": self.elderly_care_prompt}]
             
+            # 단답형 감지 및 대화 유도
+            is_short_response = self._is_short_response(user_message)
+            if is_short_response:
+                guidance_message = """[대화 유도 필요] 어르신이 짧게 대답하셨습니다. 대화를 자연스럽게 이어가세요:
+- 새로운 주제 제시: TV 프로그램, 가족 소식, 날씨, 건강, 추억, 일상
+- 구체적이고 친근한 질문으로 대화를 이어가세요
+- 단순 확인("네", "그래")만 하지 말고 다음 주제로 자연스럽게 전환하세요"""
+                messages.append({"role": "system", "content": guidance_message})
+                logger.info(f"💬 단답형 감지 → 대화 유도 모드 활성화")
+            
             # 한국 시간 정보 추가 (시간/날짜 질문 대응)
             korean_time_info = self._get_korean_time_info()
             messages.append({"role": "system", "content": f"[현재 시간] {korean_time_info} - 시간/날짜 질문 시 정확히 이 정보를 사용하세요"})
@@ -312,8 +406,8 @@ class SimpleLLMTest:
             
             ai_response = response.choices[0].message.content
             
-            # 후처리: 규칙 강제 적용 (llm_service.py와 동일)
-            ai_response = self._post_process_response(ai_response, user_message)
+            # 후처리: 규칙 강제 적용 (llm_service.py와 동일, 대화 기록 전달)
+            ai_response = self._post_process_response(ai_response, user_message, conversation_history)
             
             elapsed_time = time.time() - start_time
             
