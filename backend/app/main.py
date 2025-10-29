@@ -757,8 +757,8 @@ async def process_streaming_response(
         logger.info("=" * 60)
         
         # 재생 완료 대기
-        # if playback_duration > 0:
-        #     await asyncio.sleep(playback_duration * 0.9)
+        if playback_duration > 0:
+            await asyncio.sleep(playback_duration * 0.9)
         
         return "".join(full_response)
         
