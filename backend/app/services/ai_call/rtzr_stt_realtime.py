@@ -53,10 +53,10 @@ class RTZRRealtimeSTT:
         logger.debug("🤖 [에코 방지] AI 응답 중 - 사용자 입력 차단")
     
     def stop_bot_speaking(self):
-        """AI 응답 종료 - 1초 후 사용자 입력 재개"""
+        """AI 응답 종료 - 짧은 대기 후 사용자 입력 재개"""
         self.is_bot_speaking = False
-        self.bot_silence_delay = 5  # 5개 청크 = 0.1초 대기
-        logger.debug("🤖 [에코 방지] AI 응답 종료 - 1초 후 사용자 입력 재개")
+        self.bot_silence_delay = 5  # 5개 청크 = 약 0.1초 대기 (원래대로)
+        logger.debug("🤖 [에코 방지] AI 응답 종료 - 0.1초 후 사용자 입력 재개")
     
     async def start_streaming(self) -> AsyncGenerator[dict, None]:
         """

@@ -672,7 +672,7 @@ async def process_fallback_response(
     stream_sid: str,
     user_text: str,
     audio_processor=None
-) -> str:
+) -> tuple[str, float]:
     """폴백 모드 - 기존 방식으로 처리"""
     logger.warning("🔄 폴백 모드: 기존 방식으로 처리")
     
@@ -680,14 +680,15 @@ async def process_fallback_response(
         # 기존의 단순한 TTS 방식 사용
         response_text = await llm_service.generate_response(user_text, [])
         
+        playback_duration = 0.0
         if response_text:
-            await send_audio_to_twilio_with_tts(websocket, stream_sid, response_text, audio_processor)
-            return response_text
+            playback_duration = await send_audio_to_twilio_with_tts(websocket, stream_sid, response_text, audio_processor)
+            return (response_text, playback_duration)
         
-        return ""
+        return ("", 0.0)
     except Exception as e:
         logger.error(f"❌ 폴백 모드 처리 실패: {e}")
-        return ""
+        return ("", 0.0)
 
 async def process_streaming_response(
     websocket: WebSocket,
@@ -695,13 +696,16 @@ async def process_streaming_response(
     user_text: str,
     conversation_history: list,
     audio_processor=None
-) -> str:
+) -> tuple[str, float]:
     """
     최적화된 스트리밍 응답 처리 - 사전 연결된 WebSocket 사용
     
     핵심 개선:
     - 사전 연결된 Cartesia WebSocket 재사용
     - LLM 스트림을 두 갈래로 분리 (텍스트 수집 + TTS)
+    
+    Returns:
+        tuple[str, float]: (응답 텍스트, 재생 시간)
     """
     import audioop
     
@@ -776,17 +780,16 @@ async def process_streaming_response(
         logger.info(f"   예상 재생 시간: {playback_duration:.2f}초")
         logger.info("=" * 60)
         
-        # 재생 완료 대기
-        # if playback_duration > 0:
-        #     await asyncio.sleep(playback_duration * 0.9)
+        # 재생 완료 대기 제거 - STT 루프가 블로킹되지 않도록 즉시 반환
+        # bot_silence_delay로 보호
         
-        return "".join(full_response)
+        return ("".join(full_response), playback_duration)
         
     except Exception as e:
         logger.error(f"❌ 실시간 스트리밍 오류: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        return ""
+        return ("", 0.0)
     finally:
         if audio_processor:
             audio_processor.stop_bot_speaking()
@@ -894,6 +897,28 @@ async def cartesia_to_twilio_forwarder(
     import audioop
     import base64
     
+    def _process_audio_chunk(b64_data: str):
+        """오디오 청크 처리 (동기 함수)"""
+        # Base64 디코딩 (Cartesia는 PCM 24kHz 반환)
+        audio_chunk = base64.b64decode(b64_data)
+        decoded_size = len(audio_chunk)
+        
+        # PCM 24kHz → 8kHz 변환 (Twilio 요구사항)
+        resampled_pcm, _ = audioop.ratecv(
+            audio_chunk, 2, 1, 24000, 8000, None
+        )
+        
+        # PCM → mulaw 변환
+        mulaw_data = audioop.lin2ulaw(resampled_pcm, 2)
+        
+        # Base64 인코딩
+        audio_base64 = base64.b64encode(mulaw_data).decode('utf-8')
+        
+        return {
+            'mulaw_base64': audio_base64,
+            'decoded_size': decoded_size
+        }
+    
     try:
         chunk_count = 0
         total_audio_bytes = 0
@@ -901,6 +926,7 @@ async def cartesia_to_twilio_forwarder(
         
         logger.info("📡 [수신] Cartesia 음성 청크 대기 중...")
         
+        last_chunk_time = time.time()
         async for message in cartesia_ws:
             try:
                 data = json.loads(message)
@@ -908,33 +934,34 @@ async def cartesia_to_twilio_forwarder(
                 # 오디오 청크 수신
                 if "data" in data:
                     chunk_count += 1
+                    current_time = time.time()
                     
-                    elapsed = time.time() - pipeline_start
+                    elapsed = current_time - pipeline_start
+                    time_since_last = current_time - last_chunk_time
+                    last_chunk_time = current_time
                     
                     if not first_audio_received:
                         logger.info(f"⚡ [첫 음성] +{elapsed:.2f}초에 수신 시작!")
                         first_audio_received = True
                     
-                    # Base64 디코딩 (Cartesia는 PCM 24kHz 반환)
-                    audio_chunk = base64.b64decode(data["data"])
-                    total_audio_bytes += len(audio_chunk)
+                    # ✅ 각 청크마다 로그 (상세 디버깅)
+                    logger.info(f"📥 [청크 {chunk_count}] 수신 (간격: {time_since_last:.3f}초, 경과: {elapsed:.2f}초)")
                     
-                    # PCM 24kHz → 8kHz 변환 (Twilio 요구사항)
-                    resampled_pcm, _ = audioop.ratecv(
-                        audio_chunk, 2, 1, 24000, 8000, None
+                    # Base64 디코딩 및 변환을 비동기 실행 (블로킹 방지)
+                    loop = asyncio.get_event_loop()
+                    processed_audio = await loop.run_in_executor(
+                        None,
+                        _process_audio_chunk,
+                        data["data"]
                     )
                     
-                    # PCM → mulaw 변환
-                    mulaw_data = audioop.lin2ulaw(resampled_pcm, 2)
-                    
-                    # Base64 인코딩
-                    audio_base64 = base64.b64encode(mulaw_data).decode('utf-8')
+                    total_audio_bytes += processed_audio['decoded_size']
                     
                     # Twilio로 즉시 전송
                     message = {
                         "event": "media",
                         "streamSid": stream_sid,
-                        "media": {"payload": audio_base64}
+                        "media": {"payload": processed_audio['mulaw_base64']}
                     }
                     
                     await twilio_ws.send_text(json.dumps(message))
@@ -1877,49 +1904,40 @@ async def media_stream_handler(
                                 # ✅ AI 응답 시작 (사용자 입력 차단)
                                 rtzr_stt.start_bot_speaking()
                                 
-                                # LLM 응답 생성
-                                logger.info("🤖 [LLM] 응답 생성 시작")
-                                llm_start_time = time.time()
-                                ai_response = await process_streaming_response(
-                                    websocket,
-                                    stream_sid,
-                                    text,
-                                    conversation_history,
-                                    None
-                                )
-                                llm_end_time = time.time()
-                                llm_duration = llm_end_time - llm_start_time
+                                # LLM 응답 생성 - 백그라운드 태스크로 실행 (STT 루프 블로킹 방지)
+                                logger.info("🤖 [LLM] 응답 생성 시작 (백그라운드)")
                                 
-                                # ✅ AI 응답 종료 (1초 후 사용자 입력 재개)
-                                rtzr_stt.stop_bot_speaking()
-                                
-                                logger.info("✅ [LLM] 응답 생성 완료")
-                                
-                                # 전체 처리 시간 로깅
-                                if stt_complete_time:
-                                    total_delay = llm_end_time - stt_complete_time
-                                    logger.info(f"⏱️ [전체 지연] 최종 인식 → LLM 완료: {total_delay:.2f}초 (LLM 응답 생성: {llm_duration:.2f}초)")
-                                
-                                # AI 응답을 대화 세션에 추가 (안전하게)
-                                try:
-                                    if ai_response and ai_response.strip():
-                                        # conversation_sessions에 여전히 존재하는지 확인
-                                        if call_sid in conversation_sessions:
+                                # ✅ 핵심: await 하지 않고 백그라운드로 실행
+                                async def handle_response():
+                                    try:
+                                        llm_start_time = time.time()
+                                        ai_response, playback_duration = await process_streaming_response(
+                                            websocket,
+                                            stream_sid,
+                                            text,
+                                            conversation_history,
+                                            rtzr_stt
+                                        )
+                                        llm_end_time = time.time()
+                                        llm_duration = llm_end_time - llm_start_time
+                                        
+                                        logger.info(f"✅ [LLM] 응답 생성 완료 (재생 시간: {playback_duration:.2f}초)")
+                                        
+                                        # ✅ AI 응답 종료 - bot_silence_delay로 보호
+                                        rtzr_stt.stop_bot_speaking()
+                                        
+                                        # 대화 히스토리에 추가
+                                        if call_sid in conversation_sessions and ai_response:
                                             conversation_sessions[call_sid].append({"role": "assistant", "content": ai_response})
                                         
-                                        # 대화 히스토리 관리
-                                        if call_sid in conversation_sessions and len(conversation_sessions[call_sid]) > 20:
-                                            conversation_sessions[call_sid] = conversation_sessions[call_sid][-20:]
-                                    
-                                    total_cycle_time = time.time() - cycle_start
-                                    logger.info(f"⏱️  전체 응답 사이클: {total_cycle_time:.2f}초")
-                                    logger.info(f"{'='*60}\n\n")
-                                except KeyError:
-                                    # 세션이 이미 삭제된 경우 (통화 종료)
-                                    logger.info("⚠️  세션이 이미 삭제됨 (통화 종료 중)")
-                                    break
-                                except Exception as e:
-                                    logger.error(f"❌ 응답 저장 오류: {e}")
+                                    except Exception as e:
+                                        logger.error(f"❌ 백그라운드 응답 처리 오류: {e}")
+                                        rtzr_stt.stop_bot_speaking()
+                                
+                                # 백그라운드에서 실행 (STT 루프는 즉시 다음 반복으로)
+                                asyncio.create_task(handle_response())
+                                
+                                logger.info("✅ [STT 루프] 다음 발화 감지 준비 완료")
                                 
                             elif text:
                                 # 부분 결과를 LLM에 백그라운드 전송
