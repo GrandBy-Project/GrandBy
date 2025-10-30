@@ -3,7 +3,7 @@ Naver Clova TTS 서비스
 REST API를 통한 음성 합성 (비동기 최적화)
 """
 
-import requests
+import httpx
 import logging
 import time
 import os
@@ -34,9 +34,9 @@ class NaverClovaTTSService:
         self.audio_dir = Path(__file__).parent.parent.parent.parent / "audio_files" / "tts"
         self.audio_dir.mkdir(parents=True, exist_ok=True)
 
-        # HTTP 세션 풀 설정 (연결 재사용)
-        self.session = requests.Session()
-        # 헤더는 요청마다 새로 설정
+        # HTTP 클라이언트 (연결 재사용)
+        self.client = httpx.AsyncClient(http2=True, timeout=10.0)
+        self.sync_client = httpx.Client(http2=True, timeout=10.0)
 
         # 헤더를 요청마다 새로 설정 (매우 중요!)
         self.headers = {
@@ -63,9 +63,6 @@ class NaverClovaTTSService:
                 logger.error("❌ 변환할 텍스트가 비어있습니다!")
                 return None, 0
             
-            # 비동기 HTTP 요청
-            loop = asyncio.get_event_loop()
-            
             # API 호출 데이터
             data = {
                 "speaker": self.speaker,
@@ -82,13 +79,17 @@ class NaverClovaTTSService:
             logger.info(f"  - Speaker: {self.speaker}")
             logger.info(f"  - Text length: {len(text)}")
             
-
-            
             # 비동기 HTTP 요청 실행
-            response = await loop.run_in_executor(
-                None,
-                lambda: self.session.post(self.api_url, headers=self.headers, data=data, timeout=10.0)
+            response = await self.client.post(
+                self.api_url,
+                headers=self.headers,
+                data=data,
+                timeout=10.0
             )
+            try:
+                logger.info(f"🌐 [Clova TTS] Protocol negotiated: {response.http_version}  status={response.status_code}")
+            except Exception:
+                pass
             
             if response.status_code == 200:
                 elapsed_time = time.time() - start_time
@@ -135,14 +136,16 @@ class NaverClovaTTSService:
             logger.info(f"  - Speaker: {self.speaker}")
             logger.info(f"  - Text length: {len(text)}")
 
-            # 헤더를 요청마다 새로 설정 (매우 중요!)
-            headers = {
-                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-                "X-NCP-APIGW-API-KEY-ID": self.client_id,
-                "X-NCP-APIGW-API-KEY": self.client_secret,
-            }
-
-            response = self.session.post(self.api_url, headers=headers, data=data, timeout=10.0)
+            response = self.sync_client.post(
+                self.api_url,
+                headers=self.headers,
+                data=data,
+                timeout=10.0
+            )
+            try:
+                logger.info(f"🌐 [Clova TTS] (sync) Protocol negotiated: {response.http_version}  status={response.status_code}")
+            except Exception:
+                pass
             
             # 응답 확인
             if response.status_code == 200:
@@ -180,9 +183,11 @@ class NaverClovaTTSService:
     
     async def close(self):
         """리소스 정리"""
-        if self.session:
-            self.session.close()
-            logger.info("🔒 HTTP 세션 정리 완료")
+        if self.sync_client:
+            self.sync_client.close()
+        if self.client:
+            await self.client.aclose()
+        logger.info("🔒 HTTP 클라이언트 정리 완료")
 
 
 # 전역 인스턴스
