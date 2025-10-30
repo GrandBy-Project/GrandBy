@@ -1,3 +1,4 @@
+
 version: '3.8'
 
 services:
@@ -107,6 +108,7 @@ services:
       # Speech-to-Text Provider
       STT_PROVIDER: ${STT_PROVIDER:-rtzr}
 
+    
       # RTZR STT (Korean Speech Recognition)
       RTZR_CLIENT_ID: ${RTZR_CLIENT_ID}
       RTZR_CLIENT_SECRET: ${RTZR_CLIENT_SECRET}
@@ -127,7 +129,7 @@ services:
       - ./backend/app:/app/app
       - ./backend/migrations:/app/migrations
       - ./backend/scripts:/app/scripts
-      # (Deprecated) Google credentials volume removed
+      - ./backend/credentials:/app/credentials:ro
     networks:
       - grandby_network
     restart: unless-stopped
@@ -175,7 +177,7 @@ services:
       NAVER_CLOVA_TTS_EMOTION: ${NAVER_CLOVA_TTS_EMOTION:-2}
     volumes:
       - ./backend/app:/app/app
-      # (Deprecated) Google credentials volume removed
+      - ./backend/credentials:/app/credentials
     networks:
       - grandby_network
     restart: unless-stopped
@@ -222,7 +224,7 @@ services:
       NAVER_CLOVA_TTS_EMOTION: ${NAVER_CLOVA_TTS_EMOTION:-2}
     volumes:
       - ./backend/app:/app/app
-      # (Deprecated) Google credentials volume removed
+      - ./backend/credentials:/app/credentials
     networks:
       - grandby_network
     restart: unless-stopped
