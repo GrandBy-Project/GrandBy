@@ -47,11 +47,6 @@ class Settings(BaseSettings):
     # STT 제공자 선택: "google", "openai", "rtzr"
     STT_PROVIDER: str = "rtzr"
     
-    # Google Cloud STT 설정
-    GOOGLE_APPLICATION_CREDENTIALS: str = "credentials/google-cloud-stt.json"
-    GOOGLE_STT_LANGUAGE_CODE: str = "ko-KR"
-    GOOGLE_STT_MODEL: str = "latest_short"  # phone_call, latest_short, latest_long
-    
     # ==================== RTZR STT (Korean Speech Recognition) ====================
     RTZR_CLIENT_ID: str = ""
     RTZR_CLIENT_SECRET: str = ""

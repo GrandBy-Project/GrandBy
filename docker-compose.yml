@@ -106,12 +106,7 @@ services:
 
       # Speech-to-Text Provider
       STT_PROVIDER: ${STT_PROVIDER:-rtzr}
-      
-      # Google Cloud Speech-to-Text
-      GOOGLE_APPLICATION_CREDENTIALS: /app/credentials/google-cloud-stt.json
-      GOOGLE_STT_LANGUAGE_CODE: ${GOOGLE_STT_LANGUAGE_CODE:-ko-KR}
-      GOOGLE_STT_MODEL: ${GOOGLE_STT_MODEL:-phone_call}
-      
+
       # RTZR STT (Korean Speech Recognition)
       RTZR_CLIENT_ID: ${RTZR_CLIENT_ID}
       RTZR_CLIENT_SECRET: ${RTZR_CLIENT_SECRET}
@@ -132,7 +127,7 @@ services:
       - ./backend/app:/app/app
       - ./backend/migrations:/app/migrations
       - ./backend/scripts:/app/scripts
-      - ./backend/credentials:/app/credentials:ro
+      # (Deprecated) Google credentials volume removed
     networks:
       - grandby_network
     restart: unless-stopped
@@ -180,7 +175,7 @@ services:
       NAVER_CLOVA_TTS_EMOTION: ${NAVER_CLOVA_TTS_EMOTION:-2}
     volumes:
       - ./backend/app:/app/app
-      - ./backend/credentials:/app/credentials
+      # (Deprecated) Google credentials volume removed
     networks:
       - grandby_network
     restart: unless-stopped
@@ -227,7 +222,7 @@ services:
       NAVER_CLOVA_TTS_EMOTION: ${NAVER_CLOVA_TTS_EMOTION:-2}
     volumes:
       - ./backend/app:/app/app
-      - ./backend/credentials:/app/credentials
+      # (Deprecated) Google credentials volume removed
     networks:
       - grandby_network
     restart: unless-stopped
