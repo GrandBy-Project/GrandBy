@@ -20,6 +20,7 @@ import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { useRouter } from 'expo-router';
 import { Colors } from '../constants/Colors';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 export const LoginScreen = () => {
   const router = useRouter();
@@ -95,56 +96,83 @@ export const LoginScreen = () => {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        {/* 로고 섹션 */}
+        {/* 상단 로고 (배경 없는 로고) */}
         <View style={styles.logoSection}>
           <Image
-            source={require('../../assets/GranbyLogoMed.png')}
+            source={require('../../assets/grandby_noBackground-logo.png')}
+            style={styles.headerLogo}
+            resizeMode="contain"
+          />
+        </View>
+
+        {/* 중간에 기존 로고 배치 */}
+        <View style={styles.middleLogoSection}>
+          <Image
+            source={require('../../assets/grandby-logo.png')}
             style={styles.logo}
             resizeMode="contain"
           />
         </View>
 
-        {/* 환영 메시지 */}
-        <View style={styles.welcomeSection}>
+        {/* 환영 메시지 - 중간 로고 아래, 입력 폼 위 */}
+        <View style={styles.welcomeSection}
+        >
           <Text style={styles.welcomeText}>오늘도 함께해요!</Text>
         </View>
 
         {/* 입력 폼 */}
         <View style={styles.formSection}>
-          <Input
-            inputRef={emailRef}
-            label=""
-            value={email}
-            onChangeText={setEmail}
-            placeholder="아이디"
-            keyboardType="email-address"
-            autoCapitalize="none"
-            error={emailError}
-            returnKeyType="next"
-            onSubmitEditing={() => passwordRef.current?.focus()}
-          />
+          <View style={styles.narrow}>
+            <Input
+              ref={emailRef}
+              label=""
+              value={email}
+              onChangeText={setEmail}
+              placeholder="아이디"
+              keyboardType="email-address"
+              autoCapitalize="none"
+              error={emailError}
+              returnKeyType="next"
+              onSubmitEditing={() => passwordRef.current?.focus()}
+              inputStyle={{ fontSize: 18 }}
+            />
 
-          <Input
-            inputRef={passwordRef}
-            label=""
-            value={password}
-            onChangeText={setPassword}
-            placeholder="비밀번호"
-            secureTextEntry
-            error={passwordError}
-            returnKeyType="done"
-            onSubmitEditing={handleLogin}
-          />
+            <Input
+              ref={passwordRef}
+              label=""
+              value={password}
+              onChangeText={setPassword}
+              placeholder="비밀번호"
+              secureTextEntry
+              error={passwordError}
+              returnKeyType="done"
+              onSubmitEditing={handleLogin}
+              inputStyle={{ fontSize: 18 }}
+            />
+          </View>
 
-          {/* 자동 로그인 체크박스 */}
+          {/* 자동 로그인 체크박스 (아이콘 기반) */}
           <TouchableOpacity
             style={styles.autoLoginContainer}
             onPress={() => setAutoLogin(!autoLogin)}
             activeOpacity={0.7}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
-            <View style={[styles.checkbox, autoLogin && styles.checkboxChecked]}>
-              {autoLogin && <Text style={styles.checkmark}>✓</Text>}
-            </View>
+            {autoLogin ? (
+              <MaterialCommunityIcons
+                name="checkbox-marked"
+                size={28}
+                color={Colors.primary}
+                style={styles.checkboxIcon}
+              />
+            ) : (
+              <MaterialCommunityIcons
+                name="checkbox-blank-outline"
+                size={28}
+                color={Colors.border}
+                style={styles.checkboxIcon}
+              />
+            )}
             <Text style={styles.autoLoginText}>자동 로그인</Text>
           </TouchableOpacity>
 
@@ -153,6 +181,8 @@ export const LoginScreen = () => {
             title="로그인"
             onPress={handleLogin}
             loading={isLoading}
+            style={{ alignSelf: 'center', width: '90%' }}
+            textStyle={{ fontSize: 20 }}
           />
 
           {/* 계정 찾기 / 회원가입 */}
@@ -166,19 +196,7 @@ export const LoginScreen = () => {
             </TouchableOpacity>
           </View>
 
-          {/* 구분선 */}
-          <View style={styles.separator}>
-            <View style={styles.separatorLine} />
-          </View>
-
-          {/* 카카오 로그인 */}
-          <TouchableOpacity onPress={handleKakaoLogin} activeOpacity={0.8}>
-            <Image
-              source={require('../../assets/kakao_login_medium_wide.png')}
-              style={styles.kakaoButton}
-              resizeMode="contain"
-            />
-          </TouchableOpacity>
+          {/* 카카오 로그인 영역 제거됨 */}
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -204,22 +222,53 @@ const styles = StyleSheet.create({
     width: 300,
     height: 130,
   },
+  headerLogo: {
+    width: 480,
+    height: 200,
+    marginBottom: -180,
+  },
+  brandKorean: {
+    marginTop: 8,
+    bottom: -20,
+    fontSize: 40,
+    fontWeight: 'bold',
+    fontFamily: 'Pretendard-Bold',
+    color: Colors.primary,
+    letterSpacing: 1,
+  },
+  middleLogoSection: {
+    alignItems: 'center',
+    marginTop: 60,
+    marginBottom: 12,
+  },
   welcomeSection: {
-    marginBottom: 24,
+    marginTop: -8,
+    marginBottom: 12,
     alignItems: 'center',
   },
   welcomeText: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#000000',
+    fontSize: 24,
+    fontFamily: 'Pretendard-Bold',
+    color: Colors.primary,
+    lineHeight: 32,
   },
   formSection: {
     gap: 12,
   },
+  narrow: {
+    width: '90%',
+    alignSelf: 'center',
+  },
   autoLoginContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginVertical: 8,
+    marginVertical: 12,
+    paddingVertical: 6,
+    width: '90%',
+    alignSelf: 'center',
+  },
+  checkboxIcon: {
+    marginRight: 8,
   },
   checkbox: {
     width: 20,
@@ -241,7 +290,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   autoLoginText: {
-    fontSize: 14,
+    fontSize: 16,
     color: '#000000',
   },
   linkContainer: {
@@ -252,9 +301,9 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   linkText: {
-    fontSize: 16,
+    fontSize: 18,
     color: '#666666',
-    fontWeight: '600',
+    fontWeight: '700',
   },
   divider: {
     width: 1.5,
