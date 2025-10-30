@@ -1,8 +1,10 @@
-# Google Cloud STT 구현 요약
+# [DEPRECATED] Google Cloud STT 구현 요약 (RTZR로 대체)
+
+> 이 문서는 역사적 기록을 위해 보존되었습니다. 현재 프로젝트는 RTZR STT를 기본 및 유일한 제공자로 사용합니다. Google Cloud STT 관련 코드는 제거되었으며, 설정/의존성도 정리되었습니다.
 
 ## 📌 개요
 
-OpenAI Whisper 대신 Google Cloud Speech-to-Text API를 사용하도록 STT 서비스를 업그레이드했습니다.
+OpenAI Whisper 대신 Google Cloud Speech-to-Text API를 사용하도록 STT 서비스를 업그레이드했습니다. (현재는 RTZR로 완전 전환)
 
 ### 주요 장점
 - ⚡ **2-3배 빠른 응답속도**: 0.3-0.5초 (Whisper: 1-2초)

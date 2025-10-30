@@ -1,4 +1,6 @@
-# Google Cloud STT 수동 설정 가이드
+# [DEPRECATED] Google Cloud STT 수동 설정 가이드 (RTZR로 대체)
+
+> 현재 프로젝트는 RTZR STT만 사용합니다. 본 문서는 과거 기록 보존용입니다.
 
 ## ⚠️ 사용자가 직접 수정해야 하는 부분
 

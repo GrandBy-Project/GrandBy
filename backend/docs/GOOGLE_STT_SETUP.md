@@ -67,6 +67,8 @@ mv ~/Downloads/grandby-xxxxxxx.json backend/credentials/google-cloud-stt.json
 chmod 600 backend/credentials/google-cloud-stt.json
 ```
 
+> [DEPRECATED] 현재 프로젝트는 RTZR STT를 사용합니다. 본 문서는 과거 참조용으로만 보존됩니다.
+
 ### 2.4 .gitignore 확인
 `.gitignore`에 다음 라인이 있는지 확인:
 ```
