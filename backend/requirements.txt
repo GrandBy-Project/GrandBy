@@ -28,8 +28,7 @@ requests==2.32.5
 openai==1.51.0
 tiktoken==0.7.0
 
-# ==================== Google Cloud STT ====================
-google-cloud-speech==2.26.0
+# (Deprecated) Google Cloud STT removed in favor of RTZR
 
 # ==================== Firebase Admin SDK ====================
 firebase-admin==6.4.0

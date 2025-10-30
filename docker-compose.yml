@@ -1,3 +1,4 @@
+
 version: '3.8'
 
 services:
@@ -106,12 +107,8 @@ services:
 
       # Speech-to-Text Provider
       STT_PROVIDER: ${STT_PROVIDER:-rtzr}
-      
-      # Google Cloud Speech-to-Text
-      GOOGLE_APPLICATION_CREDENTIALS: /app/credentials/google-cloud-stt.json
-      GOOGLE_STT_LANGUAGE_CODE: ${GOOGLE_STT_LANGUAGE_CODE:-ko-KR}
-      GOOGLE_STT_MODEL: ${GOOGLE_STT_MODEL:-phone_call}
-      
+
+    
       # RTZR STT (Korean Speech Recognition)
       RTZR_CLIENT_ID: ${RTZR_CLIENT_ID}
       RTZR_CLIENT_SECRET: ${RTZR_CLIENT_SECRET}
