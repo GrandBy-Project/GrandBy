@@ -1313,7 +1313,7 @@ JSON 형식으로 응답:
         results["appropriate_rate"] = (results["appropriate_responses"] / results["total_tests"]) * 100
         results["avg_response_time"] = sum(results["response_times"]) / len(results["response_times"])
         
-        logger.info(f"📊 테스트 결과 요약:")
+        logger.info(f" 테스트 결과 요약:")
         logger.info(f"   존댓말 준수율: {results['polite_rate']:.1f}%")
         logger.info(f"   응답 적절성: {results['appropriate_rate']:.1f}%")
         logger.info(f"   평균 응답 시간: {results['avg_response_time']:.2f}초")
