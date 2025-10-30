@@ -52,6 +52,31 @@ saved_calls: set = set()  # 중복 저장 방지용 플래그
 # 한국 시간대 (KST, UTC+9)
 KST = timezone('Asia/Seoul')
 
+def calculate_audio_duration(audio_data: bytes, sample_rate: int = 24000, channels: int = 1, sample_width: int = 2) -> float:
+    """
+    오디오 데이터의 재생 시간을 계산
+    
+    Args:
+        audio_data: 오디오 바이트 데이터
+        sample_rate: 샘플링 레이트 (Hz) - Naver Clova TTS는 24000Hz
+        channels: 채널 수 (1=모노, 2=스테레오)
+        sample_width: 샘플 너비 (바이트) - 16bit = 2 bytes
+    
+    Returns:
+        float: 재생 시간 (초)
+    """
+    if not audio_data:
+        return 0.0
+    
+    # WAV 헤더가 있으면 제거 (44 bytes)
+    data_size = len(audio_data)
+    if data_size > 44 and audio_data[:4] == b'RIFF':
+        data_size -= 44  # WAV 헤더 크기
+    
+    # 재생 시간 = 데이터 크기 / (샘플레이트 * 채널 수 * 샘플 너비)
+    duration = data_size / (sample_rate * channels * sample_width)
+    return duration
+
 def get_time_based_welcome_message() -> str:
     """
     한국 시간대 기준으로 시간대별 환영 메시지 또는 기본 인사말 랜덤 선택
@@ -264,7 +289,9 @@ async def process_streaming_response(
     stream_sid: str,
     user_text: str,
     conversation_history: list,
-    audio_processor=None
+    audio_processor=None,
+    rtzr_stt=None,
+    call_sid=None
 ) -> str:
     """
     최적화된 스트리밍 응답 처리 - 사전 연결된 WebSocket 사용
@@ -272,6 +299,7 @@ async def process_streaming_response(
     핵심 개선:
     - 사전 연결된 Cartesia WebSocket 재사용
     - LLM 스트림을 두 갈래로 분리 (텍스트 수집 + TTS)
+    - 🚀 첫 TTS 재생 후 LLM 종료 판단 (사용자 경험 최적화)
     """
     import audioop
     
@@ -291,10 +319,12 @@ async def process_streaming_response(
         playback_duration = await llm_to_clova_tts_pipeline(
             websocket,
             stream_sid,
-                user_text,
-                conversation_history,
-                full_response,
-                pipeline_start
+            user_text,
+            conversation_history,
+            full_response,
+            pipeline_start,
+            rtzr_stt=rtzr_stt,
+            call_sid=call_sid
         )
         
         pipeline_time = time.time() - pipeline_start
@@ -320,13 +350,69 @@ async def process_streaming_response(
             audio_processor.stop_bot_speaking()
 
 
+async def _evaluate_end_after_first_audio(rtzr_stt, call_sid: str, user_text: str):
+    """
+    마지막 TTS 재생 후 백그라운드에서 LLM 종료 판단 수행
+    
+    Args:
+        rtzr_stt: RTZR STT 인스턴스
+        call_sid: 통화 SID
+        user_text: 사용자 발화 텍스트
+    """
+    try:
+        from app.services.ai_call.end_decision import EndDecisionSignals
+        
+        # 🤖 LLM 기반 종료 판단 수행
+        score, breakdown = rtzr_stt._end_engine.score_with_llm(
+            rtzr_stt._signals, 
+            rtzr_stt._conversation_history
+        )
+
+        # 종료 판단 결과 처리 (first_audio_evaluated 플래그로 중복 방지)
+        if score >= 100:
+            decision = 'hard_end'
+            # 하드 종료 이벤트를 results_queue에 전달
+            if rtzr_stt.results_queue and not (hasattr(rtzr_stt, '_first_audio_evaluated') and rtzr_stt._first_audio_evaluated):
+                rtzr_stt._first_audio_evaluated = True  # 중복 방지 플래그
+                await rtzr_stt.results_queue.put({
+                    'event': 'hard_end',
+                    'text': user_text,
+                    'is_final': True
+                })
+                logger.info("✅ 하드 종료 이벤트 전달 완료")
+                
+        # elif score >= 70:
+        #     decision = 'soft_close'
+        #     # 소프트 클로징 이벤트를 results_queue에 전달
+        #     if rtzr_stt.results_queue and not (hasattr(rtzr_stt, '_first_audio_evaluated') and rtzr_stt._first_audio_evaluated):
+        #         rtzr_stt._first_audio_evaluated = True  # 중복 방지 플래그
+        #         await rtzr_stt.results_queue.put({
+        #             'event': 'soft_close_prompt',
+        #             'text': user_text,
+        #             'is_final': True
+        #         })
+        #         logger.info("✅ 소프트 클로징 이벤트 전달 완료")
+        else:
+            decision = 'none'
+
+        logger.info(f"🚨 [종료 판단] 첫 TTS 재생 후 판단: {decision} (점수: {score})")
+        logger.info(f"📊 상세 내역: {breakdown}")
+                
+    except Exception as e:
+        logger.error(f"❌ 종료 판단 오류: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+
+
 async def llm_to_clova_tts_pipeline(
     websocket: WebSocket,
     stream_sid: str,
     user_text: str,
     conversation_history: list,
     full_response: list,
-    pipeline_start: float
+    pipeline_start: float,
+    rtzr_stt=None,
+    call_sid=None
 ) -> float:
     """
     LLM 텍스트 생성 → Naver Clova TTS → Twilio 전송 파이프라인
@@ -335,6 +421,7 @@ async def llm_to_clova_tts_pipeline(
     - LLM이 문장을 생성하는 즉시 Clova TTS로 변환
     - 변환된 음성을 즉시 Twilio로 전송
     - 실시간 스트리밍 효과
+    - 🚀 첫 TTS 재생 후 LLM 종료 판단 수행 (사용자 경험 최적화)
     """
     import re
     import base64
@@ -420,13 +507,21 @@ async def llm_to_clova_tts_pipeline(
                     sentence_count,
                     pipeline_start
                 )
+
                 total_playback_duration += playback_duration
             else:
                 logger.warning("⚠️ 마지막 문장 TTS 실패, 건너뜀")
         
         logger.info(f"✅ [전체] 총 {sentence_count}개 문장 처리 완료")
-        
-        return total_playback_duration
+                        
+        # 🚀 [마지막 TTS 재생 후] LLM 종료 판단 (백그라운드, 사용자 경험 영향 없음)
+        if rtzr_stt and call_sid:
+            # 백그라운드 태스크로 실행하여 TTS 스트리밍에 영향 없음
+            asyncio.create_task(_evaluate_end_after_first_audio(
+                rtzr_stt, call_sid, user_text
+            ))
+                
+        return total_playback_duration  
         
     except Exception as e:
         logger.error(f"❌ Naver Clova TTS 파이프라인 오류: {e}")
@@ -1190,6 +1285,10 @@ async def media_stream_handler(
                 # RTZR 실시간 STT 초기화
                 rtzr_stt = RTZRRealtimeSTT()
                 
+                # 🤖 LLM 서비스를 종료 판단 엔진에 주입
+                rtzr_stt._end_engine.set_llm_service(llm_service)
+                logger.info("✅ LLM 기반 종료 판단 엔진 설정 완료")
+                
                 # LLM 부분 결과 수집기 초기화 (백그라운드 전송)
                 async def llm_partial_callback(partial_text: str):
                     """부분 인식 결과를 LLM에 백그라운드 전송"""
@@ -1272,15 +1371,40 @@ async def media_stream_handler(
                 async def process_rtzr_results():
                     """RTZR 인식 결과 처리"""
                     nonlocal last_partial_time, call_sid
+                    state = "in_call"
+                    last_soft_prompt_time = 0.0
                     stt_complete_time = None
                     try:
+                        logger.info("🔄 [process_rtzr_results 시작] 결과 처리 루프 가동")
                         async for result in rtzr_stt.start_streaming():
                             # ✅ 통화 종료 체크
                             if call_sid not in conversation_sessions:
                                 logger.info("⚠️ 통화 종료로 인한 RTZR 처리 중단")
                                 break
                             
-                            if not result or 'text' not in result:
+                            if not result:
+                                logger.debug("⚪ [빈 결과] result가 None 또는 빈 값")
+                                continue
+
+                            # ====== 종료 판단 이벤트 처리 ======
+                            event_name = result.get('event')
+                            logger.debug(f"🔍 [결과 수신] event={event_name}, keys={list(result.keys())}")
+                            
+                            if event_name == 'soft_close_prompt':
+                                logger.info("🟡 소프트 클로징 트리거 수신")
+
+                            if event_name == 'hard_end':
+                                logger.info("🔴 [AUTO END] 종료 트리거 수신 - 즉시 종료")
+                                state = 'ending'
+                                # WebSocket 종료
+                                try:
+                                    await websocket.close()
+                                except Exception:
+                                    pass
+                                break
+                            
+                            # ====== 일반 STT 처리 ======
+                            if 'text' not in result:
                                 continue
                             
                             text = result.get('text', '')
@@ -1312,6 +1436,7 @@ async def media_stream_handler(
                                 
                                 # 최종 인식 시점 기록 (LLM 전달 전 시간 측정용)
                                 stt_complete_time = current_time
+
                                 
                                 # 종료 키워드 확인
                                 if '그랜비 통화를 종료합니다' in text:
@@ -1321,9 +1446,13 @@ async def media_stream_handler(
                                     if call_sid not in conversation_sessions:
                                         conversation_sessions[call_sid] = []
                                     conversation_sessions[call_sid].append({"role": "user", "content": text})
+                                    # 🤖 LLM 종료 판단을 위한 대화 기록 업데이트
+                                    rtzr_stt.update_conversation_history(conversation_sessions[call_sid])
                                     
                                     goodbye_text = "그랜비 통화를 종료합니다. 감사합니다. 좋은 하루 보내세요!"
                                     conversation_sessions[call_sid].append({"role": "assistant", "content": goodbye_text})
+                                    # 🤖 LLM 종료 판단을 위한 대화 기록 업데이트
+                                    rtzr_stt.update_conversation_history(conversation_sessions[call_sid])
                                     
                                     logger.info("🔊 [TTS] 종료 메시지 전송")
                                     # await send_audio_to_twilio_with_tts(websocket, stream_sid, goodbye_text, None)
@@ -1337,10 +1466,16 @@ async def media_stream_handler(
                                 logger.info(f"🎯 발화 완료 → 즉시 응답 생성")
                                 logger.info(f"{'='*60}")
                                 
+                                # 🔄 다음 사이클을 위한 종료 판단 플래그 리셋
+                                if hasattr(rtzr_stt, '_first_audio_evaluated'):
+                                    rtzr_stt._first_audio_evaluated = False
+                                
                                 # 대화 세션에 사용자 메시지 추가
                                 if call_sid not in conversation_sessions:
                                     conversation_sessions[call_sid] = []
                                 conversation_sessions[call_sid].append({"role": "user", "content": text})
+                                # 🤖 LLM 종료 판단을 위한 대화 기록 업데이트
+                                rtzr_stt.update_conversation_history(conversation_sessions[call_sid])
                                 
                                 conversation_history = conversation_sessions[call_sid]
                                 
@@ -1361,7 +1496,9 @@ async def media_stream_handler(
                                     stream_sid,
                                     text,
                                     conversation_history,
-                                    None
+                                    None,
+                                    rtzr_stt=rtzr_stt,
+                                    call_sid=call_sid
                                 )
                                 llm_end_time = time.time()
                                 llm_duration = llm_end_time - llm_start_time
@@ -1382,6 +1519,8 @@ async def media_stream_handler(
                                         # conversation_sessions에 여전히 존재하는지 확인
                                         if call_sid in conversation_sessions:
                                             conversation_sessions[call_sid].append({"role": "assistant", "content": ai_response})
+                                            # 🤖 LLM 종료 판단을 위한 대화 기록 업데이트
+                                            rtzr_stt.update_conversation_history(conversation_sessions[call_sid])
                                         
                                         # 대화 히스토리 관리
                                         if call_sid in conversation_sessions and len(conversation_sessions[call_sid]) > 20:

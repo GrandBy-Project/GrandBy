@@ -2,22 +2,11 @@ import time
 import re
 from dataclasses import dataclass
 
-CLOSING_KEYWORDS = [
-    r"그만(할게|할께|할까요)?",
-    r"여기까(지)?",
-    r"됐(어|습니다|어요|어요용)?",
-    r"괜찮(아|습니다)?",
-    r"고마(워|워요|웠어|했습니다)?",
-    r"감사(합니다|했어요)?",
-    r"다음에",
-    r"나중에",
-    r"이만 (끊자|끝내자|마무리하자)?",
-    r"오늘은 여기까지",
-    r"내일 또( 봬요| 통화해요)?"
-]
-SHORT_ACKS = [r"^(응|어|음|네|예|응응|네네)[.!?]?"]
+# 짧은 긍정 응답 패턴 (대화 의지 부족 감지용)
+SHORT_ACKS = [r"^(응|어|음|네|예|응응|네네)[.!?]?$"]
 
 def match_any(text: str, patterns: list[str]) -> bool:
+    """정규식 패턴 매칭 (하위 호환성 유지)"""
     t = (text or "").strip()
     for p in patterns:
         if re.search(p, t, flags=re.IGNORECASE):
@@ -38,12 +27,19 @@ class EndDecisionSignals:
     max_call_seconds: int = 300  # 5분 상한
 
 class EndDecisionEngine:
-    def __init__(self, soft_threshold=70):
+    def __init__(self, soft_threshold=70, use_llm=True):
         self.soft_threshold = soft_threshold
+        self.use_llm = use_llm  # LLM 사용 여부
+        self.llm_service = None  # 나중에 주입
+
+    def set_llm_service(self, llm_service):
+        """LLM 서비스 주입"""
+        self.llm_service = llm_service
 
     def score(self, s: EndDecisionSignals) -> tuple[int, dict]:
         """
-        종료 판단 점수 계산 및 상세 내역 반환
+        폴백용 종료 판단 점수 계산 (LLM 미사용 시에만 사용)
+        최소한의 로직만 유지
         
         Returns:
             tuple[int, dict]: (총점, 상세 내역)
@@ -51,7 +47,6 @@ class EndDecisionEngine:
         now = time.time()
         score = 0
         breakdown = {}
-        has_closing_keyword = False
 
         # ⏱️ 1. 최대 통화 시간 초과 (즉시 하드 종료)
         call_duration = now - s.call_start_time
@@ -62,59 +57,151 @@ class EndDecisionEngine:
         
         breakdown["call_duration_sec"] = int(call_duration)
 
-        # 💬 2. 종료 의도 키워드 감지 (최우선 - 즉시 소프트 클로징)
-        # 단, 최근 5초 이내 발화에만 적용 (오래된 키워드로 계속 70점 고정 방지)
-        if match_any(s.last_user_utterance, CLOSING_KEYWORDS):
-            if s.last_utterance_time and (now - s.last_utterance_time) <= 5.0:
-                has_closing_keyword = True
-                # 종료 키워드 사용 시 즉시 70점으로 설정 (소프트 클로징 보장)
-                score = 70
-                breakdown["closing_keyword"] = "70 (즉시 소프트)"
-                breakdown["total_score"] = 70
-                return 70, breakdown
-            else:
-                # 5초 이상 경과한 종료 키워드는 무시하고 일반 점수 계산
-                breakdown["closing_keyword_expired"] = f"무시 (경과: {int(now - s.last_utterance_time) if s.last_utterance_time else 0}초)"
-
-        # ✅ 3. 태스크 완료 후 긍정 응답
-        if s.task_completed:
-            score += 40
-            breakdown["task_completed"] = 40
-
-        # 🔄 4. 짧은 응답 반복
+        # 🔄 2. 짧은 응답 반복
         if s.short_ack_count >= 3:
             score += 20
             breakdown["short_ack_repeat"] = f"+20 (count:{s.short_ack_count})"
 
-        # 🔇 5. 사용자 침묵 시간 기반
+        # 🔇 3. 사용자 침묵 시간 기반
         if s.last_user_speech_time is not None:
             silence = now - s.last_user_speech_time
-            if silence >= 15:
+            if silence >= 20:
+                score = 70
+                breakdown["silence_20s+"] = f"70 (소프트) - {int(silence)}초 침묵"
+                breakdown["total_score"] = 70
+                return 70, breakdown
+            elif silence >= 15:
                 score += 40
                 breakdown["silence_15s+"] = f"+40 ({int(silence)}s)"
             elif silence >= 10:
                 score += 25
                 breakdown["silence_10s+"] = f"+25 ({int(silence)}s)"
-            elif silence >= 5:
-                score += 10
-                breakdown["silence_5s+"] = f"+10 ({int(silence)}s)"
-            else:
-                breakdown["silence"] = f"{int(silence)}s (미적용)"
 
-        # 🕐 6. AI 클로징 이후 무응답 (중복 방지)
+        # 🕐 4. AI 클로징 이후 무응답
         if s.last_ai_closing_time:
             closing_elapsed = now - s.last_ai_closing_time
-            if 5 <= closing_elapsed < 10:
-                score += 30
-                breakdown["soft_closing_timeout"] = f"+30 ({int(closing_elapsed)}s)"
-            else:
-                breakdown["soft_closing_elapsed"] = f"{int(closing_elapsed)}s"
+            user_responded_after_closing = (
+                s.last_user_speech_time is not None and 
+                s.last_user_speech_time > s.last_ai_closing_time
+            )
+            
+            if not user_responded_after_closing:
+                if closing_elapsed >= 10:
+                    score = 100
+                    breakdown["soft_closing_hard_timeout"] = f"100 (하드) - {int(closing_elapsed)}초 무응답"
+                    breakdown["total_score"] = 100
+                    return 100, breakdown
+                elif closing_elapsed >= 5:
+                    score += 30
+                    breakdown["soft_closing_timeout"] = f"+30 ({int(closing_elapsed)}s)"
+        
+        final_score = max(0, min(score, 100))
+        breakdown["total_score"] = final_score
+        
+        return final_score, breakdown
 
-        # 회복 (감쇠) - 단, 종료 키워드가 있으면 적용하지 않음
-        if not has_closing_keyword and s.last_user_speech_time is not None and (now - s.last_user_speech_time) < 5:
-            # 최근에 대화 재개됨 → 감쇠
-            score -= 10
-            breakdown["recovery_penalty"] = "-10 (최근 대화)"
+    def score_with_llm(self, s: EndDecisionSignals, conversation_history: list = None) -> tuple[int, dict]:
+        """
+        LLM 기반 종료 판단 점수 계산
+        
+        Args:
+            s: 종료 판단 신호
+            conversation_history: 대화 기록
+            
+        Returns:
+            tuple[int, dict]: (총점, 상세 내역)
+        """
+        now = time.time()
+        score = 0
+        breakdown = {}
+        
+        # 기존 점수 계산 로직
+        call_duration = now - s.call_start_time
+        breakdown["call_duration_sec"] = int(call_duration)
+        
+        # ⏱️ 1. 최대 통화 시간 초과 (즉시 하드 종료)
+        if call_duration >= s.max_call_seconds:
+            breakdown["max_time_exceeded"] = 100
+            return 100, breakdown
+        
+        # 🤖 2. LLM 기반 종료 의도 분석 (최우선)
+        if self.use_llm and self.llm_service and s.last_user_utterance:
+            try:
+                llm_analysis = self.llm_service.analyze_call_ending_context(
+                    s.last_user_utterance,
+                    conversation_history
+                )
+                
+                end_intent = llm_analysis.get("end_intent", "none")
+                confidence = llm_analysis.get("confidence", 0.0)
+                reason = llm_analysis.get("reason", "")
+                
+                breakdown["llm_analysis"] = {
+                    "intent": end_intent,
+                    "confidence": confidence,
+                    "reason": reason
+                }
+                
+                # LLM 분석 결과에 따른 점수 부여
+                if end_intent == "explicit" and confidence >= 0.85:
+                    # 명시적 종료 의도 → 즉시 하드 종료
+                    score = 100
+                    breakdown["llm_explicit_end"] = f"100 (하드 종료) - {reason}"
+                    breakdown["total_score"] = 100
+                    return 100, breakdown
+                    
+                # elif end_intent == "soft" and confidence >= 0.6:
+                #     # 부드러운 종료 신호 → 소프트 클로징
+                #     score = 70
+                #     breakdown["llm_soft_end"] = f"70 (소프트 클로징) - {reason}"
+                #     breakdown["total_score"] = 70
+                #     return 70, breakdown
+                    
+                elif end_intent == "none":
+                    # 종료 의도 없음 → 기존 점수 계산 로직 계속
+                    breakdown["llm_no_end"] = f"계속 대화 - {reason}"
+                
+            except Exception as e:
+                breakdown["llm_error"] = f"LLM 분석 실패: {str(e)}"
+        
+        # 🔄 3. 시간 기반 로직 (LLM 보조)
+        # 짧은 응답 반복 (LLM이 놓칠 수 있는 패턴)
+        if s.short_ack_count >= 3:
+            score += 20
+            breakdown["short_ack_repeat"] = f"+20 (count:{s.short_ack_count})"
+
+        # 🔇 4. 사용자 침묵 시간 (시간 기반 판단) - 수정 필요할 수 있음
+        if s.last_user_speech_time is not None:
+            silence = now - s.last_user_speech_time
+            if silence >= 20:
+                score = 70
+                breakdown["silence_20s+"] = f"70 (소프트) - {int(silence)}초 침묵"
+                breakdown["total_score"] = 70
+                return 70, breakdown
+            elif silence >= 15:
+                score += 40
+                breakdown["silence_15s+"] = f"+40 ({int(silence)}s)"
+            elif silence >= 10:
+                score += 25
+                breakdown["silence_10s+"] = f"+25 ({int(silence)}s)"
+
+        # 🕐 5. AI 클로징 이후 무응답 (시간 기반 판단) - 수정 필요할 수 있음
+        if s.last_ai_closing_time:
+            closing_elapsed = now - s.last_ai_closing_time
+            user_responded_after_closing = (
+                s.last_user_speech_time is not None and 
+                s.last_user_speech_time > s.last_ai_closing_time
+            )
+            
+            if not user_responded_after_closing:
+                if closing_elapsed >= 10:
+                    score = 100
+                    breakdown["soft_closing_hard_timeout"] = f"100 (하드) - {int(closing_elapsed)}초 무응답"
+                    breakdown["total_score"] = 100
+                    return 100, breakdown
+                elif closing_elapsed >= 5:
+                    score += 30
+                    breakdown["soft_closing_timeout"] = f"+30 ({int(closing_elapsed)}s)"
         
         final_score = max(0, min(score, 100))
         breakdown["total_score"] = final_score
@@ -123,7 +210,7 @@ class EndDecisionEngine:
 
     def decide(self, s: EndDecisionSignals) -> tuple[str, int, dict]:
         """
-        종료 판단 및 점수/상세 내역 반환
+        종료 판단 및 점수/상세 내역 반환 (기존 방식 - 하위 호환성 유지)
         
         Returns:
             tuple[str, int, dict]: (판단 결과, 총점, 상세 내역)
@@ -137,46 +224,54 @@ class EndDecisionEngine:
             decision = "keep"
         
         return decision, sc, breakdown
+    
+    def should_analyze_with_llm(self, s: EndDecisionSignals) -> bool:
+        """
+        LLM 분석이 필요한 상황인지 판단
+        
+        Args:
+            s: 종료 판단 신호
+            
+        Returns:
+            bool: LLM 분석이 필요하면 True
+        """
+        # 최근 5초 이내 사용자 발화가 있었을 때만 LLM 사용
+        if s.last_utterance_time:
+            elapsed = time.time() - s.last_utterance_time
+            return elapsed < 5.0
+        return False
+    
+    def decide_smart(self, s: EndDecisionSignals, conversation_history: list = None) -> tuple[str, int, dict]:
+        """
+        🚀 스마트 종료 판단 (필요할 때만 LLM 사용 - 성능 최적화)
+        
+        사용자가 방금 발화했을 때만 LLM으로 맥락 분석하고,
+        그 외에는 빠른 시간 기반 로직만 사용
+        
+        Args:
+            s: 종료 판단 신호
+            conversation_history: 대화 기록
+            
+        Returns:
+            tuple[str, int, dict]: (판단 결과, 총점, 상세 내역)
+        """
+        # 사용자가 방금(5초 이내) 발화했으면 LLM 사용
+        if self.should_analyze_with_llm(s):
+            sc, breakdown = self.score_with_llm(s, conversation_history)
+            breakdown["analysis_mode"] = "LLM (recent utterance)"
+        else:
+            # 시간 기반만 (빠름)
+            sc, breakdown = self.score(s)
+            breakdown["analysis_mode"] = "Time-based (fast)"
+        
+        if sc >= 100:
+            decision = "hard_end"
+        elif sc >= self.soft_threshold:
+            decision = "soft_close"
+        else:
+            decision = "keep"
+        
+        return decision, sc, breakdown
 
 def is_short_ack(text: str) -> bool:
     return match_any(text or "", SHORT_ACKS)
-
-
-def classify_soft_closing_response(text: str) -> str:
-    """
-    소프트 클로징 멘트 후 사용자 응답을 긍정(계속)/부정(종료)/불명으로 분류
-    
-    Args:
-        text: 사용자 발화 텍스트
-    
-    Returns:
-        str: "continue" (대화 계속), "end" (종료 의사), "unclear" (불명확)
-    """
-    normalized = (text or "").strip().lower()
-    
-    # 명확한 종료 의사
-    end_patterns = [
-        r"(됐|됐어|됐습니다|됐어요|괜찮아|괜찮습니다|괜찮아요|충분해|충분합니다)",
-        r"(여기까지|이만|그만|끝|종료|마무리)",
-        r"(안.*할래|안.*할게|이제.*그만|더.*이상.*안)",
-        r"^(네|예|응|어)\.?\s*(됐|괜찮|충분|그만|끝)",
-    ]
-    
-    for pattern in end_patterns:
-        if re.search(pattern, normalized):
-            return "end"
-    
-    # 명확한 계속 의사
-    continue_patterns = [
-        r"(더|조금.*더|좀.*더|계속|이어|아직)",
-        r"(얘기.*나누|이야기.*나누|말.*하|이어.*가|계속.*해)",
-        r"(아니|아니야|아니에요|아니요)",  # 종료 부정 = 계속
-        r"(괜찮.*더|더.*괜찮)",
-    ]
-    
-    for pattern in continue_patterns:
-        if re.search(pattern, normalized):
-            return "continue"
-    
-    # 불명확 (짧은 긍정 응답 등)
-    return "unclear"
