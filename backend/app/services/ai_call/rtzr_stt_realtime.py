@@ -7,6 +7,11 @@ import asyncio
 import logging
 import time
 from typing import Optional, AsyncGenerator, Callable
+from app.services.ai_call.end_decision import (
+    EndDecisionEngine,
+    EndDecisionSignals,
+    is_short_ack,
+)
 from app.services.ai_call.rtzr_stt_service import RTZRSTTService, PartialResultBuffer
 
 logger = logging.getLogger(__name__)
@@ -44,6 +49,14 @@ class RTZRRealtimeSTT:
         self.is_bot_speaking = False
         self.bot_silence_delay = 0  # AI 응답 종료 후 1초 대기
         
+        # 🔚 종료 판단 엔진/신호
+        self._end_engine = EndDecisionEngine(soft_threshold=70, use_llm=True)
+        self._signals = EndDecisionSignals(call_start_time=time.time())
+        self._evaluator_task: Optional[asyncio.Task] = None
+        
+        # 🤖 대화 기록 (LLM 종료 판단용)
+        self._conversation_history: list = []
+
         logger.info("✅ RTZR 실시간 STT 초기화 완료")
     
     def start_bot_speaking(self):
@@ -72,11 +85,87 @@ class RTZRRealtimeSTT:
         self.is_active = True
         self.audio_queue = asyncio.Queue()
         self.results_queue = asyncio.Queue()
-        
-        logger.info("🎤 RTZR 실시간 스트리밍 시작")
+
+        # 종료 판단 주기 평가 태스크 (1초 간격)
+        # async def _evaluator_loop():
+        #     logger.info("🔄 [종료 판단 루프 시작] 🚀 스마트 LLM 평가 엔진 (최적화)")
+        #     try:
+        #         eval_count = 0
+        #         while self.is_active:
+        #             await asyncio.sleep(1.0)
+        #             eval_count += 1
+                    
+        #             # 🚀 스마트 종료 판단 (사용자 발화 시에만 LLM 사용, 나머지는 시간 기반)
+        #             decision, score, breakdown = self._end_engine.decide_smart(
+        #                 self._signals,
+        #                 self._conversation_history
+        #             )
+                    
+        #             # 점수 로깅 (3초마다 또는 점수가 높을 때)
+        #             if eval_count % 3 == 0 or score >= 40:
+        #                 mode = breakdown.get("analysis_mode", "unknown")
+        #                 breakdown_str = " | ".join([f"{k}:{v}" for k, v in breakdown.items() if k != "analysis_mode"])
+        #                 logger.info(f"📊 [{mode}] {score}/100 → {decision} | {breakdown_str}")
+                    
+        #             if decision == "soft_close":
+        #                 logger.info(f"🟡 [소프트 전환] 점수 {score}/100")
+        #             #     await self.results_queue.put({"event": "hard_end"})
+        #             #     return
+        #             elif decision == "hard_end":
+        #                 logger.info(f"🔴 [하드 종료 트리거] 점수 {score}/100 도달")
+        #                 await self.results_queue.put({"event": "hard_end"})
+        #                 return
+        #     except Exception as e:
+        #         logger.error(f"❌ 종료 판단 루프 오류: {e}")
+        #         import traceback
+        #         logger.error(f"상세 오류: {traceback.format_exc()}")
+
+        # self._evaluator_task = asyncio.create_task(_evaluator_loop())
+        # logger.info("✅ [종료 판단 태스크 생성 완료]")
+
+        # logger.info("🎤 RTZR 실시간 스트리밍 시작")
         
         try:
-            # RTZR 스트리밍 시작 (AsyncGenerator)
+            # RTZR 스트리밍 태스크 생성
+            rtzr_stream_task = asyncio.create_task(
+                self._consume_rtzr_stream()
+            )
+            
+            # 통합된 결과 스트림 처리 (STT 결과 + 종료 판단 이벤트)
+            while self.is_active:
+                try:
+                    # results_queue에서 이벤트 대기 (0.1초 타임아웃)
+                    result = await asyncio.wait_for(
+                        self.results_queue.get(),
+                        timeout=0.1
+                    )
+                    
+                    if result:
+                        yield result
+                        
+                except asyncio.TimeoutError:
+                    # 타임아웃은 정상 (큐가 비어있을 때)
+                    continue
+                except Exception as e:
+                    logger.error(f"❌ 결과 큐 처리 오류: {e}")
+                    break
+        
+        except Exception as e:
+            logger.error(f"❌ RTZR 스트리밍 오류: {e}")
+        finally:
+            self.is_active = False
+            if rtzr_stream_task and not rtzr_stream_task.done():
+                rtzr_stream_task.cancel()
+            if self._evaluator_task:
+                try:
+                    self._evaluator_task.cancel()
+                except Exception:
+                    pass
+            logger.info("🛑 RTZR 실시간 스트리밍 종료")
+    
+    async def _consume_rtzr_stream(self):
+        """RTZR STT 결과를 소비해서 results_queue에 넣기"""
+        try:
             async for result in self.rtzr_service.transcribe_streaming(self.audio_queue):
                 # ✅ AI 응답 중이면 사용자 입력 무시
                 if self.is_bot_speaking:
@@ -94,12 +183,22 @@ class RTZRRealtimeSTT:
                     if is_final:
                         # 최종 결과
                         self.partial_buffer.set_final(text)
+
+                        # 🔔 종료 판단 신호 업데이트
+                        current_time = time.time()
+                        self._signals.last_user_speech_time = current_time
+                        self._signals.last_utterance_time = current_time  # 발화 시각 기록 (키워드 시효 판단용)
+                        self._signals.last_user_utterance = text
+                        if is_short_ack(text):
+                            self._signals.short_ack_count += 1
+                        else:
+                            self._signals.short_ack_count = 0
                         
-                        yield {
+                        await self.results_queue.put({
                             'text': text,
                             'is_final': True,
                             'partial_only': False
-                        }
+                        })
                         
                         # 발화 완료 - 버퍼 초기화 및 시간 리셋
                         self.partial_buffer.reset()
@@ -113,17 +212,14 @@ class RTZRRealtimeSTT:
                         
                         self.partial_buffer.add_partial(text)
                         
-                        yield {
+                        await self.results_queue.put({
                             'text': text,
                             'is_final': False,
                             'partial_only': True
-                        }
+                        })
         
         except Exception as e:
-            logger.error(f"❌ RTZR 스트리밍 오류: {e}")
-        finally:
-            self.is_active = False
-            logger.info("🛑 RTZR 실시간 스트리밍 종료")
+            logger.error(f"❌ RTZR 스트림 소비 오류: {e}")
     
     async def add_audio_chunk(self, audio_data: bytes):
         """
@@ -149,6 +245,16 @@ class RTZRRealtimeSTT:
         if self.audio_queue:
             await self.audio_queue.put(None)  # EOS 신호
         self.is_active = False
+
+    # ===== 종료 판단 신호 업데이트용 헬퍼 =====
+    def update_conversation_history(self, conversation_history: list):
+        """
+        외부에서 대화 기록 업데이트 (LLM 종료 판단용)
+        
+        Args:
+            conversation_history: 대화 기록 리스트
+        """
+        self._conversation_history = conversation_history
 
 
 class LLMPartialCollector:
