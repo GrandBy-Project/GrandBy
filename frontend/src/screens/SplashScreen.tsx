@@ -13,15 +13,18 @@ import { useAuthStore } from '../store/authStore';
 export const SplashScreen = () => {
   const router = useRouter();
   const { setUser } = useAuthStore();
-  const [statusMessage, setStatusMessage] = useState('로그인 여부를 확인 중입니다..');
+  const [statusMessage, setStatusMessage] = useState('반갑습니다. 그랜비입니다.');
+  
 
   useEffect(() => {
     checkAutoLogin();
   }, []);
 
+  
+
   const checkAutoLogin = async () => {
     try {
-      setStatusMessage('로그인 여부를 확인 중입니다..');
+      setStatusMessage('반갑습니다. 그랜비입니다.');
       
       // 1. 토큰 확인
       const tokens = await TokenManager.getTokens();
@@ -38,7 +41,7 @@ export const SplashScreen = () => {
       if (await TokenManager.isAccessTokenValid()) {
         // Access Token 유효 → 사용자 정보 가져오기
         try {
-          setStatusMessage('로그인 여부를 확인 중입니다..');
+          setStatusMessage('반갑습니다. 그랜비입니다.');
           const user = await authApi.verifyToken();
           
           // 사용자 정보 저장
@@ -58,7 +61,7 @@ export const SplashScreen = () => {
       // 3. Refresh Token으로 갱신 시도
       if (await TokenManager.isRefreshTokenValid()) {
         try {
-          setStatusMessage('로그인 여부를 확인 중입니다..');
+          setStatusMessage('반갑습니다. 그랜비입니다.');
           const response = await authApi.refreshToken(tokens.refresh_token);
           
           // 사용자 정보 저장
