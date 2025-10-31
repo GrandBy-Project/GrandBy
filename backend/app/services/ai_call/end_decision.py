@@ -25,6 +25,8 @@ class EndDecisionSignals:
     task_completed: bool = False
     last_user_utterance: str = ""
     max_call_seconds: int = 300  # 5분 상한
+    max_time_warning_sent: bool = False  # 최대 시간 경고 전송 여부
+    warning_before_end_seconds: int = 10  # 종료 전 경고 시간 (초)
 
 class EndDecisionEngine:
     def __init__(self, soft_threshold=70, use_llm=True):
@@ -123,6 +125,15 @@ class EndDecisionEngine:
         if call_duration >= s.max_call_seconds:
             breakdown["max_time_exceeded"] = 100
             return 100, breakdown
+        
+        # ⚠️ 1-1. 최대 통화 시간 임박 감지 (종료 안내 멘트)
+        time_until_end = s.max_call_seconds - call_duration
+        if not s.max_time_warning_sent and time_until_end <= s.warning_before_end_seconds:
+            # 경고 전송 플래그 설정
+            s.max_time_warning_sent = True
+            breakdown["max_time_warning"] = f"경고 전송 (남은 시간: {int(time_until_end)}초)"
+            breakdown["total_score"] = -1  # 특별 값: 경고 전송 필요
+            return -1, breakdown
         
         # 🤖 2. LLM 기반 종료 의도 분석 (최우선)
         if self.use_llm and self.llm_service and s.last_user_utterance:
