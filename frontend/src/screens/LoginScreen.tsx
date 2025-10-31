@@ -14,8 +14,6 @@ import {
   TouchableOpacity,
   TextInput,
   useWindowDimensions,
-  Modal,
-  Pressable,
 } from 'react-native';
 import { useAuthStore } from '../store/authStore';
 import { Button } from '../components/Button';
@@ -23,11 +21,13 @@ import { Input } from '../components/Input';
 import { useRouter } from 'expo-router';
 import { Colors } from '../constants/Colors';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useAlert } from '../components/GlobalAlertProvider';
 
 export const LoginScreen = () => {
   const router = useRouter();
   const { login, isLoading, error } = useAuthStore();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+  const { show } = useAlert();
   
   // Input refs
   const emailRef = useRef<TextInput>(null);
@@ -46,16 +46,6 @@ export const LoginScreen = () => {
   const verticalScale = (size: number) => (screenHeight / guidelineBaseHeight) * size;
   const moderateScale = (size: number, factor = 0.5) => size + (scale(size) - size) * factor;
 
-  // 커스텀 알림 모달 상태
-  const [alertVisible, setAlertVisible] = useState(false);
-  const [alertTitle, setAlertTitle] = useState('');
-  const [alertMessage, setAlertMessage] = useState('');
-  const openAlert = (title: string, message: string) => {
-    setAlertTitle(title);
-    setAlertMessage(message);
-    setAlertVisible(true);
-  };
-  const closeAlert = () => setAlertVisible(false);
 
   const validateForm = (): boolean => {
     let isValid = true;
@@ -85,12 +75,12 @@ export const LoginScreen = () => {
 
     try {
       await login(email, password);
-      openAlert('로그인 완료', 'GrandBy에 오신 것을 환영합니다.');
+      show('로그인 완료', 'GrandBy에 오신 것을 환영합니다.');
       router.replace('/home');
     } catch (err: any) {
       const message =
         error || err?.message || '아이디 또는 비밀번호가 일치하지 않습니다.';
-      openAlert('로그인 실패', message);
+      show('로그인 실패', message);
     }
   };
 
@@ -103,7 +93,7 @@ export const LoginScreen = () => {
   };
 
   const handleKakaoLogin = () => {
-    openAlert('준비 중', '카카오 로그인은 준비 중입니다.');
+    show('준비 중', '카카오 로그인은 준비 중입니다.');
   };
 
   return (
@@ -231,23 +221,7 @@ export const LoginScreen = () => {
           {/* 카카오 로그인 영역 제거됨 */}
         </View>
 
-        {/* 커스텀 알림 모달 */}
-        <Modal
-          visible={alertVisible}
-          transparent
-          animationType="fade"
-          onRequestClose={closeAlert}
-        >
-          <Pressable style={styles.modalBackdrop} onPress={closeAlert}>
-            <Pressable style={styles.modalContainer} onPress={() => {}}>
-              <Text style={styles.modalTitle}>{alertTitle}</Text>
-              <Text style={styles.modalMessage}>{alertMessage}</Text>
-              <TouchableOpacity style={styles.modalButton} onPress={closeAlert} activeOpacity={0.8}>
-                <Text style={styles.modalButtonText}>확인</Text>
-              </TouchableOpacity>
-            </Pressable>
-          </Pressable>
-        </Modal>
+        {/* 전역 알림은 GlobalAlertProvider에서 렌더링됩니다. */}
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -362,46 +336,5 @@ const styles = StyleSheet.create({
   kakaoButton: {
     width: '100%',
     height: 50,
-  },
-  // 모달 스타일
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  modalContainer: {
-    width: '100%',
-    maxWidth: 360,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 12,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#111827',
-    marginBottom: 8,
-  },
-  modalMessage: {
-    fontSize: 15,
-    color: '#374151',
-    lineHeight: 22,
-    marginBottom: 16,
-  },
-  modalButton: {
-    alignSelf: 'flex-end',
-    backgroundColor: Colors.primary,
-    borderRadius: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-  },
-  modalButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '700',
   },
 });

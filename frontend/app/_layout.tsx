@@ -6,6 +6,7 @@ import { Stack } from 'expo-router';
 import * as Notifications from 'expo-notifications';
 import { registerPushToken } from '../src/api/auth';
 import { useAuthStore } from '../src/store/authStore';
+import { GlobalAlertProvider } from '../src/components/GlobalAlertProvider';
 
 // 푸시 알림 설정
 Notifications.setNotificationHandler({
@@ -69,23 +70,25 @@ export default function RootLayout() {
   };
 
   return (
-    <Stack
-      screenOptions={{
-        headerShown: false,
-        animation: 'slide_from_right',
-      }}
-    >
-      <Stack.Screen name="index" />
-      <Stack.Screen name="register" />
-      <Stack.Screen name="home" />
-      <Stack.Screen name="mypage" />
-      <Stack.Screen name="settings" />
-      <Stack.Screen name="todos" />
-      <Stack.Screen name="todo-detail" />
-      <Stack.Screen name="todo-write" />
-      <Stack.Screen name="calendar" />
-      <Stack.Screen name="ai-call" />
-    </Stack>
+    <GlobalAlertProvider>
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          animation: 'slide_from_right',
+        }}
+      >
+        <Stack.Screen name="index" />
+        <Stack.Screen name="register" />
+        <Stack.Screen name="home" />
+        <Stack.Screen name="mypage" />
+        <Stack.Screen name="settings" />
+        <Stack.Screen name="todos" />
+        <Stack.Screen name="todo-detail" />
+        <Stack.Screen name="todo-write" />
+        <Stack.Screen name="calendar" />
+        <Stack.Screen name="ai-call" />
+      </Stack>
+    </GlobalAlertProvider>
   );
 }
 
