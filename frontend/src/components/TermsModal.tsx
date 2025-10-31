@@ -201,7 +201,10 @@ export const TermsModal: React.FC<TermsModalProps> = ({
             </TouchableOpacity>
             <Text style={[styles.headerTitle, { fontSize: moderateScale(20) }]}>{term.title}</Text>
           </View>
-          <ScrollView style={styles.contentScroll} contentContainerStyle={{ paddingBottom: 24 }}>
+          <ScrollView
+            style={styles.contentScroll}
+            contentContainerStyle={{ paddingBottom: 24, width: '90%', alignSelf: 'center' }}
+          >
             <Text style={[styles.contentText, { fontSize: moderateScale(14), lineHeight: moderateScale(24) }]}>{term.content}</Text>
           </ScrollView>
         </View>
@@ -223,7 +226,7 @@ export const TermsModal: React.FC<TermsModalProps> = ({
 
         <ScrollView
           style={styles.content}
-          contentContainerStyle={{ paddingBottom: Math.max(140, insets.bottom + 100) }}
+          contentContainerStyle={{ paddingBottom: Math.max(140, insets.bottom + 100), width: '90%', alignSelf: 'center' }}
         >
           {/* 전체 동의 */}
           <TouchableOpacity style={styles.allAgreeContainer} onPress={handleToggleAll}>
@@ -268,7 +271,7 @@ export const TermsModal: React.FC<TermsModalProps> = ({
         </ScrollView>
 
         {/* 하단 버튼 */}
-        <View style={[styles.footer, { paddingBottom: insets.bottom + verticalScale(16) }] }>
+        <View style={[styles.footer, { paddingBottom: insets.bottom + verticalScale(16), width: '90%', alignSelf: 'center' }] }>
           <Button title="동의하고 가입" onPress={handleAgree} disabled={!allAgreed} />
         </View>
       </View>
