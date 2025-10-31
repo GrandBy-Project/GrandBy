@@ -9,14 +9,15 @@ import {
   ScrollView,
   TouchableOpacity,
   TextInput,
-  Alert,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { Header, Button, Input } from '../components';
+import { useAlert } from '../components/GlobalAlertProvider';
 import { validatePhoneNumber, validateName, validateVerificationCode, validatePassword } from '../utils/validation';
 import apiClient from '../api/client';
 import { useFontSizeStore } from '../store/fontSizeStore';
@@ -27,6 +28,12 @@ export const FindAccountScreen = () => {
   const router = useRouter();
   const { fontSizeLevel } = useFontSizeStore();
   const [activeTab, setActiveTab] = useState<TabType>('email');
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+  const guidelineBaseWidth = 375;
+  const guidelineBaseHeight = 812;
+  const scale = (size: number) => (screenWidth / guidelineBaseWidth) * size;
+  const verticalScale = (size: number) => (screenHeight / guidelineBaseHeight) * size;
+  const moderateScale = (size: number, factor = 0.5) => size + (scale(size) - size) * factor;
 
   return (
     <KeyboardAvoidingView 
@@ -44,7 +51,7 @@ export const FindAccountScreen = () => {
           style={[styles.tab, activeTab === 'email' && styles.activeTab]}
           onPress={() => setActiveTab('email')}
         >
-          <Text style={[styles.tabText, activeTab === 'email' && styles.activeTabText]}>
+          <Text style={[styles.tabText, { fontSize: moderateScale(16) }, activeTab === 'email' && styles.activeTabText]}>
             이메일 찾기
           </Text>
         </TouchableOpacity>
@@ -52,17 +59,17 @@ export const FindAccountScreen = () => {
           style={[styles.tab, activeTab === 'password' && styles.activeTab]}
           onPress={() => setActiveTab('password')}
         >
-          <Text style={[styles.tabText, activeTab === 'password' && styles.activeTabText]}>
+          <Text style={[styles.tabText, { fontSize: moderateScale(16) }, activeTab === 'password' && styles.activeTabText]}>
             비밀번호 재설정
           </Text>
         </TouchableOpacity>
       </View>
 
       <ScrollView 
-        style={styles.content} 
+        style={[styles.content, { backgroundColor: '#FFFFFF' }]} 
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { width: '90%', alignSelf: 'center' }]}
       >
         {activeTab === 'email' ? <FindEmailTab /> : <ResetPasswordTab />}
       </ScrollView>
@@ -76,19 +83,20 @@ const FindEmailTab = () => {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const phoneRef = useRef<TextInput>(null);
+  const { show } = useAlert();
 
   const handleFindEmail = async () => {
     try {
       // 입력값 검증
       const nameValidation = validateName(name);
       if (!nameValidation.valid) {
-        Alert.alert('입력 오류', nameValidation.message);
+        show('입력 오류', nameValidation.message);
         return;
       }
 
       const phoneValidation = validatePhoneNumber(phoneNumber);
       if (!phoneValidation.valid) {
-        Alert.alert('입력 오류', phoneValidation.message);
+        show('입력 오류', phoneValidation.message);
         return;
       }
 
@@ -99,12 +107,9 @@ const FindEmailTab = () => {
         phone_number: phoneNumber,
       });
 
-      const maskedEmail = response.data.email;
-      Alert.alert(
-        '이메일 찾기 성공',
-        `등록된 이메일: ${maskedEmail}\n\n로그인 화면에서 해당 이메일로 로그인하세요.`,
-        [{ text: '확인' }]
-      );
+      // API는 masked_email 키를 반환하므로 해당 값 사용
+      const maskedEmail = response.data.masked_email || response.data.email;
+      show('이메일 찾기 성공', `등록된 이메일: ${maskedEmail}\n\n로그인 화면에서 해당 이메일로 로그인하세요.`);
 
       // 입력값 초기화
       setName('');
@@ -112,7 +117,7 @@ const FindEmailTab = () => {
     } catch (error: any) {
       console.error('이메일 찾기 오류:', error);
       const errorMessage = error.response?.data?.detail || '이메일을 찾을 수 없습니다.';
-      Alert.alert('오류', errorMessage);
+      show('오류', errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -127,6 +132,7 @@ const FindEmailTab = () => {
         </Text>
       </View>
 
+      <View style={styles.narrow}>
       <Input
         label="이름"
         value={name}
@@ -136,7 +142,9 @@ const FindEmailTab = () => {
         returnKeyType="next"
         onSubmitEditing={() => phoneRef.current?.focus()}
       />
+      </View>
 
+      <View style={styles.narrow}>
       <Input
         ref={phoneRef}
         label="전화번호"
@@ -147,6 +155,7 @@ const FindEmailTab = () => {
         returnKeyType="done"
         onSubmitEditing={handleFindEmail}
       />
+      </View>
 
       <Button
         title={isLoading ? '찾는 중...' : '이메일 찾기'}
@@ -166,6 +175,7 @@ const ResetPasswordTab = () => {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const { show } = useAlert();
 
   const codeRef = useRef<TextInput>(null);
   const passwordRef = useRef<TextInput>(null);
@@ -175,7 +185,7 @@ const ResetPasswordTab = () => {
   const handleSendCode = async () => {
     try {
       if (!email) {
-        Alert.alert('입력 오류', '이메일을 입력해주세요.');
+        show('입력 오류', '이메일을 입력해주세요.');
         return;
       }
 
@@ -183,16 +193,13 @@ const ResetPasswordTab = () => {
 
       await apiClient.post('/api/auth/reset-password-request', { email });
 
-      Alert.alert(
-        '인증 코드 발송',
-        '입력하신 이메일로 6자리 인증 코드를 발송했습니다.\n코드는 5분간 유효합니다.'
-      );
+      show('인증 코드 발송', '이메일로 인증 코드가 발송되었습니다. 이메일 확인후 인증 번호를 입력해주세요.');
 
       setStep('code');
     } catch (error: any) {
       console.error('코드 발송 오류:', error);
       const errorMessage = error.response?.data?.detail || '코드 발송에 실패했습니다.';
-      Alert.alert('오류', errorMessage);
+      show('오류', errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -204,18 +211,18 @@ const ResetPasswordTab = () => {
       // 입력값 검증
       const codeValidation = validateVerificationCode(code);
       if (!codeValidation.valid) {
-        Alert.alert('입력 오류', codeValidation.message);
+        show('입력 오류', codeValidation.message);
         return;
       }
 
       const passwordValidation = validatePassword(newPassword);
       if (!passwordValidation.valid) {
-        Alert.alert('입력 오류', passwordValidation.message);
+        show('입력 오류', passwordValidation.message);
         return;
       }
 
       if (newPassword !== confirmPassword) {
-        Alert.alert('입력 오류', '비밀번호가 일치하지 않습니다.');
+        show('입력 오류', '비밀번호가 일치하지 않습니다.');
         return;
       }
 
@@ -229,20 +236,12 @@ const ResetPasswordTab = () => {
 
       setStep('success');
       
-      Alert.alert(
-        '비밀번호 재설정 완료',
-        '비밀번호가 성공적으로 변경되었습니다.\n새 비밀번호로 로그인해주세요.',
-        [
-          {
-            text: '로그인하기',
-            onPress: () => router.replace('/login'),
-          },
-        ]
-      );
+      show('비밀번호 재설정 완료', '비밀번호가 성공적으로 변경되었습니다. 새 비밀번호로 로그인해주세요.');
+      router.replace('/login');
     } catch (error: any) {
       console.error('비밀번호 재설정 오류:', error);
       const errorMessage = error.response?.data?.detail || '비밀번호 재설정에 실패했습니다.';
-      Alert.alert('오류', errorMessage);
+      show('오류', errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -265,6 +264,7 @@ const ResetPasswordTab = () => {
             </Text>
           </View>
 
+          <View style={styles.narrow}>
           <Input
             label="이메일"
             value={email}
@@ -275,6 +275,7 @@ const ResetPasswordTab = () => {
             returnKeyType="done"
             onSubmitEditing={handleSendCode}
           />
+          </View>
 
           <Button
             title={isLoading ? '발송 중...' : '인증 코드 받기'}
@@ -294,7 +295,7 @@ const ResetPasswordTab = () => {
             </Text>
           </View>
 
-          <View style={styles.codeSection}>
+          <View style={[styles.codeSection, styles.narrow]}>
             <Input
               ref={codeRef}
               label="인증 코드"
@@ -316,6 +317,7 @@ const ResetPasswordTab = () => {
             </TouchableOpacity>
           </View>
 
+          <View style={styles.narrow}>
           <Input
             ref={passwordRef}
             label="새 비밀번호"
@@ -326,7 +328,9 @@ const ResetPasswordTab = () => {
             returnKeyType="next"
             onSubmitEditing={() => confirmPasswordRef.current?.focus()}
           />
+          </View>
 
+          <View style={styles.narrow}>
           <Input
             ref={confirmPasswordRef}
             label="비밀번호 확인"
@@ -337,6 +341,7 @@ const ResetPasswordTab = () => {
             returnKeyType="done"
             onSubmitEditing={handleResetPassword}
           />
+          </View>
 
           <Button
             title={isLoading ? '재설정 중...' : '비밀번호 재설정'}
@@ -395,6 +400,10 @@ const styles = StyleSheet.create({
   },
   tabContent: {
     padding: 24,
+  },
+  narrow: {
+    width: '95%',
+    alignSelf: 'center',
   },
   infoBox: {
     flexDirection: 'row',
