@@ -43,7 +43,9 @@ export const FindAccountScreen = () => {
     >
       <Header 
         title="계정 찾기" 
-        showMenuButton={true}
+        showBackButton={false}
+        showMenuButton={false}
+        showFontSizeButton={false}
       />
       
       <View style={styles.tabContainer}>
@@ -402,7 +404,7 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   narrow: {
-    width: '95%',
+    width: '100%',
     alignSelf: 'center',
   },
   infoBox: {

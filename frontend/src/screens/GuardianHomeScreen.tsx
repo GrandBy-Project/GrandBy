@@ -1658,15 +1658,15 @@ export const GuardianHomeScreen = () => {
                     >
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                         <View style={{ flex: 1 }}>
-                          <Text style={{ fontSize: 18, fontWeight: '600', color: '#333', marginBottom: 4 }}>
-                            👵 {elderly.name}
+                          <Text style={{ fontSize: 14, fontWeight: '600', color: '#333', marginBottom: 4 }}>
+                            성함 : {elderly.name}
                           </Text>
                           <Text style={{ fontSize: 14, color: '#666', marginBottom: 2 }}>
-                            📧 {elderly.email}
+                            ID : {elderly.email}
                           </Text>
                           {elderly.phone_number && (
                             <Text style={{ fontSize: 14, color: '#666' }}>
-                              📞 {elderly.phone_number}
+                              번호 : {elderly.phone_number}
                             </Text>
                           )}
                         </View>
