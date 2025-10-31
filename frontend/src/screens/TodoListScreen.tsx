@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../constants/Colors';
 import * as todoApi from '../api/todo';
 import { TokenManager } from '../api/client';
+import { useFontSizeStore } from '../store/fontSizeStore';
 
 interface TodoItem {
   id: string;
@@ -34,6 +35,7 @@ type DateFilter = 'yesterday' | 'today' | 'tomorrow';
 export const TodoListScreen = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { fontSizeLevel } = useFontSizeStore();
   const [showSuccessAnimation, setShowSuccessAnimation] = useState(false);
   const [completedTodoTitle, setCompletedTodoTitle] = useState('');
   const [fadeAnim] = useState(new Animated.Value(0));
@@ -272,11 +274,11 @@ export const TodoListScreen = () => {
           
           {/* 친근한 메시지 */}
           <View style={styles.messageContainer}>
-            <Text style={styles.successTitle}>완료했어요!</Text>
-          <Text style={styles.successMessage}>
+            <Text style={[styles.successTitle, fontSizeLevel >= 1 && { fontSize: 24 }, fontSizeLevel >= 2 && { fontSize: 28 }]}>완료했어요!</Text>
+          <Text style={[styles.successMessage, fontSizeLevel >= 1 && { fontSize: 20 }, fontSizeLevel >= 2 && { fontSize: 24 }]}>
             "{completedTodoTitle}"
           </Text>
-            <Text style={styles.successSubtitle}>
+            <Text style={[styles.successSubtitle, fontSizeLevel >= 1 && { fontSize: 18 }, fontSizeLevel >= 2 && { fontSize: 20 }]}>
               오늘 {completedTodos.length}개 완료
           </Text>
           </View>
@@ -313,6 +315,7 @@ export const TodoListScreen = () => {
   };
 
   const TodoCard = ({ todo }: { todo: TodoItem }) => {
+    const { fontSizeLevel } = useFontSizeStore();
     const isExpanded = expandedTodoId === todo.id;
     
     return (
@@ -335,7 +338,11 @@ export const TodoListScreen = () => {
                   style={[
                     styles.todoTitle,
                     todo.isCompleted && styles.completedText,
+                    fontSizeLevel >= 1 && { fontSize: 20 },
+                    fontSizeLevel >= 2 && { fontSize: 24 },
                   ]}
+                  numberOfLines={2}
+                  ellipsizeMode="tail"
                 >
                   {todo.title}
                 </Text>
@@ -343,7 +350,11 @@ export const TodoListScreen = () => {
                   style={[
                     styles.todoDescription,
                     todo.isCompleted && styles.completedText,
+                    fontSizeLevel >= 1 && { fontSize: 16 },
+                    fontSizeLevel >= 2 && { fontSize: 18 },
                   ]}
+                  numberOfLines={2}
+                  ellipsizeMode="tail"
                 >
                   {todo.description}
                 </Text>
@@ -358,6 +369,8 @@ export const TodoListScreen = () => {
                     style={[
                       styles.todoTime,
                       todo.isCompleted && styles.completedText,
+                      fontSizeLevel >= 1 && { fontSize: 16 },
+                      fontSizeLevel >= 2 && { fontSize: 18 },
                     ]}
                   >
                     {todo.time}
@@ -380,9 +393,9 @@ export const TodoListScreen = () => {
                 todo.isCompleted && styles.completedButton,
               ]}>
                 {todo.isCompleted ? (
-                  <Text style={styles.completedButtonText}>취소</Text>
+                  <Text style={[styles.completedButtonText, fontSizeLevel >= 1 && { fontSize: 16 }, fontSizeLevel >= 2 && { fontSize: 18 }]}>취소</Text>
                 ) : (
-                  <Text style={styles.completeButtonText}>완료</Text>
+                  <Text style={[styles.completeButtonText, fontSizeLevel >= 1 && { fontSize: 16 }, fontSizeLevel >= 2 && { fontSize: 18 }]}>완료</Text>
                 )}
               </View>
             </TouchableOpacity>
@@ -397,8 +410,8 @@ export const TodoListScreen = () => {
             }
           ]}>
             <View style={styles.detailDivider} />
-            <Text style={styles.expandedLabel}>더 자세한 정보</Text>
-            <Text style={styles.expandedDescription}>
+            <Text style={[styles.expandedLabel, fontSizeLevel >= 1 && { fontSize: 18 }, fontSizeLevel >= 2 && { fontSize: 20 }]}>더 자세한 정보</Text>
+            <Text style={[styles.expandedDescription, fontSizeLevel >= 1 && { fontSize: 16 }, fontSizeLevel >= 2 && { fontSize: 18 }]}>
               이 할일에 대한 추가 정보나 메모가 여기에 표시됩니다.
             </Text>
           </Animated.View>
@@ -444,7 +457,7 @@ export const TodoListScreen = () => {
       {/* 공통 헤더 */}
       <Header 
         title="할 일" 
-        showBackButton 
+        showMenuButton={true}
       />
 
       {/* 날짜 탭 네비게이션 */}
@@ -454,7 +467,7 @@ export const TodoListScreen = () => {
           onPress={() => setSelectedDate('yesterday')}
           activeOpacity={0.7}
         >
-          <Text style={[styles.dateTabText, selectedDate === 'yesterday' && styles.dateTabTextActive]}>
+          <Text style={[styles.dateTabText, selectedDate === 'yesterday' && styles.dateTabTextActive, fontSizeLevel >= 1 && { fontSize: 18 }, fontSizeLevel >= 2 && { fontSize: 20 }]}>
             어제
           </Text>
         </TouchableOpacity>
@@ -464,7 +477,7 @@ export const TodoListScreen = () => {
           onPress={() => setSelectedDate('today')}
           activeOpacity={0.7}
         >
-          <Text style={[styles.dateTabText, selectedDate === 'today' && styles.dateTabTextActive]}>
+          <Text style={[styles.dateTabText, selectedDate === 'today' && styles.dateTabTextActive, fontSizeLevel >= 1 && { fontSize: 18 }, fontSizeLevel >= 2 && { fontSize: 20 }]}>
             오늘
           </Text>
         </TouchableOpacity>
@@ -474,7 +487,7 @@ export const TodoListScreen = () => {
           onPress={() => setSelectedDate('tomorrow')}
           activeOpacity={0.7}
         >
-          <Text style={[styles.dateTabText, selectedDate === 'tomorrow' && styles.dateTabTextActive]}>
+          <Text style={[styles.dateTabText, selectedDate === 'tomorrow' && styles.dateTabTextActive, fontSizeLevel >= 1 && { fontSize: 18 }, fontSizeLevel >= 2 && { fontSize: 20 }]}>
             내일
           </Text>
         </TouchableOpacity>
@@ -482,10 +495,10 @@ export const TodoListScreen = () => {
 
       {/* 선택된 날짜 정보 */}
       <View style={styles.dateInfoCard}>
-        <Text style={styles.dateInfoText}>
+        <Text style={[styles.dateInfoText, fontSizeLevel >= 1 && { fontSize: 22 }, fontSizeLevel >= 2 && { fontSize: 26 }]}>
           {dateInfo.dateString}
         </Text>
-        <Text style={styles.dateInfoDay}>
+        <Text style={[styles.dateInfoDay, fontSizeLevel >= 1 && { fontSize: 20 }, fontSizeLevel >= 2 && { fontSize: 24 }]}>
           {dateInfo.dayString}
         </Text>
       </View>
@@ -495,7 +508,7 @@ export const TodoListScreen = () => {
         {isLoading ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color={Colors.primary} />
-            <Text style={styles.loadingText}>할 일을 불러오는 중...</Text>
+            <Text style={[styles.loadingText, fontSizeLevel >= 1 && { fontSize: 18 }, fontSizeLevel >= 2 && { fontSize: 20 }]}>할 일을 불러오는 중...</Text>
           </View>
         ) : (
           <>
@@ -508,17 +521,17 @@ export const TodoListScreen = () => {
                 <View style={styles.calendarBody} />
               </View>
             </View>
-            <Text style={styles.summaryTitle}>오늘의 할일</Text>
+            <Text style={[styles.summaryTitle, fontSizeLevel >= 1 && { fontSize: 20 }, fontSizeLevel >= 2 && { fontSize: 24 }]}>오늘의 할일</Text>
           </View>
           <View style={styles.summaryStats}>
             <View style={styles.statItem}>
-              <Text style={styles.statNumber}>{pendingTodos.length}</Text>
-              <Text style={styles.statLabel}>남은 일</Text>
+              <Text style={[styles.statNumber, fontSizeLevel >= 1 && { fontSize: 28 }, fontSizeLevel >= 2 && { fontSize: 32 }]}>{pendingTodos.length}</Text>
+              <Text style={[styles.statLabel, fontSizeLevel >= 1 && { fontSize: 16 }, fontSizeLevel >= 2 && { fontSize: 18 }]}>남은 일</Text>
             </View>
             <View style={styles.statDivider} />
             <View style={styles.statItem}>
-              <Text style={styles.statNumber}>{completedTodos.length}</Text>
-              <Text style={styles.statLabel}>완료</Text>
+              <Text style={[styles.statNumber, fontSizeLevel >= 1 && { fontSize: 28 }, fontSizeLevel >= 2 && { fontSize: 32 }]}>{completedTodos.length}</Text>
+              <Text style={[styles.statLabel, fontSizeLevel >= 1 && { fontSize: 16 }, fontSizeLevel >= 2 && { fontSize: 18 }]}>완료</Text>
             </View>
           </View>
         </View>
@@ -527,9 +540,9 @@ export const TodoListScreen = () => {
         {pendingTodos.length > 0 && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>해야 할 일</Text>
+              <Text style={[styles.sectionTitle, fontSizeLevel >= 1 && { fontSize: 20 }, fontSizeLevel >= 2 && { fontSize: 24 }]}>해야 할 일</Text>
               <View style={styles.sectionBadge}>
-                <Text style={styles.sectionBadgeText}>{pendingTodos.length}</Text>
+                <Text style={[styles.sectionBadgeText, fontSizeLevel >= 1 && { fontSize: 16 }, fontSizeLevel >= 2 && { fontSize: 18 }]}>{pendingTodos.length}</Text>
               </View>
             </View>
             <View style={styles.cardsContainer}>
@@ -546,9 +559,9 @@ export const TodoListScreen = () => {
         {completedTodos.length > 0 && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>완료된 일</Text>
+              <Text style={[styles.sectionTitle, fontSizeLevel >= 1 && { fontSize: 20 }, fontSizeLevel >= 2 && { fontSize: 24 }]}>완료된 일</Text>
               <View style={styles.sectionBadge}>
-                <Text style={styles.sectionBadgeText}>{completedTodos.length}</Text>
+                <Text style={[styles.sectionBadgeText, fontSizeLevel >= 1 && { fontSize: 16 }, fontSizeLevel >= 2 && { fontSize: 18 }]}>{completedTodos.length}</Text>
               </View>
             </View>
             <View style={styles.cardsContainer}>
@@ -570,8 +583,8 @@ export const TodoListScreen = () => {
                 <View style={styles.checkmarkLine2} />
               </View>
             </View>
-            <Text style={styles.emptyTitle}>오늘 할일이 없습니다</Text>
-            <Text style={styles.emptyDescription}>
+            <Text style={[styles.emptyTitle, fontSizeLevel >= 1 && { fontSize: 20 }, fontSizeLevel >= 2 && { fontSize: 24 }]}>오늘 할일이 없습니다</Text>
+            <Text style={[styles.emptyDescription, fontSizeLevel >= 1 && { fontSize: 16 }, fontSizeLevel >= 2 && { fontSize: 18 }]}>
               보호자가 설정한 할일이 여기에 표시됩니다
             </Text>
           </View>

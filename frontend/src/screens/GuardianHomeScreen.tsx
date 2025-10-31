@@ -1255,7 +1255,10 @@ export const GuardianHomeScreen = () => {
   return (
     <View style={styles.container}>
       {/* 공통 헤더 */}
-      <Header />
+      <Header 
+        title="그랜비"
+        showMenuButton={true} 
+      />
 
       {/* 탭 네비게이션 */}
       <View style={styles.tabNavigation}>

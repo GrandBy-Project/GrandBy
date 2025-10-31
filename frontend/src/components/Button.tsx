@@ -62,6 +62,8 @@ export const Button: React.FC<ButtonProps> = ({
               icon ? styles.textWithIcon : null,
               textStyle,
             ]}
+            numberOfLines={1}
+            ellipsizeMode="tail"
           >
             {title}
           </Text>

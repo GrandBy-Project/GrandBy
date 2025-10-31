@@ -24,11 +24,13 @@ import { Calendar } from 'react-native-calendars';
 import { TodoItem, getTodosByRange, createTodo, deleteTodo } from '../api/todo';
 import { useAuthStore } from '../store/authStore';
 import { Colors } from '../constants/Colors';
+import { useFontSizeStore } from '../store/fontSizeStore';
 
 export const CalendarScreen = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
+  const { fontSizeLevel } = useFontSizeStore();
   
   // 날짜 선택 상태
   const [selectedDay, setSelectedDay] = useState(new Date());
@@ -504,7 +506,7 @@ export const CalendarScreen = () => {
       {/* 공통 헤더 */}
       <Header 
         title="달력" 
-        showBackButton 
+        showMenuButton={true}
         rightButton={
           <TouchableOpacity
             style={styles.viewToggleButton}

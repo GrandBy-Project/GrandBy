@@ -18,10 +18,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import apiClient from '../api/client';
 import { useAuthStore } from '../store/authStore';
 import { UserRole } from '../types';
+import { useFontSizeStore } from '../store/fontSizeStore';
 
 export const AppSettingsScreen = () => {
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
+  const { fontSizeLevel } = useFontSizeStore();
 
   // 설정 상태 관리
   const [settings, setSettings] = useState({
@@ -423,7 +425,7 @@ export const AppSettingsScreen = () => {
       {/* 공통 헤더 */}
       <Header 
         title="앱 설정"
-        showBackButton={true}
+        showMenuButton={true}
       />
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>

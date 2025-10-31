@@ -177,7 +177,7 @@ export const GuardianTodoAddScreen = () => {
       {/* 헤더 */}
       <Header 
         title={elderlyName ? `${elderlyName}님의 할일 추가` : '할일 추가'} 
-        showBackButton 
+        showMenuButton={true}
       />
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
