@@ -212,7 +212,7 @@ apiClient.interceptors.response.use(
         isRefreshing = false;
         
         return Promise.reject({
-          message: '로그인이 만료되었습니다. 다시 로그인해주세요.',
+          message: '아이디 또는 비밀번호가 일치하지 않습니다.',
           shouldLogout: true
         });
       }
