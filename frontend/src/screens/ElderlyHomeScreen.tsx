@@ -382,24 +382,22 @@ export const ElderlyHomeScreen = () => {
         diary.date === today && diary.status === 'published'
       );
       
-      // 최근 24시간 내 통화 기록이 있는지 확인
-      const now = new Date();
-      const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-      
-      const recentCalls = calls.filter((call: any) => {
+    // 오늘(당일) 통화 기록이 있는지 확인
+      const todayCalls = calls.filter((call: any) => {
         const callDate = new Date(call.created_at);
-        return callDate > oneDayAgo && call.call_status === 'completed';
+        const callDateString = callDate.toISOString().split('T')[0];
+        return callDateString === today && call.call_status === 'completed';
       });
       
       // 통화가 있고 오늘 다이어리가 없을 때만 배너 표시
-      const hasRecent = recentCalls.length > 0 && !hasTodayDiary;
-      setHasRecentCall(hasRecent);
+      const hasTodayCall = todayCalls.length > 0 && !hasTodayDiary;
+      setHasRecentCall(hasTodayCall);
       setHasWrittenDiaryFromCall(hasTodayDiary);
       
-      console.log(`📞 최근 통화 기록 확인: ${hasRecent ? '있음' : '없음'} (${recentCalls.length}건) - 오늘 다이어리: ${hasTodayDiary ? '작성됨' : '없음'} - 사용자: ${user?.user_id}`);
-      return hasRecent;
+      console.log(`📞 오늘의 통화 기록 확인: ${hasTodayCall ? '있음' : '없음'} - 오늘 다이어리: ${hasTodayDiary ? '작성됨' : '없음'} - 사용자: ${user?.user_id}`);
+      return hasTodayCall;
     } catch (error) {
-      console.error('최근 통화 기록 확인 실패:', error);
+      console.error('오늘의 통화 기록 확인 실패:', error);
       setHasRecentCall(false);
       setHasWrittenDiaryFromCall(false);
       return false;

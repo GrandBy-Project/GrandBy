@@ -22,6 +22,7 @@ import { createDiary, getDiary, updateDiary, Diary } from '../api/diary';
 import { getCallLog, getExtractedTodos, ExtractedTodo } from '../api/call';
 import { createTodo } from '../api/todo';
 import { useAuthStore } from '../store/authStore';
+import { BottomNavigationBar } from '../components';
 
 // 기분 옵션
 const MOOD_OPTIONS = [
@@ -123,24 +124,24 @@ export const DiaryWriteScreen = () => {
           
           let callSidToUse = callSid;
           
-          // ✅ callSid가 없으면 최근 통화 기록에서 찾기 (상단 배너에서 온 경우)
+          // ✅ callSid가 없으면 오늘의 통화 기록에서 찾기 (상단 배너에서 온 경우)
           if (!callSidToUse) {
-            console.log('📞 최근 통화 기록에서 callSid 찾기');
+            console.log('📞 오늘의 통화 기록에서 callSid 찾기');
             const { getCallLogs } = await import('../api/call');
             const calls = await getCallLogs({ limit: 10 });
             
-            // 최근 24시간 내 완료된 통화 기록 찾기
-            const now = new Date();
-            const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+            // 오늘 완료된 통화 기록 찾기
+            const today = new Date().toISOString().split('T')[0];
             
-            const recentCall = calls.find((call: any) => {
+            const todayCalls = calls.find((call: any) => {
               const callDate = new Date(call.created_at);
-              return callDate > oneDayAgo && call.call_status === 'completed';
+              const callDateString = callDate.toISOString().split('T')[0];
+              return callDateString === today && call.call_status === 'completed';
             });
             
-            if (recentCall) {
-              callSidToUse = recentCall.call_id;
-              console.log('✅ 최근 통화 기록 발견:', callSidToUse);
+            if (todayCalls) {
+              callSidToUse = todayCalls.call_id;
+              console.log('✅ 오늘의 통화 기록 발견:', callSidToUse);
             }
           }
           
@@ -362,20 +363,7 @@ export const DiaryWriteScreen = () => {
     <View style={[styles.container, { paddingTop: insets.top }]}>
       {/* 헤더 */}
       <View style={styles.header}>
-        <TouchableOpacity
-          onPress={() => {
-            // 통화에서 온 경우 메인으로, 아니면 뒤로가기
-            if (fromCall) {
-              router.replace('/home');
-            } else {
-              router.back();
-            }
-          }}
-          style={styles.backButton}
-          disabled={isSubmitting}
-        >
-          <Text style={styles.backButtonText}>←</Text>
-        </TouchableOpacity>
+        <View style={styles.placeholder} />
         <Text style={styles.headerTitle}>{isEditMode ? '일기 수정' : '일기 작성'}</Text>
         <View style={styles.placeholder} />
       </View>
@@ -610,6 +598,9 @@ export const DiaryWriteScreen = () => {
           )}
         </TouchableOpacity>
       </ScrollView>
+
+      {/* 하단 네비게이션 바 */}
+      <BottomNavigationBar />
     </View>
   );
 };
@@ -651,7 +642,7 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 20,
-    paddingBottom: 100,
+    // paddingBottom: 100,
   },
   section: {
     marginBottom: 24,

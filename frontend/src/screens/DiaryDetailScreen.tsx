@@ -13,8 +13,6 @@ import {
   Alert,
   ScrollView,
   TextInput,
-  Keyboard,
-  KeyboardEvent,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -22,6 +20,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { getDiary, deleteDiary, Diary, getComments, createComment, deleteComment, DiaryComment } from '../api/diary';
 import { useAuthStore } from '../store/authStore';
 import { Colors } from '../constants/Colors';
+import { BottomNavigationBar } from '../components';
 
 export const DiaryDetailScreen = () => {
   const router = useRouter();
@@ -35,7 +34,6 @@ export const DiaryDetailScreen = () => {
   const [commentText, setCommentText] = useState('');
   const [isSubmittingComment, setIsSubmittingComment] = useState(false);
   const [isLoadingComments, setIsLoadingComments] = useState(false);
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
 
   /**
    * 다이어리 상세 로드
@@ -188,24 +186,6 @@ export const DiaryDetailScreen = () => {
   };
 
   /**
-   * 키보드 이벤트 리스너
-   */
-  useEffect(() => {
-    const keyboardDidShowListener = Keyboard.addListener('keyboardDidShow', (e: KeyboardEvent) => {
-      setKeyboardHeight(e.endCoordinates.height);
-    });
-    
-    const keyboardDidHideListener = Keyboard.addListener('keyboardDidHide', () => {
-      setKeyboardHeight(0);
-    });
-
-    return () => {
-      keyboardDidShowListener.remove();
-      keyboardDidHideListener.remove();
-    };
-  }, []);
-
-  /**
    * 초기 데이터 로드
    */
   useEffect(() => {
@@ -227,7 +207,7 @@ export const DiaryDetailScreen = () => {
   };
 
   /**
-   * 타임스탬프 포맷팅
+   * 타임스탬프 포맷팅 (상대적 시간)
    */
   const formatTimestamp = (dateString: string): string => {
     const date = new Date(dateString);
@@ -245,6 +225,17 @@ export const DiaryDetailScreen = () => {
     const month = (date.getMonth() + 1).toString().padStart(2, '0');
     const day = date.getDate().toString().padStart(2, '0');
     return `${month}월 ${day}일`;
+  };
+
+  /**
+   * 작성시간 포맷팅
+   */
+  const formatCreatedTime = (dateString: string): string => {
+    const date = new Date(dateString);
+    return date.toLocaleString('ko-KR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
   };
 
   /**
@@ -309,9 +300,7 @@ export const DiaryDetailScreen = () => {
       <View style={[styles.container, { paddingTop: insets.top }]}>
         {/* 헤더 */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-            <Ionicons name="chevron-back" size={28} color="#333333" />
-          </TouchableOpacity>
+          <View style={styles.placeholder} />
           <Text style={styles.headerTitle}>일기 상세</Text>
           
           {/* 삭제 버튼 - 본인이 작성한 경우만 표시 */}
@@ -332,6 +321,9 @@ export const DiaryDetailScreen = () => {
       >
         {/* 날짜 */}
         <Text style={styles.dateText}>{formatDate(diary.date)}</Text>
+
+        {/* 작성시간 */}
+        <Text style={styles.timestampText}>{formatCreatedTime(diary.created_at)}</Text>
 
         {/* 제목 */}
         {diary.title && (
@@ -376,6 +368,37 @@ export const DiaryDetailScreen = () => {
         {/* 일기 내용 */}
         <Text style={styles.contentText}>{diary.content}</Text>
 
+        {/* 댓글 작성 입력창 */}
+        <View style={styles.commentInputContainer}>
+          <View style={styles.commentInputWrapper}>
+            <Ionicons name="chatbubble-ellipses" size={18} color={Colors.primary} style={{ marginRight: 6 }} />
+            <TextInput
+              style={styles.commentInput}
+              value={commentText}
+              onChangeText={setCommentText}
+              placeholder="댓글을 입력하세요"
+              multiline
+              maxLength={100}
+              returnKeyType="default"
+              blurOnSubmit={false}
+            />
+          </View>
+          <TouchableOpacity
+            style={[
+              styles.commentSubmitButton,
+              (!commentText.trim() || isSubmittingComment) && styles.commentSubmitButtonDisabled
+            ]}
+            onPress={handleSubmitComment}
+            disabled={!commentText.trim() || isSubmittingComment}
+          >
+            {isSubmittingComment ? (
+              <ActivityIndicator size="small" color={Colors.textWhite} />
+            ) : (
+              <Ionicons name="send" size={18} color={Colors.textWhite} />
+            )}
+          </TouchableOpacity>
+        </View>
+
         {/* 댓글 섹션 */}
         <View style={styles.commentsSection}>
           <View style={styles.commentsSectionHeader}>
@@ -416,44 +439,10 @@ export const DiaryDetailScreen = () => {
           )}
         </View>
       </ScrollView>
+      </View>
 
-      {/* 댓글 작성 입력창 - 하단 고정 */}
-      <View style={[
-        styles.commentInputContainer, 
-        { 
-          paddingBottom: insets.bottom,
-          bottom: keyboardHeight > 0 ? keyboardHeight - 0 : 0
-        }
-      ]}>
-        <View style={styles.commentInputWrapper}>
-          <Ionicons name="chatbubble-ellipses" size={18} color={Colors.primary} style={{ marginRight: 6 }} />
-          <TextInput
-            style={styles.commentInput}
-            value={commentText}
-            onChangeText={setCommentText}
-            placeholder="댓글을 입력하세요"
-            multiline
-            maxLength={100}
-            returnKeyType="default"
-            blurOnSubmit={false}
-          />
-        </View>
-        <TouchableOpacity
-          style={[
-            styles.commentSubmitButton,
-            (!commentText.trim() || isSubmittingComment) && styles.commentSubmitButtonDisabled
-          ]}
-          onPress={handleSubmitComment}
-          disabled={!commentText.trim() || isSubmittingComment}
-        >
-          {isSubmittingComment ? (
-            <ActivityIndicator size="small" color={Colors.textWhite} />
-          ) : (
-            <Ionicons name="send" size={18} color={Colors.textWhite} />
-          )}
-        </TouchableOpacity>
-      </View>
-      </View>
+      {/* 하단 네비게이션 바 */}
+      <BottomNavigationBar />
     </View>
   );
 };
@@ -522,19 +511,25 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 24,
-    paddingBottom: 100,
+    paddingBottom: 0,
   },
   dateText: {
     fontSize: 24,
-    fontWeight: '700',
+    fontWeight: '600',
     color: '#333333',
-    marginBottom: 16,
+    marginBottom: 8,
+  },
+  timestampText: {
+    fontSize: 14,
+    fontWeight: '400',
+    color: '#999999',
+    marginBottom: 8,
   },
   titleText: {
     fontSize: 22,
     fontWeight: '600',
     color: '#333333',
-    marginBottom: 16,
+    marginBottom: 8,
   },
   moodContainer: {
     flexDirection: 'row',
@@ -554,7 +549,7 @@ const styles = StyleSheet.create({
   metaInfo: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 16,
   },
   authorTypeContainer: {
     flexDirection: 'row',
@@ -594,7 +589,6 @@ const styles = StyleSheet.create({
   },
   // 댓글 섹션
   commentsSection: {
-    marginTop: 32,
     paddingTop: 24,
     borderTopWidth: 1,
     borderTopColor: '#E0E0E0',
@@ -653,10 +647,6 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   commentInputContainer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
     flexDirection: 'row',
     paddingHorizontal: 16,
     paddingVertical: 12,
@@ -664,11 +654,9 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
     borderTopWidth: 1,
     borderTopColor: Colors.border,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+    marginTop: 32,
   },
   commentInputWrapper: {
     flex: 1,

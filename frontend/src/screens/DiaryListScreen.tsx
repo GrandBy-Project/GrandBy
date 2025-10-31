@@ -24,6 +24,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { getDiaries, Diary } from '../api/diary';
 import { useAuthStore } from '../store/authStore';
 import * as connectionsApi from '../api/connections';
+import { BottomNavigationBar } from '../components';
 
 export const DiaryListScreen = () => {
   const router = useRouter();
@@ -481,12 +482,7 @@ export const DiaryListScreen = () => {
     <View style={[styles.container, { paddingTop: insets.top }]}>
       {/* 헤더 */}
       <View style={styles.header}>
-        <TouchableOpacity 
-          onPress={() => router.back()}
-          style={styles.backButton}
-        >
-          <Text style={styles.backButtonText}>←</Text>
-        </TouchableOpacity>
+        <View style={styles.placeholder} />
         <Text style={styles.headerTitle}>
           {user?.role === 'caregiver' && selectedElderlyName
             ? `${selectedElderlyName}님의 일기장`
@@ -600,9 +596,12 @@ export const DiaryListScreen = () => {
         renderCalendarView()
       )}
 
+      {/* 하단 네비게이션 바 */}
+      <BottomNavigationBar />
+
       {/* 일기 작성 플로팅 버튼 */}
       <TouchableOpacity
-        style={[styles.floatingButton, { bottom: insets.bottom + 24 }]}
+        style={[styles.floatingButton, { bottom: insets.bottom + 120 }]}
         onPress={() => router.push('/diary-write')}
       >
         <Ionicons name="create" size={28} color="#FFFFFF" />
@@ -756,7 +755,6 @@ const styles = StyleSheet.create({
   },
   recentDiariesSection: {
     padding: 16,
-    paddingBottom: 100,
   },
   sectionTitleContainer: {
     flexDirection: 'row',
@@ -816,7 +814,7 @@ const styles = StyleSheet.create({
   },
   listContent: {
     padding: 16,
-    paddingBottom: 100,
+    paddingBottom: 0,
   },
   diaryCard: {
     backgroundColor: '#FFFFFF',

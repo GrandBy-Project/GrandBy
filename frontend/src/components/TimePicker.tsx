@@ -7,7 +7,6 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  TouchableOpacity,
 } from 'react-native';
 import { Colors } from '../constants/Colors';
 
@@ -26,15 +25,19 @@ const PADDING_TOP = (CONTAINER_HEIGHT - ITEM_HEIGHT) / 2;
 export const TimePicker: React.FC<TimePickerProps> = ({ value, onChange }) => {
   const [selectedHour, setSelectedHour] = useState('00');
   const [selectedMinute, setSelectedMinute] = useState('00');
+  const [centerHour, setCenterHour] = useState('00'); // 스크롤 중 가운데 항목
+  const [centerMinute, setCenterMinute] = useState('00'); // 스크롤 중 가운데 항목
   const hourScrollRef = useRef<ScrollView>(null);
   const minuteScrollRef = useRef<ScrollView>(null);
 
   // 초기값 설정 및 value 변경 시 업데이트
   useEffect(() => {
-    if (value && value.includes(':')) {
+      if (value && value.includes(':')) {
       const [h, m] = value.split(':');
       setSelectedHour(h || '00');
       setSelectedMinute(m || '00');
+      setCenterHour(h || '00');
+      setCenterMinute(m || '00');
     } else {
       // value가 없으면 현재 시간으로 설정
       const now = new Date();
@@ -42,6 +45,8 @@ export const TimePicker: React.FC<TimePickerProps> = ({ value, onChange }) => {
       const minute = now.getMinutes().toString().padStart(2, '0');
       setSelectedHour(hour);
       setSelectedMinute(minute);
+      setCenterHour(hour);
+      setCenterMinute(minute);
       onChange(`${hour}:${minute}`);
     }
   }, [value]);
@@ -70,18 +75,20 @@ export const TimePicker: React.FC<TimePickerProps> = ({ value, onChange }) => {
 
   // 스크롤 위치에서 가운데 항목 인덱스 계산
   const calculateCenterIndex = (scrollY: number, itemHeight: number): number => {
-    // scrollY는 contentContainer 시작점(paddingTop 포함)부터의 오프셋
-    // 뷰포트의 중심은 CONTAINER_HEIGHT / 2
-    // 실제 중앙에 있는 항목의 위치 = scrollY + (CONTAINER_HEIGHT / 2)
-    
-    // paddingTop을 빼면 첫 번째 아이템(index 0)의 top이 0이 됨
-    // 여기에 itemHeight로 나누면 인덱스 계산 가능
+    // 뷰포트의 중심 위치
     const viewportCenter = CONTAINER_HEIGHT / 2;
+    
+    // 스크롤된 위치에서 뷰포트 중심에 있는 항목의 절대 Y 좌표 (contentContainer 기준)
     const centerPositionInContent = scrollY + viewportCenter;
+    
+    // paddingTop을 제외한 실제 아이템 영역 기준 위치
     const centerPositionInItems = centerPositionInContent - PADDING_TOP;
     
-    // 아이템 인덱스 계산 (반올림으로 가장 가까운 아이템 선택)
-    const index = Math.round(centerPositionInItems / itemHeight);
+    // 아이템 인덱스 계산
+    // 각 아이템의 중심 위치는: paddingTop + (index * itemHeight) + (itemHeight / 2)
+    // 따라서 centerPositionInItems = (index * itemHeight) + (itemHeight / 2)일 때
+    // index = (centerPositionInItems - itemHeight / 2) / itemHeight
+    const index = Math.round((centerPositionInItems - itemHeight / 2) / itemHeight);
     
     return Math.max(0, index);
   };
@@ -91,18 +98,24 @@ export const TimePicker: React.FC<TimePickerProps> = ({ value, onChange }) => {
     // 목표: index 항목의 중심이 뷰포트 중심에 오도록 스크롤
     
     // 1. index 항목의 중심 Y 좌표 (contentContainer 기준)
-    //    - paddingTop: 상단 패딩
-    //    - index * itemHeight: 해당 항목까지의 높이
-    //    - itemHeight / 2: 항목 중심까지의 오프셋
+
     const itemCenterY = PADDING_TOP + (index * itemHeight) + (itemHeight / 2);
     
     // 2. 뷰포트의 중심
     const viewportCenter = CONTAINER_HEIGHT / 2;
     
     // 3. 항목 중심을 뷰포트 중심에 맞추기 위한 스크롤 위치
-    //    itemCenterY = scrollY + viewportCenter
-    //    따라서, scrollY = itemCenterY - viewportCenter
+
     return itemCenterY - viewportCenter;
+  };
+
+  // 시간 스크롤 중 처리 (가운데 항목 업데이트)
+  const handleHourScroll = (event: any) => {
+    const scrollY = event.nativeEvent.contentOffset.y;
+    const centerIndex = calculateCenterIndex(scrollY, ITEM_HEIGHT);
+    const clampedIndex = Math.min(Math.max(centerIndex, 0), HOURS.length - 1);
+    const newHour = HOURS[clampedIndex];
+    setCenterHour(newHour);
   };
 
   // 시간 스크롤 종료 처리
@@ -115,7 +128,17 @@ export const TimePicker: React.FC<TimePickerProps> = ({ value, onChange }) => {
     // snapToInterval이 이미 스냅 처리를 하므로, scrollTo 호출 제거
     // 선택된 값만 업데이트
     setSelectedHour(newHour);
+    setCenterHour(newHour);
     onChange(`${newHour}:${selectedMinute}`);
+  };
+
+  // 분 스크롤 중 처리 (가운데 항목 업데이트)
+  const handleMinuteScroll = (event: any) => {
+    const scrollY = event.nativeEvent.contentOffset.y;
+    const centerIndex = calculateCenterIndex(scrollY, ITEM_HEIGHT);
+    const clampedIndex = Math.min(Math.max(centerIndex, 0), MINUTES.length - 1);
+    const newMinute = MINUTES[clampedIndex];
+    setCenterMinute(newMinute);
   };
 
   // 분 스크롤 종료 처리
@@ -128,6 +151,7 @@ export const TimePicker: React.FC<TimePickerProps> = ({ value, onChange }) => {
     // snapToInterval이 이미 스냅 처리를 하므로, scrollTo 호출 제거
     // 선택된 값만 업데이트
     setSelectedMinute(newMinute);
+    setCenterMinute(newMinute);
     onChange(`${selectedHour}:${newMinute}`);
   };
 
@@ -145,35 +169,35 @@ export const TimePicker: React.FC<TimePickerProps> = ({ value, onChange }) => {
       <View style={styles.pickerContainer}>
         {/* 시간 선택 */}
         <View style={styles.pickerColumn}>
+          {/* 고정된 선택 박스 (배경 역할) */}
+          <View style={styles.selectedBox} />
+          
           <ScrollView
             ref={hourScrollRef}
             style={styles.scrollView}
             contentContainerStyle={styles.scrollViewContent}
             showsVerticalScrollIndicator={false}
             nestedScrollEnabled={true}
+            onScroll={handleHourScroll}
             onMomentumScrollEnd={handleHourScrollEnd}
-            // onScrollEndDrag={handleHourScrollEnd}
             snapToInterval={ITEM_HEIGHT}
             decelerationRate="fast"
+            scrollEventThrottle={16}
           >
             {HOURS.map((hour, index) => (
-              <TouchableOpacity
+              <View
                 key={hour}
-                style={[
-                  styles.timeItem,
-                  selectedHour === hour && styles.timeItemSelected,
-                ]}
-                activeOpacity={1}
+                style={styles.timeItem}
               >
                 <Text
                   style={[
                     styles.timeItemText,
-                    selectedHour === hour && styles.timeItemTextSelected,
+                    centerHour === hour && styles.timeItemTextSelected,
                   ]}
                 >
                   {hour}
                 </Text>
-              </TouchableOpacity>
+              </View>
             ))}
           </ScrollView>
         </View>
@@ -182,35 +206,36 @@ export const TimePicker: React.FC<TimePickerProps> = ({ value, onChange }) => {
 
         {/* 분 선택 */}
         <View style={styles.pickerColumn}>
+          {/* 고정된 선택 박스 (배경 역할) */}
+          <View style={styles.selectedBox} />
+          
           <ScrollView
             ref={minuteScrollRef}
             style={styles.scrollView}
             contentContainerStyle={styles.scrollViewContent}
             showsVerticalScrollIndicator={false}
             nestedScrollEnabled={true}
+            onScroll={handleMinuteScroll}
             onMomentumScrollEnd={handleMinuteScrollEnd}
             onScrollEndDrag={handleMinuteScrollEnd}
             snapToInterval={ITEM_HEIGHT}
             decelerationRate="fast"
+            scrollEventThrottle={16}
           >
             {MINUTES.map((minute, index) => (
-              <TouchableOpacity
+              <View
                 key={minute}
-                style={[
-                  styles.timeItem,
-                  selectedMinute === minute && styles.timeItemSelected,
-                ]}
-                activeOpacity={1}
+                style={styles.timeItem}
               >
                 <Text
                   style={[
                     styles.timeItemText,
-                    selectedMinute === minute && styles.timeItemTextSelected,
+                    centerMinute === minute && styles.timeItemTextSelected,
                   ]}
                 >
                   {minute}
                 </Text>
-              </TouchableOpacity>
+              </View>
             ))}
           </ScrollView>
         </View>
@@ -226,7 +251,20 @@ const styles = StyleSheet.create({
   timeDisplay: {
     alignItems: 'center',
     marginBottom: 20,
-    paddingVertical: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    backgroundColor: Colors.primaryPale,
+    borderRadius: 16,
+    borderWidth: 3,
+    borderColor: Colors.primary,
+    shadowColor: Colors.shadow,
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   timeDisplayText: {
     fontSize: 32,
@@ -243,10 +281,24 @@ const styles = StyleSheet.create({
   pickerColumn: {
     flex: 1,
     alignItems: 'center',
+    position: 'relative',
   },
   scrollView: {
     width: '100%',
     height: CONTAINER_HEIGHT,
+    backgroundColor: 'transparent', // 투명 배경
+  },
+  // 고정된 선택 박스 (가운데 위치, 배경 역할)
+  selectedBox: {
+    position: 'absolute',
+    top: PADDING_TOP - 1, // 약간 올려서 정렬
+    left: 0,
+    right: 0,
+    height: ITEM_HEIGHT,
+    backgroundColor: Colors.primary,
+    borderRadius: 8,
+    zIndex: 0, // 배경 레이어
+    pointerEvents: 'none',
   },
   scrollViewContent: {
     paddingTop: PADDING_TOP,
@@ -257,11 +309,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 20,
-    borderRadius: 8,
-    backgroundColor: '#F8F8F8',
-  },
-  timeItemSelected: {
-    backgroundColor: Colors.primary,
   },
   timeItemText: {
     fontSize: 18,
@@ -278,7 +325,8 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: Colors.primary,
     marginHorizontal: 16,
-    marginTop: -24, // 중앙 정렬 보정
+    marginTop: -4, 
+    lineHeight: ITEM_HEIGHT, // 정확한 수직 정렬을 위해
   },
 });
 
