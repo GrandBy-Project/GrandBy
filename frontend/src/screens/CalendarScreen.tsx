@@ -1,7 +1,7 @@
 /**
  * 어르신 통합 캘린더 화면 (주간 달력 + 일정 추가)
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -15,6 +15,8 @@ import {
   KeyboardAvoidingView,
   Keyboard,
   ActivityIndicator,
+  Dimensions,
+  TouchableWithoutFeedback,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Header, BottomNavigationBar } from '../components';
@@ -31,29 +33,35 @@ export const CalendarScreen = () => {
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
   const { fontSizeLevel } = useFontSizeStore();
-  
+
   // 날짜 선택 상태
   const [selectedDay, setSelectedDay] = useState(new Date());
-  
+
   // 현재 주 상태
   const [currentWeek, setCurrentWeek] = useState(new Date());
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
-  
+
+  // 날짜 스크롤 뷰 ref
+  const dayScrollViewRef = useRef<ScrollView>(null);
+
   // 월간/일간 뷰 상태
   const [isMonthlyView, setIsMonthlyView] = useState(false);
-  
+
   // 필터 상태
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'my' | 'assigned'>('all');
-  
+
   // 년/월 피커 상태
   const [showYearMonthPicker, setShowYearMonthPicker] = useState(false);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
-  
+
   // 시간 드롭다운 상태
   const [showTimePicker, setShowTimePicker] = useState(false);
-  
+
+  // 날짜 선택 모달 상태
+  const [showDatePicker, setShowDatePicker] = useState(false);
+
   // 일정 추가 모달 상태
   const [showAddModal, setShowAddModal] = useState(false);
   const [newSchedule, setNewSchedule] = useState({
@@ -62,15 +70,15 @@ export const CalendarScreen = () => {
     time: '',
     date: '',
   });
-  
+
   // 일정 상세 모달 상태
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [selectedSchedule, setSelectedSchedule] = useState<TodoItem | null>(null);
-  
+
   // API 연동: TodoItem 타입 사용
   const [schedules, setSchedules] = useState<TodoItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  
+
   // 필터링된 일정 가져오기
   const getFilteredSchedules = (schedules: TodoItem[]) => {
     if (selectedFilter === 'my') {
@@ -88,7 +96,7 @@ export const CalendarScreen = () => {
   const getMarkedDates = () => {
     const marked: any = {};
     const filteredSchedules = getFilteredSchedules(schedules);
-    
+
     filteredSchedules.forEach(schedule => {
       const date = schedule.due_date;
       if (!marked[date]) {
@@ -98,21 +106,21 @@ export const CalendarScreen = () => {
           selectedColor: Colors.primary
         };
       }
-      
+
       // 카테고리별 색상 설정
       let dotColor = Colors.primary;
       if (schedule.category === 'MEDICINE') dotColor = Colors.error;
       else if (schedule.category === 'HOSPITAL') dotColor = Colors.warning;
       else if (schedule.category === 'EXERCISE') dotColor = Colors.success;
       else if (schedule.category === 'MEAL') dotColor = Colors.info;
-      
+
       marked[date].dots.push({
         key: schedule.todo_id,
         color: dotColor,
         selectedDotColor: Colors.textWhite
       });
     });
-    
+
     // 선택된 날짜 표시
     const selectedDateStr = selectedDay.toISOString().split('T')[0];
     if (marked[selectedDateStr]) {
@@ -124,7 +132,7 @@ export const CalendarScreen = () => {
         selectedColor: Colors.primary
       };
     }
-    
+
     return marked;
   };
 
@@ -138,34 +146,34 @@ export const CalendarScreen = () => {
   // 시간 형식 변환 함수
   const convertKoreanTimeToHHMM = (koreanTime: string): string => {
     if (koreanTime === '하루 종일') return '00:00';
-    
+
     const match = koreanTime.match(/(오전|오후)\s*(\d+)시/);
     if (!match) return '00:00';
-    
+
     const [, period, hourStr] = match;
     let hour = parseInt(hourStr, 10);
-    
+
     if (period === '오후' && hour !== 12) {
       hour += 12;
     } else if (period === '오전' && hour === 12) {
       hour = 0;
     }
-    
+
     return `${hour.toString().padStart(2, '0')}:00`;
   };
 
   const convertHHMMToKoreanTime = (timeStr: string | null): string => {
     if (!timeStr) return '시간 미정';
-    
+
     const [hourStr, minute] = timeStr.split(':');
     let hour = parseInt(hourStr, 10);
-    
+
     if (hour === 0 && minute === '00') return '하루 종일';
-    
+
     const period = hour >= 12 ? '오후' : '오전';
     if (hour > 12) hour -= 12;
     if (hour === 0) hour = 12;
-    
+
     return `${period} ${hour}시`;
   };
 
@@ -175,7 +183,7 @@ export const CalendarScreen = () => {
       console.log('⚠️ 사용자 정보 없음, 조회 중단');
       return;
     }
-    
+
     // 토큰 확인
     const { TokenManager } = require('../api/client');
     const tokens = await TokenManager.getTokens();
@@ -184,27 +192,27 @@ export const CalendarScreen = () => {
       console.log('🔑 Access Token:', tokens.access_token ? '존재' : '없음');
       console.log('🔑 Refresh Token:', tokens.refresh_token ? '존재' : '없음');
     }
-    
+
     try {
       setIsLoading(true);
-      
+
       // 현재 보이는 날짜 범위 계산 (selectedDay 기준으로 ±2주)
       const startDate = new Date(selectedDay);
       startDate.setDate(startDate.getDate() - 14);
-      
+
       const endDate = new Date(selectedDay);
       endDate.setDate(endDate.getDate() + 21);
-      
+
       const startDateStr = formatDateString(startDate);
       const endDateStr = formatDateString(endDate);
-      
+
       console.log(`📅 캘린더 일정 조회 시작`);
       console.log(`  - 사용자 ID: ${user.user_id}`);
       console.log(`  - 사용자 역할: ${user.role}`);
       console.log(`  - 날짜 범위: ${startDateStr} ~ ${endDateStr}`);
-      
+
       const todos = await getTodosByRange(startDateStr, endDateStr);
-      
+
       console.log(`✅ 조회된 일정: ${todos.length}개`);
       setSchedules(todos);
     } catch (error: any) {
@@ -223,6 +231,12 @@ export const CalendarScreen = () => {
     loadSchedules();
   }, [selectedDay]);
 
+  // 날짜 변경 시 스크롤 뷰에서 해당 날짜로 이동
+  useEffect(() => {
+    const dates = getExtendedDates(selectedDay);
+    scrollToDate(selectedDay, dates);
+  }, [selectedDay]);
+
   // 주간 캘린더 유틸리티 함수들
   const getWeekDates = (date: Date) => {
     const week = [];
@@ -230,7 +244,7 @@ export const CalendarScreen = () => {
     const day = startOfWeek.getDay();
     const diff = startOfWeek.getDate() - day;
     startOfWeek.setDate(diff);
-    
+
     for (let i = 0; i < 7; i++) {
       const weekDate = new Date(startOfWeek);
       weekDate.setDate(startOfWeek.getDate() + i);
@@ -293,15 +307,15 @@ export const CalendarScreen = () => {
     const lastDay = new Date(year, month + 1, 0);
     const startDate = new Date(firstDay);
     startDate.setDate(startDate.getDate() - firstDay.getDay());
-    
+
     const dates = [];
     const current = new Date(startDate);
-    
+
     for (let i = 0; i < 42; i++) {
       dates.push(new Date(current));
       current.setDate(current.getDate() + 1);
     }
-    
+
     return dates;
   };
 
@@ -321,30 +335,59 @@ export const CalendarScreen = () => {
     setCurrentMonth(new Date());
   };
 
-  // 날짜 선택기 함수들 - 더 많은 날짜 생성
+  // 날짜 선택기 함수들 - 해당 월의 1일부터 마지막 일까지
   const getExtendedDates = (centerDate: Date) => {
     const dates = [];
-    const startDate = new Date(centerDate);
-    startDate.setDate(startDate.getDate() - 14); // 2주 전부터 시작
+    const year = centerDate.getFullYear();
+    const month = centerDate.getMonth();
     
-    for (let i = 0; i < 35; i++) { // 5주치 날짜
-      const date = new Date(startDate);
-      date.setDate(startDate.getDate() + i);
+    // 해당 월의 1일
+    const firstDay = new Date(year, month, 1);
+    // 해당 월의 마지막 일
+    const lastDay = new Date(year, month + 1, 0);
+
+    for (let i = 1; i <= lastDay.getDate(); i++) {
+      const date = new Date(year, month, i);
       dates.push(date);
     }
     return dates;
   };
 
-  const goToPreviousDay = () => {
-    const newDay = new Date(selectedDay);
-    newDay.setDate(newDay.getDate() - 1);
-    setSelectedDay(newDay);
+  // 날짜를 스크롤 뷰 중앙으로 이동
+  const scrollToDate = (date: Date, dates: Date[]) => {
+    const index = dates.findIndex(d => isSameDate(d, date));
+    if (index !== -1 && dayScrollViewRef.current) {
+      // 각 날짜 버튼의 너비: minWidth(50) + marginRight(8) = 58
+      const buttonWidth = 58;
+      const screenWidth = Dimensions.get('window').width;
+      // 버튼 중앙 위치 계산
+      const buttonCenterX = index * buttonWidth + buttonWidth / 2;
+      // 화면 중앙으로 맞추기 위한 스크롤 위치
+      const scrollPosition = buttonCenterX - screenWidth / 2;
+      
+      // 약간의 지연 후 스크롤 (렌더링 완료 후)
+      setTimeout(() => {
+        dayScrollViewRef.current?.scrollTo({
+          x: Math.max(0, scrollPosition),
+          animated: true,
+        });
+      }, 150);
+    }
   };
 
-  const goToNextDay = () => {
-    const newDay = new Date(selectedDay);
-    newDay.setDate(newDay.getDate() + 1);
-    setSelectedDay(newDay);
+  // 날짜 선택 헤더의 월 이동 함수
+  const handlePreviousMonth = () => {
+    const newDate = new Date(selectedDay);
+    newDate.setDate(1); // 먼저 1일로 설정 (월말 날짜 오류 방지)
+    newDate.setMonth(newDate.getMonth() - 1); // 그 다음 월 변경
+    setSelectedDay(newDate);
+  };
+
+  const handleNextMonth = () => {
+    const newDate = new Date(selectedDay);
+    newDate.setDate(1); // 먼저 1일로 설정 (월말 날짜 오류 방지)
+    newDate.setMonth(newDate.getMonth() + 1); // 그 다음 월 변경
+    setSelectedDay(newDate);
   };
 
   // 년/월 피커 데이터
@@ -372,12 +415,30 @@ export const CalendarScreen = () => {
 
   const handleAddSchedule = () => {
     // 선택된 날짜 또는 오늘 날짜로 일정 추가 모달 열기
-    const targetDate = selectedDate || new Date();
-    setNewSchedule({ 
-      ...newSchedule, 
+    const targetDate = selectedDay || new Date();
+    setNewSchedule({
+      ...newSchedule,
       date: formatDateString(targetDate)
     });
     setShowAddModal(true);
+  };
+
+  // 날짜 표시 포맷팅 (예: 2024년 10월 31일 (목))
+  const formatDateDisplay = (dateString: string): string => {
+    if (!dateString) return '날짜 선택';
+    const date = new Date(dateString + 'T00:00:00'); // 로컬 시간으로 파싱
+    const year = date.getFullYear();
+    const month = date.getMonth() + 1;
+    const day = date.getDate();
+    const dayOfWeek = ['일', '월', '화', '수', '목', '금', '토'][date.getDay()];
+    return `${year}년 ${month}월 ${day}일 (${dayOfWeek})`;
+  };
+
+  // 날짜 선택 핸들러 (일정 추가 모달용)
+  const handleDateSelectInModal = (day: { dateString: string }) => {
+    setNewSchedule({ ...newSchedule, date: day.dateString });
+    setShowDatePicker(false);
+    setShowTimePicker(false); // 시간 드롭다운도 닫기
   };
 
   const handleDateSelect = (date: Date) => {
@@ -386,11 +447,16 @@ export const CalendarScreen = () => {
   };
 
   const handleSaveSchedule = async () => {
+    if (!newSchedule.date) {
+      Alert.alert('알림', '날짜를 선택해주세요.');
+      return;
+    }
+
     if (!newSchedule.title.trim()) {
       Alert.alert('알림', '제목을 입력해주세요.');
       return;
     }
-    
+
     if (!newSchedule.description.trim()) {
       Alert.alert('알림', '내용을 입력해주세요.');
       return;
@@ -408,10 +474,10 @@ export const CalendarScreen = () => {
 
     try {
       setIsLoading(true);
-      
+
       // 시간 형식 변환: "오후 12시" → "12:00"
       const timeHHMM = convertKoreanTimeToHHMM(newSchedule.time);
-      
+
       const todoData = {
         elderly_id: user.user_id,
         title: newSchedule.title,
@@ -419,16 +485,16 @@ export const CalendarScreen = () => {
         due_date: newSchedule.date,
         due_time: timeHHMM,
       };
-      
+
       console.log('📝 일정 생성 요청:', todoData);
-      
+
       await createTodo(todoData);
-      
+
       console.log('✅ 일정 생성 성공');
-      
+
       // 일정 다시 불러오기
       await loadSchedules();
-      
+
       setNewSchedule({ title: '', description: '', time: '', date: '' });
       setShowAddModal(false);
       Alert.alert('저장 완료', '일정이 추가되었습니다.');
@@ -444,6 +510,7 @@ export const CalendarScreen = () => {
     setNewSchedule({ title: '', description: '', time: '', date: '' });
     setShowAddModal(false);
     setShowTimePicker(false); // 시간 선택 모달도 함께 닫기
+    setShowDatePicker(false); // 날짜 선택 모달도 함께 닫기
   };
 
 
@@ -477,16 +544,16 @@ export const CalendarScreen = () => {
           onPress: async () => {
             try {
               setIsLoading(true);
-              
+
               console.log('🗑️ 일정 삭제 요청:', todoId);
-              
+
               await deleteTodo(todoId);
-              
+
               console.log('✅ 일정 삭제 성공');
-              
+
               // 일정 다시 불러오기
               await loadSchedules();
-              
+
               Alert.alert('삭제 완료', '일정이 삭제되었습니다.');
             } catch (error: any) {
               console.error('❌ 일정 삭제 실패:', error);
@@ -504,8 +571,8 @@ export const CalendarScreen = () => {
   return (
     <View style={styles.container}>
       {/* 공통 헤더 */}
-      <Header 
-        title="달력" 
+      <Header
+        title="달력"
         showMenuButton={true}
         rightButton={
           <TouchableOpacity
@@ -513,10 +580,10 @@ export const CalendarScreen = () => {
             onPress={() => setIsMonthlyView(!isMonthlyView)}
             activeOpacity={0.7}
           >
-            <Ionicons 
-              name={isMonthlyView ? "calendar-outline" : "grid-outline"} 
-              size={24} 
-              color={Colors.primary} 
+            <Ionicons
+              name={isMonthlyView ? "calendar-outline" : "grid-outline"}
+              size={24}
+              color={Colors.primary}
             />
             <Text style={styles.viewToggleText}>
               {isMonthlyView ? "일간" : "월간"}
@@ -543,7 +610,7 @@ export const CalendarScreen = () => {
               전체
             </Text>
           </TouchableOpacity>
-          
+
           <TouchableOpacity
             style={[
               styles.filterTab,
@@ -559,7 +626,7 @@ export const CalendarScreen = () => {
               내 일정
             </Text>
           </TouchableOpacity>
-          
+
           <TouchableOpacity
             style={[
               styles.filterTab,
@@ -621,7 +688,7 @@ export const CalendarScreen = () => {
                 textDayHeaderFontSize: 14,
               }}
             />
-            
+
             {/* 월간 달력 하단 일정 미리보기 */}
             <View style={styles.monthlySchedulePreview}>
               <View style={styles.previewHeader}>
@@ -640,8 +707,8 @@ export const CalendarScreen = () => {
               {getSchedulesForDate(selectedDay).length > 0 ? (
                 <View style={styles.previewList}>
                   {getSchedulesForDate(selectedDay).slice(0, 3).map((schedule, index) => (
-                    <TouchableOpacity 
-                      key={schedule.todo_id} 
+                    <TouchableOpacity
+                      key={schedule.todo_id}
                       style={styles.previewItem}
                       onPress={() => handleSchedulePress(schedule)}
                       activeOpacity={0.7}
@@ -654,16 +721,16 @@ export const CalendarScreen = () => {
                         schedule.category === 'MEAL' && styles.previewIconMeal,
                         !schedule.category && styles.previewIconDefault,
                       ]}>
-                        <Ionicons 
+                        <Ionicons
                           name={
-                            schedule.title.includes('약') || schedule.category === 'MEDICINE' ? 'medical' : 
-                            schedule.title.includes('병원') || schedule.category === 'HOSPITAL' ? 'medical-outline' :
-                            schedule.category === 'EXERCISE' ? 'fitness-outline' :
-                            schedule.category === 'MEAL' ? 'restaurant-outline' :
-                            'calendar-outline'
+                            schedule.title.includes('약') || schedule.category === 'MEDICINE' ? 'medical' :
+                              schedule.title.includes('병원') || schedule.category === 'HOSPITAL' ? 'medical-outline' :
+                                schedule.category === 'EXERCISE' ? 'fitness-outline' :
+                                  schedule.category === 'MEAL' ? 'restaurant-outline' :
+                                    'calendar-outline'
                           }
-                          size={16} 
-                          color={Colors.textWhite} 
+                          size={16}
+                          color={Colors.textWhite}
                         />
                       </View>
                       <Text style={styles.previewText}>{schedule.title}</Text>
@@ -685,179 +752,187 @@ export const CalendarScreen = () => {
           <>
             {/* 날짜 선택기 */}
             <View style={styles.dateSelector}>
-          <TouchableOpacity 
-            style={styles.dateNavButton}
-            onPress={goToPreviousDay}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="chevron-back" size={20} color={Colors.textSecondary} />
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={styles.selectedDateContainer}
-            onPress={() => setShowYearMonthPicker(true)}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.selectedDateText}>
-              {selectedDay.getFullYear()}년 {selectedDay.getMonth() + 1}월
-            </Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={styles.dateNavButton}
-            onPress={goToNextDay}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="chevron-forward" size={20} color={Colors.textSecondary} />
-          </TouchableOpacity>
-        </View>
-
-        {/* 날짜 선택 */}
-        <ScrollView 
-          horizontal 
-          showsHorizontalScrollIndicator={false}
-          style={styles.daySelectorScroll}
-          contentContainerStyle={styles.daySelectorContent}
-        >
-          {getExtendedDates(selectedDay).map((date, index) => {
-            const isSelected = isSameDate(date, selectedDay);
-            const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
-            
-            return (
               <TouchableOpacity
-                key={index}
-                style={[
-                  styles.dayButton,
-                  isSelected && styles.dayButtonSelected
-                ]}
-                onPress={() => setSelectedDay(date)}
+                style={styles.dateNavButton}
+                onPress={handlePreviousMonth}
                 activeOpacity={0.7}
               >
-                <Text style={[
-                  styles.dayNumber,
-                  isSelected && styles.dayNumberSelected
-                ]}>
-                  {date.getDate()}
-                </Text>
-                <Text style={[
-                  styles.dayName,
-                  isSelected && styles.dayNameSelected
-                ]}>
-                  {dayNames[date.getDay()]}
+                <Ionicons name="chevron-back" size={20} color={Colors.textSecondary} />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.selectedDateContainer}
+                onPress={() => setShowYearMonthPicker(true)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.selectedDateText}>
+                  {selectedDay.getFullYear()}년 {selectedDay.getMonth() + 1}월
                 </Text>
               </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
 
+              <TouchableOpacity
+                style={styles.dateNavButton}
+                onPress={handleNextMonth}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="chevron-forward" size={20} color={Colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
 
-        {/* 일정 추가 버튼 */}
-        <View style={styles.addScheduleSection}>
-          <TouchableOpacity
-            style={styles.addScheduleButton}
-            onPress={handleAddSchedule}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="add" size={22} color={Colors.textWhite} />
-            <Text style={styles.addScheduleText}>
-              {selectedDate ? `${formatDate(selectedDate)} 일정 추가` : '일정 추가'}
-            </Text>
-          </TouchableOpacity>
-        </View>
+            {/* 날짜 선택 */}
+            <ScrollView
+              ref={dayScrollViewRef}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.daySelectorScroll}
+              contentContainerStyle={styles.daySelectorContent}
+              onLayout={() => {
+                // 초기 로드 시 오늘 날짜로 스크롤
+                const dates = getExtendedDates(selectedDay);
+                scrollToDate(selectedDay, dates);
+              }}
+            >
+              {getExtendedDates(selectedDay).map((date, index) => {
+                const isSelected = isSameDate(date, selectedDay);
+                const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
 
-        {/* 시간대별 일정 목록 */}
-        <View style={styles.scheduleSection}>
-          <View style={styles.scheduleHeader}>
-            <Text style={styles.scheduleSectionTitle}>
-              {selectedDate ? `${formatDate(selectedDate)} 일정` : '오늘의 일정'}
-            </Text>
-          </View>
-          
-          {(() => {
-            const targetDateString = formatDateString(selectedDay);
-            const dateSchedules = schedules.filter(schedule => schedule.due_date === targetDateString);
-            const filteredSchedules = getFilteredSchedules(dateSchedules);
-            
-            if (isLoading) {
-              return (
-                <View style={styles.emptyState}>
-                  <ActivityIndicator size="large" color={Colors.primary} />
-                  <Text style={styles.emptySubText}>일정을 불러오는 중...</Text>
-                </View>
-              );
-            }
-            
-            if (filteredSchedules.length === 0) {
-              return (
-                <View style={styles.emptyState}>
-                  <Text style={styles.emptyText}>
-                    {selectedDate ? `${formatDate(selectedDate)} 등록된 일정이 없습니다` : '오늘 등록된 일정이 없습니다'}
-                  </Text>
-                  <Text style={styles.emptySubText}>+ 버튼을 눌러 일정을 추가해보세요</Text>
-                </View>
-              );
-            }
-            
-            // 시간순으로 정렬
-            const sortedSchedules = filteredSchedules.sort((a, b) => {
-              if (!a.due_time) return 1;
-              if (!b.due_time) return -1;
-              return a.due_time.localeCompare(b.due_time);
-            });
-            
-            return (
-              <View style={styles.timeScheduleContainer}>
-                {sortedSchedules.map((schedule, index) => (
+                return (
                   <TouchableOpacity
-                    key={schedule.todo_id}
-                    style={styles.scheduleCard}
-                    onPress={() => handleSchedulePress(schedule)}
+                    key={index}
+                    style={[
+                      styles.dayButton,
+                      isSelected && styles.dayButtonSelected
+                    ]}
+                    onPress={() => {
+                      setSelectedDay(date);
+                    }}
                     activeOpacity={0.7}
                   >
-                    <View style={styles.scheduleIconContainer}>
-                      <View style={[
-                        styles.scheduleIcon,
-                        schedule.category === 'MEDICINE' && styles.scheduleIconMedicine,
-                        schedule.category === 'HOSPITAL' && styles.scheduleIconHospital,
-                        schedule.category === 'EXERCISE' && styles.scheduleIconExercise,
-                        schedule.category === 'MEAL' && styles.scheduleIconMeal,
-                        !schedule.category && styles.scheduleIconDefault,
-                      ]}>
-                        <Ionicons 
-                          name={
-                            schedule.title.includes('약') || schedule.category === 'MEDICINE' ? 'medical' : 
-                            schedule.title.includes('병원') || schedule.category === 'HOSPITAL' ? 'medical-outline' :
-                            schedule.category === 'EXERCISE' ? 'fitness-outline' :
-                            schedule.category === 'MEAL' ? 'restaurant-outline' :
-                            'calendar-outline'
-                          }
-                          size={24} 
-                          color={Colors.textWhite} 
-                        />
-                      </View>
-                    </View>
-                    
-                    <View style={styles.scheduleContent}>
-                      <Text style={styles.scheduleTitle}>{schedule.title}</Text>
-                      <Text style={styles.scheduleTime}>{convertHHMMToKoreanTime(schedule.due_time)}</Text>
-                      {schedule.description && (
-                        <Text style={styles.scheduleDescription}>{schedule.description}</Text>
-                      )}
-                    </View>
-                    
-                    <View style={styles.scheduleArrow}>
-                      <Ionicons name="chevron-forward" size={20} color={Colors.textLight} />
-                    </View>
+                    <Text style={[
+                      styles.dayNumber,
+                      isSelected && styles.dayNumberSelected
+                    ]}>
+                      {date.getDate()}
+                    </Text>
+                    <Text style={[
+                      styles.dayName,
+                      isSelected && styles.dayNameSelected
+                    ]}>
+                      {dayNames[date.getDay()]}
+                    </Text>
                   </TouchableOpacity>
-                ))}
+                );
+              })}
+            </ScrollView>
+
+
+            {/* 일정 추가 버튼 */}
+            <View style={styles.addScheduleSection}>
+              <TouchableOpacity
+                style={styles.addScheduleButton}
+                onPress={handleAddSchedule}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="add" size={22} color={Colors.textWhite} />
+                <Text style={styles.addScheduleText}>
+                  {selectedDate ? `${formatDate(selectedDate)} 일정 추가` : '일정 추가'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* 시간대별 일정 목록 */}
+            <View style={styles.scheduleSection}>
+              <View style={styles.scheduleHeader}>
+                <Text style={styles.scheduleSectionTitle}>
+                  {selectedDate ? `${formatDate(selectedDate)} 일정` : '오늘의 일정'}
+                </Text>
               </View>
-            );
-          })()}
-        </View>
+
+              {(() => {
+                const targetDateString = formatDateString(selectedDay);
+                const dateSchedules = schedules.filter(schedule => schedule.due_date === targetDateString);
+                const filteredSchedules = getFilteredSchedules(dateSchedules);
+
+                if (isLoading) {
+                  return (
+                    <View style={styles.emptyState}>
+                      <ActivityIndicator size="large" color={Colors.primary} />
+                      <Text style={styles.emptySubText}>일정을 불러오는 중...</Text>
+                    </View>
+                  );
+                }
+
+                if (filteredSchedules.length === 0) {
+                  return (
+                    <View style={styles.emptyState}>
+                      <Text style={styles.emptyText}>
+                        {selectedDate ? `${formatDate(selectedDate)} 등록된 일정이 없습니다` : '오늘 등록된 일정이 없습니다'}
+                      </Text>
+                      <Text style={styles.emptySubText}>+ 버튼을 눌러 일정을 추가해보세요</Text>
+                    </View>
+                  );
+                }
+
+                // 시간순으로 정렬
+                const sortedSchedules = filteredSchedules.sort((a, b) => {
+                  if (!a.due_time) return 1;
+                  if (!b.due_time) return -1;
+                  return a.due_time.localeCompare(b.due_time);
+                });
+
+                return (
+                  <View style={styles.timeScheduleContainer}>
+                    {sortedSchedules.map((schedule, index) => (
+                      <TouchableOpacity
+                        key={schedule.todo_id}
+                        style={styles.scheduleCard}
+                        onPress={() => handleSchedulePress(schedule)}
+                        activeOpacity={0.7}
+                      >
+                        <View style={styles.scheduleIconContainer}>
+                          <View style={[
+                            styles.scheduleIcon,
+                            schedule.category === 'MEDICINE' && styles.scheduleIconMedicine,
+                            schedule.category === 'HOSPITAL' && styles.scheduleIconHospital,
+                            schedule.category === 'EXERCISE' && styles.scheduleIconExercise,
+                            schedule.category === 'MEAL' && styles.scheduleIconMeal,
+                            !schedule.category && styles.scheduleIconDefault,
+                          ]}>
+                            <Ionicons
+                              name={
+                                schedule.title.includes('약') || schedule.category === 'MEDICINE' ? 'medical' :
+                                  schedule.title.includes('병원') || schedule.category === 'HOSPITAL' ? 'medical-outline' :
+                                    schedule.category === 'EXERCISE' ? 'fitness-outline' :
+                                      schedule.category === 'MEAL' ? 'restaurant-outline' :
+                                        'calendar-outline'
+                              }
+                              size={24}
+                              color={Colors.textWhite}
+                            />
+                          </View>
+                        </View>
+
+                        <View style={styles.scheduleContent}>
+                          <Text style={styles.scheduleTitle}>{schedule.title}</Text>
+                          <Text style={styles.scheduleTime}>{convertHHMMToKoreanTime(schedule.due_time)}</Text>
+                          {schedule.description && (
+                            <Text style={styles.scheduleDescription}>{schedule.description}</Text>
+                          )}
+                        </View>
+
+                        <View style={styles.scheduleArrow}>
+                          <Ionicons name="chevron-forward" size={20} color={Colors.textLight} />
+                        </View>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                );
+              })()}
+            </View>
 
 
-        {/* 하단 여백 */}
-        <View style={{ height: 100 + Math.max(insets.bottom, 10) }} />
+            {/* 하단 여백 */}
+            <View style={{ height: 100 + Math.max(insets.bottom, 10) }} />
           </>
         )}
       </ScrollView>
@@ -873,7 +948,7 @@ export const CalendarScreen = () => {
         onRequestClose={handleCancelAdd}
         presentationStyle="overFullScreen"
       >
-        <KeyboardAvoidingView 
+        <KeyboardAvoidingView
           style={styles.modalOverlay}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
@@ -881,18 +956,98 @@ export const CalendarScreen = () => {
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>일정 추가</Text>
-              <TouchableOpacity onPress={handleCancelAdd} style={styles.closeButton}>
+              <TouchableOpacity 
+                onPress={handleCancelAdd} 
+                style={styles.closeButton}
+                onPressIn={() => {
+                  setShowDatePicker(false);
+                  setShowTimePicker(false);
+                }}
+              >
                 <Ionicons name="close" size={18} color={Colors.textSecondary} />
               </TouchableOpacity>
             </View>
-
-            <ScrollView 
+            
+            <ScrollView
               style={styles.modalBody}
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
               contentInsetAdjustmentBehavior={Platform.OS === 'ios' ? 'automatic' : 'never'}
               automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+              scrollEnabled={!showTimePicker && !showDatePicker}
             >
+              {/* 날짜 선택 */}
+              <View style={styles.inputSection}>
+                <Text style={styles.inputLabel}>날짜</Text>
+                <View style={styles.datePickerContainer}>
+                  <TouchableOpacity
+                    style={styles.datePickerButton}
+                    onPress={() => {
+                      setShowDatePicker(!showDatePicker);
+                      if (!showDatePicker) {
+                        setShowTimePicker(false); // 시간 드롭다운 닫기
+                      }
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[
+                      styles.datePickerText,
+                      !newSchedule.date && styles.datePickerPlaceholder
+                    ]}>
+                      {newSchedule.date ? formatDateDisplay(newSchedule.date) : '날짜를 선택해주세요'}
+                    </Text>
+                    <Ionicons
+                      name="calendar-outline"
+                      size={20}
+                      color={Colors.primary}
+                    />
+                  </TouchableOpacity>
+
+                  {/* 날짜 선택 달력 - 오버레이 형식 */}
+                  {showDatePicker && (
+                    <View 
+                      style={styles.datePickerDropdown}
+                      pointerEvents="auto"
+                    >
+                      <View>
+                        <Calendar
+                          current={newSchedule.date || formatDateString(selectedDay)}
+                          onDayPress={handleDateSelectInModal}
+                          monthFormat={'yyyy년 M월'}
+                          hideExtraDays={true}
+                          theme={{
+                            backgroundColor: '#FFFFFF',
+                            calendarBackground: '#FFFFFF',
+                            textSectionTitleColor: '#666666',
+                            selectedDayBackgroundColor: Colors.primary,
+                            selectedDayTextColor: '#FFFFFF',
+                            todayTextColor: Colors.primary,
+                            dayTextColor: '#333333',
+                            textDisabledColor: '#CCCCCC',
+                            dotColor: Colors.primary,
+                            selectedDotColor: '#FFFFFF',
+                            arrowColor: Colors.primary,
+                            monthTextColor: '#333333',
+                            textDayFontWeight: '500',
+                            textMonthFontWeight: '700',
+                            textDayHeaderFontWeight: '600',
+                            textDayFontSize: 16,
+                            textMonthFontSize: 18,
+                            textDayHeaderFontSize: 14,
+                          }}
+                          markedDates={{
+                            [newSchedule.date || formatDateString(selectedDay)]: {
+                              selected: true,
+                              selectedColor: Colors.primary,
+                            }
+                          }}
+                        />
+                      </View>
+                    </View>
+                  )}
+                </View>
+              </View>
+
               {/* 제목 입력 */}
               <View style={styles.inputSection}>
                 <Text style={styles.inputLabel}>제목</Text>
@@ -902,6 +1057,8 @@ export const CalendarScreen = () => {
                   onChangeText={(text) => setNewSchedule({ ...newSchedule, title: text })}
                   placeholder="일정 제목을 입력해주세요"
                   placeholderTextColor={Colors.textLight}
+                  pointerEvents={showTimePicker || showDatePicker ? 'none' : 'auto'}
+                  editable={!showTimePicker && !showDatePicker}
                 />
               </View>
 
@@ -916,63 +1073,87 @@ export const CalendarScreen = () => {
                   placeholderTextColor={Colors.textLight}
                   multiline
                   numberOfLines={4}
+                  pointerEvents={showTimePicker || showDatePicker ? 'none' : 'auto'}
+                  editable={!showTimePicker && !showDatePicker}
                 />
               </View>
 
               {/* 시간 선택 */}
               <View style={styles.inputSection}>
                 <Text style={styles.inputLabel}>시간</Text>
-                
-                {/* 드롭다운 선택 버튼 */}
-                <TouchableOpacity
-                  style={styles.timePickerButton}
-                  onPress={() => setShowTimePicker(!showTimePicker)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[
-                    styles.timePickerText,
-                    !newSchedule.time && styles.timePickerPlaceholder
-                  ]}>
-                    {newSchedule.time || '시간을 선택해주세요'}
-                  </Text>
-                  <Ionicons 
-                    name={showTimePicker ? "chevron-up" : "chevron-down"} 
-                    size={16} 
-                    color={Colors.primary} 
-                  />
-                </TouchableOpacity>
 
-                {/* 드롭다운 목록 */}
-                {showTimePicker && (
-                  <View style={styles.timePickerDropdown}>
-                    <ScrollView 
-                      style={styles.timePickerScroll} 
-                      showsVerticalScrollIndicator={true}
+                <View style={styles.timePickerContainer}>
+                  {/* 드롭다운 선택 버튼 */}
+                  <TouchableOpacity
+                    style={styles.timePickerButton}
+                    onPress={() => {
+                      setShowTimePicker(!showTimePicker);
+                      if (!showTimePicker) {
+                        setShowDatePicker(false); // 날짜 드롭다운 닫기
+                      }
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[
+                      styles.timePickerText,
+                      !newSchedule.time && styles.timePickerPlaceholder
+                    ]}>
+                      {newSchedule.time || '시간을 선택해주세요'}
+                    </Text>
+                    <Ionicons
+                      name={showTimePicker ? "chevron-up" : "chevron-down"}
+                      size={16}
+                      color={Colors.primary}
+                    />
+                  </TouchableOpacity>
+
+                  {/* 드롭다운 목록 - 위 방향 */}
+                  {showTimePicker && (
+                    <View 
+                      style={styles.timePickerDropdown}
+                      pointerEvents="box-none"
+                      collapsable={false}
                     >
-                      {timeOptions.map((time) => (
-                        <TouchableOpacity
-                          key={time}
-                          style={[
-                            styles.timePickerOption,
-                            newSchedule.time === time && styles.timePickerOptionSelected,
-                          ]}
-                          onPress={() => {
-                            setNewSchedule({ ...newSchedule, time });
-                            setShowTimePicker(false);
-                          }}
-                          activeOpacity={0.7}
-                        >
-                          <Text style={[
-                            styles.timePickerOptionText,
-                            newSchedule.time === time && styles.timePickerOptionTextSelected,
-                          ]}>
-                            {time}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </ScrollView>
-                  </View>
-                )}
+                      <ScrollView
+                        style={styles.timePickerScroll}
+                        contentContainerStyle={styles.timePickerScrollContent}
+                        showsVerticalScrollIndicator={true}
+                        nestedScrollEnabled={true}
+                        bounces={false}
+                        scrollEventThrottle={16}
+                        alwaysBounceVertical={false}
+                        scrollEnabled={true}
+                        onStartShouldSetResponder={() => true}
+                        onStartShouldSetResponderCapture={() => true}
+                        onMoveShouldSetResponder={() => true}
+                        onMoveShouldSetResponderCapture={() => true}
+                        pointerEvents="auto"
+                      >
+                        {timeOptions.map((time) => (
+                          <TouchableOpacity
+                            key={time}
+                            style={[
+                              styles.timePickerOption,
+                              newSchedule.time === time && styles.timePickerOptionSelected,
+                            ]}
+                            onPress={() => {
+                              setNewSchedule({ ...newSchedule, time });
+                              setShowTimePicker(false);
+                            }}
+                            activeOpacity={0.7}
+                          >
+                            <Text style={[
+                              styles.timePickerOptionText,
+                              newSchedule.time === time && styles.timePickerOptionTextSelected,
+                            ]}>
+                              {time}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    </View>
+                  )}
+                </View>
               </View>
             </ScrollView>
 
@@ -1001,14 +1182,14 @@ export const CalendarScreen = () => {
           <View style={styles.pickerContainer}>
             {/* 헤더 */}
             <View style={styles.pickerHeader}>
-              <TouchableOpacity 
+              <TouchableOpacity
                 onPress={() => setShowYearMonthPicker(false)}
                 style={styles.pickerCancelButton}
               >
                 <Text style={styles.pickerCancelText}>취소</Text>
               </TouchableOpacity>
               <Text style={styles.pickerTitle}>날짜 선택</Text>
-              <TouchableOpacity 
+              <TouchableOpacity
                 onPress={handleYearMonthSelect}
                 style={styles.pickerDoneButton}
               >
@@ -1021,7 +1202,7 @@ export const CalendarScreen = () => {
               {/* 년도 피커 */}
               <View style={styles.pickerColumn}>
                 <View style={styles.pickerMask} />
-                <ScrollView 
+                <ScrollView
                   style={styles.pickerScroll}
                   showsVerticalScrollIndicator={false}
                   snapToInterval={40}
@@ -1050,7 +1231,7 @@ export const CalendarScreen = () => {
               {/* 월 피커 */}
               <View style={styles.pickerColumn}>
                 <View style={styles.pickerMask} />
-                <ScrollView 
+                <ScrollView
                   style={styles.pickerScroll}
                   showsVerticalScrollIndicator={false}
                   snapToInterval={40}
@@ -1095,8 +1276,8 @@ export const CalendarScreen = () => {
                 {/* 헤더 */}
                 <View style={styles.detailModalHeader}>
                   <Text style={styles.detailModalTitle}>일정 상세</Text>
-                  <TouchableOpacity 
-                    onPress={() => setShowDetailModal(false)} 
+                  <TouchableOpacity
+                    onPress={() => setShowDetailModal(false)}
                     style={styles.detailCloseButton}
                   >
                     <Ionicons name="close" size={18} color={Colors.textSecondary} />
@@ -1110,19 +1291,19 @@ export const CalendarScreen = () => {
                       <Text style={styles.detailInfoLabel}>제목</Text>
                       <Text style={styles.detailInfoValue}>{selectedSchedule.title}</Text>
                     </View>
-                    
+
                     {selectedSchedule.description && (
                       <View style={styles.detailInfoRow}>
                         <Text style={styles.detailInfoLabel}>내용</Text>
                         <Text style={styles.detailInfoValue}>{selectedSchedule.description}</Text>
                       </View>
                     )}
-                    
+
                     <View style={styles.detailInfoRow}>
                       <Text style={styles.detailInfoLabel}>날짜</Text>
                       <Text style={styles.detailInfoValue}>{selectedSchedule.due_date}</Text>
                     </View>
-                    
+
                     {selectedSchedule.due_time && (
                       <View style={styles.detailInfoRow}>
                         <Text style={styles.detailInfoLabel}>시간</Text>
@@ -1131,7 +1312,7 @@ export const CalendarScreen = () => {
                         </Text>
                       </View>
                     )}
-                    
+
                     <View style={styles.detailInfoRow}>
                       <Text style={styles.detailInfoLabel}>카테고리</Text>
                       <View style={[
@@ -1143,13 +1324,13 @@ export const CalendarScreen = () => {
                       ]}>
                         <Text style={styles.detailCategoryText}>
                           {selectedSchedule.category === 'MEDICINE' ? '약물' :
-                           selectedSchedule.category === 'HOSPITAL' ? '병원' :
-                           selectedSchedule.category === 'EXERCISE' ? '운동' :
-                           selectedSchedule.category === 'MEAL' ? '식사' : '기타'}
+                            selectedSchedule.category === 'HOSPITAL' ? '병원' :
+                              selectedSchedule.category === 'EXERCISE' ? '운동' :
+                                selectedSchedule.category === 'MEAL' ? '식사' : '기타'}
                         </Text>
                       </View>
                     </View>
-                    
+
                     <View style={styles.detailInfoRow}>
                       <Text style={styles.detailInfoLabel}>등록자</Text>
                       <Text style={styles.detailInfoValue}>
@@ -1169,7 +1350,7 @@ export const CalendarScreen = () => {
                     <Ionicons name="create-outline" size={18} color={Colors.primary} />
                     <Text style={styles.detailEditButtonText}>수정</Text>
                   </TouchableOpacity>
-                  
+
                   <TouchableOpacity
                     style={styles.detailDeleteButton}
                     onPress={handleDeleteFromDetail}
@@ -1198,7 +1379,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.backgroundLight,
   },
-  
+
   // 날짜 선택기
   dateSelector: {
     flexDirection: 'row',
@@ -1224,7 +1405,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#555555',
   },
-  
+
   // 요일 선택
   daySelectorScroll: {
     marginBottom: 24,
@@ -1277,7 +1458,7 @@ const styles = StyleSheet.create({
     marginTop: 24,
     marginBottom: 20,
   },
-  
+
   // 주간 네비게이션
   weekNavigation: {
     flexDirection: 'row',
@@ -1320,7 +1501,7 @@ const styles = StyleSheet.create({
     color: '#40B59F',
     fontWeight: '500',
   },
-  
+
   // 주간 달력
   weekCalendarContainer: {
     backgroundColor: '#FFFFFF',
@@ -1412,7 +1593,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#FFFFFF',
   },
-  
+
   // 일정 미리보기
   schedulePreview: {
     marginTop: 8,
@@ -1428,7 +1609,7 @@ const styles = StyleSheet.create({
   schedulePreviewTextSelected: {
     color: '#FFFFFF',
   },
-  
+
   // 스케줄 섹션
   scheduleSection: {
     marginHorizontal: 24,
@@ -1463,7 +1644,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#666666',
   },
-  
+
   // 시간대별 일정
   timeScheduleContainer: {
     marginTop: 10,
@@ -1689,7 +1870,54 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
     minHeight: 100,
   },
+  // 날짜 선택 스타일
+  datePickerContainer: {
+    position: 'relative',
+    zIndex: 1,
+  },
+  datePickerButton: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E9ECEF',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: '#FFFFFF',
+  },
+  datePickerText: {
+    fontSize: 16,
+    color: '#333333',
+    fontWeight: '500',
+    flex: 1,
+  },
+  datePickerPlaceholder: {
+    color: '#999999',
+  },
+  datePickerDropdown: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    marginTop: 8,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E9ECEF',
+    borderRadius: 12,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 8,
+    zIndex: 1001,
+    overflow: 'hidden',
+  },
   // 시간 선택 스타일
+  timePickerContainer: {
+    position: 'relative',
+    zIndex: 1,
+  },
   timePickerButton: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1710,12 +1938,16 @@ const styles = StyleSheet.create({
     color: '#999999',
   },
   timePickerDropdown: {
-    marginTop: 8,
+    position: 'absolute',
+    bottom: '100%',
+    left: 0,
+    right: 0,
+    marginBottom: 8,
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#E9ECEF',
     borderRadius: 12,
-    maxHeight: 250,
+    height: 250,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
@@ -1724,7 +1956,18 @@ const styles = StyleSheet.create({
     zIndex: 1000,
   },
   timePickerScroll: {
-    maxHeight: 200,
+    height: 250,
+  },
+  timePickerScrollContent: {
+    paddingVertical: 4,
+  },
+  dropdownBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 999,
   },
   timePickerOption: {
     paddingVertical: 14,
@@ -1854,7 +2097,7 @@ const styles = StyleSheet.create({
     color: '#000000',
     fontWeight: '600',
   },
-  
+
   // 월간 달력 스타일
   viewToggleButton: {
     flexDirection: 'row',
@@ -1868,7 +2111,7 @@ const styles = StyleSheet.create({
     marginLeft: 4,
     fontWeight: '500',
   },
-  
+
   // 필터 탭 스타일
   filterContainer: {
     flexDirection: 'row',
@@ -1990,7 +2233,7 @@ const styles = StyleSheet.create({
     color: Colors.textLight,
     fontStyle: 'italic',
   },
-  
+
   // 일정 상세 모달 스타일
   detailModalOverlay: {
     flex: 1,
