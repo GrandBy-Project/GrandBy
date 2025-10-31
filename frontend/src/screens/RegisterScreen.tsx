@@ -84,6 +84,8 @@ export const RegisterScreen = () => {
 
   // 타이머
   useEffect(() => {
+    // 인증 완료 시 타이머 무시
+    if (emailVerified) return;
     if (timeLeft > 0) {
       const timer = setTimeout(() => setTimeLeft(timeLeft - 1), 1000);
       return () => clearTimeout(timer);
@@ -91,7 +93,7 @@ export const RegisterScreen = () => {
       show('인증 시간 만료', '인증 코드를 다시 발송해주세요.');
       setCodeSent(false);
     }
-  }, [timeLeft]);
+  }, [timeLeft, emailVerified, codeSent]);
 
   // 비밀번호 강도
   const passwordStrength = password ? checkPasswordStrength(password) : null;
@@ -149,6 +151,9 @@ export const RegisterScreen = () => {
       });
 
       setEmailVerified(true);
+      // 인증 성공 시 타이머/상태 초기화
+      setCodeSent(false);
+      setTimeLeft(0);
       show('인증 완료', '이메일 인증이 완료되었습니다.');
     } catch (error: any) {
       setErrors({
