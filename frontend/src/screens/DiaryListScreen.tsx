@@ -231,10 +231,15 @@ export const DiaryListScreen = () => {
       : item.content;
 
     const authorBadge = getAuthorBadgeInfo(item);
+    const moodInfo = getMoodIcon(item.mood);
+    const borderColor = moodInfo ? moodInfo.color : '#9C27B0';
 
     return (
       <TouchableOpacity
-        style={styles.diaryCard}
+        style={[
+          styles.diaryCard,
+          { borderLeftColor: borderColor }
+        ]}
         onPress={() => router.push(`/diary-detail?diaryId=${item.diary_id}`)}
       >
         {/* 날짜 헤더 */}
@@ -419,12 +424,19 @@ export const DiaryListScreen = () => {
               {diaries.filter(diary => diary.date === selectedDate).length > 0 ? (
                 diaries
                   .filter(diary => diary.date === selectedDate)
-                  .map((diary) => (
-                    <TouchableOpacity
-                      key={diary.diary_id}
-                      style={styles.miniDiaryCard}
-                      onPress={() => router.push(`/diary-detail?diaryId=${diary.diary_id}`)}
-                    >
+                  .map((diary) => {
+                    const moodInfo = getMoodIcon(diary.mood);
+                    const borderColor = moodInfo ? moodInfo.color : '#9C27B0';
+                    
+                    return (
+                      <TouchableOpacity
+                        key={diary.diary_id}
+                        style={[
+                          styles.miniDiaryCard,
+                          { borderLeftColor: borderColor }
+                        ]}
+                        onPress={() => router.push(`/diary-detail?diaryId=${diary.diary_id}`)}
+                      >
                       <View style={styles.miniDiaryHeader}>
                         <Text style={styles.miniDiaryDate}>
                           {formatDate(diary.date)} ({formatDayOfWeek(diary.date)})
@@ -446,7 +458,8 @@ export const DiaryListScreen = () => {
                         {diary.content}
                       </Text>
                     </TouchableOpacity>
-                  ))
+                    );
+                  })
               ) : (
                 <View style={styles.emptySelectedDate}>
                   <Ionicons name="book-outline" size={48} color="#CCCCCC" style={{ marginBottom: 12 }} />
@@ -741,12 +754,14 @@ const styles = StyleSheet.create({
     color: '#333333',
   },
   miniDiaryCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#FFF9F5',
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
     borderWidth: 1,
     borderColor: '#E8E8E8',
+    borderLeftWidth: 4,
+    borderLeftColor: '#9C27B0', // 기본 색상, 동적으로 변경됨
   },
   miniDiaryHeader: {
     flexDirection: 'row',
@@ -790,12 +805,14 @@ const styles = StyleSheet.create({
     paddingBottom: 0,
   },
   diaryCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#FFF9F5',
     borderRadius: 16,
     padding: 20,
     marginBottom: 16,
     borderWidth: 1,
     borderColor: '#E8E8E8',
+    borderLeftWidth: 4,
+    borderLeftColor: '#9C27B0', // 기본 색상, 동적으로 변경됨
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
