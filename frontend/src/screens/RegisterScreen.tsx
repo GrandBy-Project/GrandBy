@@ -10,9 +10,9 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  Alert,
   TouchableOpacity,
   TextInput,
+  useWindowDimensions,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Colors, PasswordStrengthColors } from '../constants/Colors';
@@ -33,10 +33,13 @@ import { UserRole, Gender } from '../types';
 import apiClient, { TokenManager } from '../api/client';
 import { TermsModal } from '../components/TermsModal';
 import { useAuthStore } from '../store/authStore';
+import { useAlert } from '../components/GlobalAlertProvider';
 
 export const RegisterScreen = () => {
   const router = useRouter();
   const { setUser } = useAuthStore();
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+  const { show } = useAlert();
   
   // Input refs
   const emailRef = useRef<TextInput>(null);
@@ -72,13 +75,20 @@ export const RegisterScreen = () => {
   // 약관 모달 상태
   const [showTermsModal, setShowTermsModal] = useState(false);
 
+  // 반응형 스케일 헬퍼(기준 375x812)
+  const guidelineBaseWidth = 375;
+  const guidelineBaseHeight = 812;
+  const scale = (size: number) => (screenWidth / guidelineBaseWidth) * size;
+  const verticalScale = (size: number) => (screenHeight / guidelineBaseHeight) * size;
+  const moderateScale = (size: number, factor = 0.5) => size + (scale(size) - size) * factor;
+
   // 타이머
   useEffect(() => {
     if (timeLeft > 0) {
       const timer = setTimeout(() => setTimeLeft(timeLeft - 1), 1000);
       return () => clearTimeout(timer);
     } else if (timeLeft === 0 && codeSent) {
-      Alert.alert('인증 시간 만료', '인증 코드를 다시 발송해주세요.');
+      show('인증 시간 만료', '인증 코드를 다시 발송해주세요.');
       setCodeSent(false);
     }
   }, [timeLeft]);
@@ -113,12 +123,9 @@ export const RegisterScreen = () => {
       
       setCodeSent(true);
       setTimeLeft(300); // 5분
-      Alert.alert(
-        '인증 코드 발송',
-        '이메일로 인증 코드가 발송되었습니다.\n개발 중에는 백엔드 콘솔을 확인해주세요.'
-      );
+      show('인증 코드 발송', '이메일로 인증 코드가 발송되었습니다. 이메일 확인후 인증 번호를 입력해주세요.');
     } catch (error: any) {
-      Alert.alert('오류', error.response?.data?.detail || '인증 코드 발송에 실패했습니다.');
+      show('오류', error.response?.data?.detail || '인증 코드 발송에 실패했습니다.');
     } finally {
       setIsSendingCode(false);
     }
@@ -142,7 +149,7 @@ export const RegisterScreen = () => {
       });
 
       setEmailVerified(true);
-      Alert.alert('인증 완료', '이메일 인증이 완료되었습니다!');
+      show('인증 완료', '이메일 인증이 완료되었습니다.');
     } catch (error: any) {
       setErrors({
         ...errors,
@@ -212,7 +219,7 @@ export const RegisterScreen = () => {
   // 회원가입 버튼 클릭 (약관 모달 표시)
   const handleRegister = () => {
     if (!validateForm()) {
-      Alert.alert('입력 오류', '모든 항목을 올바르게 입력해주세요.');
+      show('입력 오류', '모든 항목을 올바르게 입력해주세요.');
       return;
     }
 
@@ -249,17 +256,10 @@ export const RegisterScreen = () => {
       setUser(response.data.user);
 
       // 회원가입 완료
-      Alert.alert('환영합니다!', '회원가입이 완료되었습니다.', [
-        {
-          text: '확인',
-          onPress: () => router.replace('/home'),
-        },
-      ]);
+      show('환영합니다!', '회원가입이 완료되었습니다.');
+      router.replace('/home');
     } catch (error: any) {
-      Alert.alert(
-        '회원가입 실패',
-        error.response?.data?.detail || '회원가입에 실패했습니다.'
-      );
+      show('회원가입 실패', error.response?.data?.detail || '회원가입에 실패했습니다.');
     } finally {
       setIsLoading(false);
     }
@@ -270,24 +270,24 @@ export const RegisterScreen = () => {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
+      {/* 고정 헤더 */}
+      <View style={[styles.fixedHeader, { paddingTop: verticalScale(20), paddingBottom: verticalScale(12) }]}>
+        <Text style={[styles.title, { fontSize: moderateScale(28) }]}>회원가입</Text>
+        <Text style={[styles.subtitle, { fontSize: moderateScale(14) }]}>그랜비와 함께 시작해요</Text>
+      </View>
+
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        style={{ backgroundColor: '#FFFFFF' }}
+        contentContainerStyle={[styles.scrollContent, { paddingTop: verticalScale(100), flexGrow: 1 }]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        {/* 헤더 */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-            <Text style={styles.backButtonText}>← 돌아가기</Text>
-          </TouchableOpacity>
-          <Text style={styles.title}>회원가입</Text>
-          <Text style={styles.subtitle}>그랜비와 함께 시작해요</Text>
-        </View>
+        {/* 헤더 섹션 제거: 상단 고정 헤더로 대체 */}
 
         {/* 이메일 인증 */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>이메일 *</Text>
-          <View style={styles.emailContainer}>
+          <View style={styles.narrow}><Text style={styles.sectionTitle}>이메일 *</Text></View>
+          <View style={[styles.emailContainer, styles.narrow]}>
             <View style={{ flex: 1 }}>
               <Input
                 ref={emailRef}
@@ -305,10 +305,11 @@ export const RegisterScreen = () => {
             </View>
             {!emailVerified && (
               <Button
-                title={codeSent ? '재발송' : '인증코드 발송'}
+                title={codeSent ? '재발송' : '인증하기'}
                 onPress={handleSendVerificationCode}
                 loading={isSendingCode}
                 variant="outline"
+                style={{ paddingHorizontal: 10 }}
               />
             )}
             {emailVerified && (
@@ -320,7 +321,7 @@ export const RegisterScreen = () => {
 
           {/* 인증 코드 입력 */}
           {codeSent && !emailVerified && (
-            <View style={styles.codeContainer}>
+            <View style={[styles.codeContainer, styles.narrow]}>
               <View style={{ flex: 1 }}>
                 <Input
                   ref={verificationCodeRef}
@@ -352,22 +353,24 @@ export const RegisterScreen = () => {
 
         {/* 비밀번호 */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>비밀번호 * (최소 6자)</Text>
-          <Input
-            ref={passwordRef}
-            label=""
-            value={password}
-            onChangeText={setPassword}
-            placeholder="비밀번호"
-            secureTextEntry
-            error={errors.password}
-            returnKeyType="next"
-            onSubmitEditing={() => confirmPasswordRef.current?.focus()}
-          />
+          <View style={styles.narrow}><Text style={styles.sectionTitle}>비밀번호 * (최소 6자)</Text></View>
+          <View style={styles.narrow}>
+            <Input
+              ref={passwordRef}
+              label=""
+              value={password}
+              onChangeText={setPassword}
+              placeholder="비밀번호"
+              secureTextEntry
+              error={errors.password}
+              returnKeyType="next"
+              onSubmitEditing={() => confirmPasswordRef.current?.focus()}
+            />
+          </View>
           
           {/* 비밀번호 강도 표시기 */}
           {password && passwordStrength && (
-            <View style={styles.strengthContainer}>
+            <View style={[styles.strengthContainer, styles.narrow]}>
               <View style={styles.strengthBars}>
                 {[1, 2, 3, 4, 5, 6].map((level) => (
                   <View
@@ -392,75 +395,83 @@ export const RegisterScreen = () => {
             </View>
           )}
 
-          <Input
-            ref={confirmPasswordRef}
-            label=""
-            value={confirmPassword}
-            onChangeText={setConfirmPassword}
-            placeholder="비밀번호 확인"
-            secureTextEntry
-            error={errors.confirmPassword}
-            returnKeyType="next"
-            onSubmitEditing={() => nameRef.current?.focus()}
-          />
+          <View style={styles.narrow}>
+            <Input
+              ref={confirmPasswordRef}
+              label=""
+              value={confirmPassword}
+              onChangeText={setConfirmPassword}
+              placeholder="비밀번호 확인"
+              secureTextEntry
+              error={errors.confirmPassword}
+              returnKeyType="next"
+              onSubmitEditing={() => nameRef.current?.focus()}
+            />
+          </View>
         </View>
 
         {/* 이름 */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>이름 *</Text>
-          <Input
-            ref={nameRef}
-            label=""
-            value={name}
-            onChangeText={setName}
-            placeholder="이름"
-            error={errors.name}
-            returnKeyType="next"
-            onSubmitEditing={() => phoneRef.current?.focus()}
-          />
+          <View style={styles.narrow}><Text style={styles.sectionTitle}>이름 *</Text></View>
+          <View style={styles.narrow}>
+            <Input
+              ref={nameRef}
+              label=""
+              value={name}
+              onChangeText={setName}
+              placeholder="이름"
+              error={errors.name}
+              returnKeyType="next"
+              onSubmitEditing={() => phoneRef.current?.focus()}
+            />
+          </View>
         </View>
 
         {/* 전화번호 */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>전화번호 *</Text>
+          <View style={styles.narrow}><Text style={styles.sectionTitle}>전화번호 *</Text></View>
           <View>
             <View style={{ flex: 1 }}>
-              <Input
-                ref={phoneRef}
-                label=""
-                value={phoneNumber}
-                onChangeText={handlePhoneNumberChange}
-                placeholder="010-1234-5678"
-                keyboardType="phone-pad"
-                error={errors.phoneNumber}
-                returnKeyType="next"
-              />
+              <View style={styles.narrow}>
+                <Input
+                  ref={phoneRef}
+                  label=""
+                  value={phoneNumber}
+                  onChangeText={handlePhoneNumberChange}
+                  placeholder="010-1234-5678"
+                  keyboardType="phone-pad"
+                  error={errors.phoneNumber}
+                  returnKeyType="next"
+                />
+              </View>
             </View>
           </View>
         </View>
 
         {/* 생년월일 */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>생년월일 * (YYYY-MM-DD)</Text>
-          <Input
-            ref={birthDateRef}
-            label=""
-            value={birthDate}
-            onChangeText={handleBirthDateChange}
-            placeholder="1990-01-01"
-            keyboardType="numeric"
-            error={errors.birthDate}
-            maxLength={10}
-            returnKeyType="done"
-            onSubmitEditing={() => {}}
-          />
-          <Text style={styles.helperText}>만 14세 이상만 가입 가능합니다</Text>
+          <View style={styles.narrow}><Text style={styles.sectionTitle}>생년월일 * (YYYY-MM-DD)</Text></View>
+          <View style={styles.narrow}>
+            <Input
+              ref={birthDateRef}
+              label=""
+              value={birthDate}
+              onChangeText={handleBirthDateChange}
+              placeholder="1990-01-01"
+              keyboardType="numeric"
+              error={errors.birthDate}
+              maxLength={10}
+              returnKeyType="done"
+              onSubmitEditing={() => {}}
+            />
+          </View>
+          
         </View>
 
         {/* 성별 */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>성별 *</Text>
-          <View style={styles.genderButtons}>
+          <View style={styles.narrow}><Text style={styles.sectionTitle}>성별 *</Text></View>
+          <View style={[styles.genderButtons, styles.narrow]}>
             <TouchableOpacity
               style={[
                 styles.genderButton,
@@ -495,8 +506,8 @@ export const RegisterScreen = () => {
 
         {/* 사용자 유형 */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>사용자 유형 *</Text>
-          <View style={styles.roleButtons}>
+          <View style={styles.narrow}><Text style={styles.sectionTitle}>사용자 유형 *</Text></View>
+          <View style={[styles.roleButtons, styles.narrow]}>
             <TouchableOpacity
               style={[
                 styles.roleButton,
@@ -534,7 +545,7 @@ export const RegisterScreen = () => {
         </View>
 
         {/* 회원가입 버튼 */}
-        <View style={styles.buttonContainer}>
+        <View style={[styles.buttonContainer, styles.narrow]}>
           <Button
             title="회원가입"
             onPress={handleRegister}
@@ -558,21 +569,19 @@ export const RegisterScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
+    backgroundColor: '#FFFFFF',
   },
   scrollContent: {
     padding: 24,
-    paddingTop: 60,
   },
-  header: {
-    marginBottom: 32,
-  },
-  backButton: {
-    marginBottom: 16,
-  },
-  backButtonText: {
-    fontSize: 16,
-    color: Colors.primary,
+  fixedHeader: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 24,
+    zIndex: 10,
   },
   title: {
     fontSize: 32,
@@ -587,6 +596,10 @@ const styles = StyleSheet.create({
   section: {
     marginBottom: 24,
   },
+  narrow: {
+    width: '95%',
+    alignSelf: 'center',
+  },
   sectionTitle: {
     fontSize: 16,
     fontWeight: '600',
@@ -596,7 +609,9 @@ const styles = StyleSheet.create({
   emailContainer: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 8,
+    gap: 10,
+    flexWrap: 'wrap',
+    
   },
   verifiedBadge: {
     minHeight: 54,
@@ -615,6 +630,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: 8,
     marginTop: 8,
+    flexWrap: 'wrap',
   },
   timerContainer: {
     minHeight: 54,
@@ -679,11 +695,6 @@ const styles = StyleSheet.create({
   buttonContainer: {
     marginTop: 16,
     marginBottom: 32,
-  },
-  helperText: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-    marginTop: 4,
   },
   genderButtons: {
     flexDirection: 'row',
