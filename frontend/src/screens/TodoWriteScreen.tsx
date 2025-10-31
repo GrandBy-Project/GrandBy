@@ -14,6 +14,7 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Header, BottomNavigationBar } from '../components';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFontSizeStore } from '../store/fontSizeStore';
 
 interface TodoFormData {
   title: string;
@@ -25,6 +26,7 @@ export const TodoWriteScreen = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { id, mode } = useLocalSearchParams();
+  const { fontSizeLevel } = useFontSizeStore();
   
   const isEdit = mode === 'edit';
   
@@ -93,7 +95,7 @@ export const TodoWriteScreen = () => {
       {/* 공통 헤더 */}
       <Header 
         title={isEdit ? "일정 수정" : "일정 추가"} 
-        showBackButton 
+        showMenuButton={true}
         rightButton={
           <TouchableOpacity onPress={handleCancel} style={styles.cancelButton}>
             <Text style={styles.cancelText}>취소</Text>

@@ -8,13 +8,16 @@ import {
   StyleSheet,
   TouchableOpacity,
   Modal,
-  Dimensions,
-  Alert,
   Animated,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../store/authStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useResponsive, getResponsiveFontSize, getResponsivePadding, getResponsiveSize } from '../hooks/useResponsive';
+import { useFontSizeStore } from '../store/fontSizeStore';
+import { ScrollView } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { Colors } from '../constants/Colors';
 
 interface SideMenuProps {
   visible: boolean;
@@ -23,8 +26,10 @@ interface SideMenuProps {
 
 export const SideMenu: React.FC<SideMenuProps> = ({ visible, onClose }) => {
   const router = useRouter();
-  const { user, logout } = useAuthStore();
+  const { user } = useAuthStore();
   const insets = useSafeAreaInsets();
+  const { scale, width: screenWidth, height: screenHeight } = useResponsive();
+  const { fontSizeLevel } = useFontSizeStore();
 
   // 애니메이션 값들
   const slideAnim = React.useRef(new Animated.Value(-300)).current;
@@ -67,51 +72,39 @@ export const SideMenu: React.FC<SideMenuProps> = ({ visible, onClose }) => {
     });
   };
 
-  const handleLogout = async () => {
-    Alert.alert(
-      '로그아웃',
-      '로그아웃 하시겠습니까?',
-      [
-        { text: '취소', style: 'cancel' },
-        {
-          text: '로그아웃',
-          style: 'destructive',
-          onPress: async () => {
-            await logout();
-            router.replace('/');
-            onClose();
-          },
-        },
-      ]
-    );
-  };
 
   const menuItems = [
     {
-      id: 'shared-diary',
-      icon: '📖',
-      title: '일기장',
-      color: '#34B79F',
-      onPress: () => {
-        router.push('/diaries');
-        handleClose();
-      },
-    },
-    {
       id: 'todo-list',
-      icon: '📋',
+      iconName: 'list-outline' as keyof typeof Ionicons.glyphMap,
       title: '해야 할 일',
-      color: '#FF6B6B',
       onPress: () => {
         router.push('/todos');
         handleClose();
       },
     },
     {
+      id: 'ai-call',
+      iconName: 'call-outline' as keyof typeof Ionicons.glyphMap,
+      title: 'AI 통화',
+      onPress: () => {
+        router.push('/ai-call');
+        handleClose();
+      },
+    },
+    {
+      id: 'shared-diary',
+      iconName: 'book-outline' as keyof typeof Ionicons.glyphMap,
+      title: '일기장',
+      onPress: () => {
+        router.push('/diaries');
+        handleClose();
+      },
+    },
+    {
       id: 'calendar',
-      icon: '📅',
+      iconName: 'calendar-outline' as keyof typeof Ionicons.glyphMap,
       title: '달력',
-      color: '#FF9500',
       onPress: () => {
         router.push('/calendar');
         handleClose();
@@ -119,9 +112,8 @@ export const SideMenu: React.FC<SideMenuProps> = ({ visible, onClose }) => {
     },
     {
       id: 'mypage',
-      icon: '👤',
+      iconName: 'person-outline' as keyof typeof Ionicons.glyphMap,
       title: '내 정보',
-      color: '#5856D6',
       onPress: () => {
         router.push('/mypage');
         handleClose();
@@ -129,9 +121,8 @@ export const SideMenu: React.FC<SideMenuProps> = ({ visible, onClose }) => {
     },
     {
       id: 'settings',
-      icon: '⚙️',
+      iconName: 'settings-outline' as keyof typeof Ionicons.glyphMap,
       title: '설정',
-      color: '#5856D6',
       onPress: () => {
         router.push('/settings');
         handleClose();
@@ -139,7 +130,43 @@ export const SideMenu: React.FC<SideMenuProps> = ({ visible, onClose }) => {
     },
   ];
 
-  const screenWidth = Dimensions.get('window').width;
+  // 순수 비율 기반 동적 계산
+  // 메뉴 너비: 화면 너비의 70-75% (화면 크기에 따라 자연스럽게)
+  const menuWidth = screenWidth * (screenWidth < 400 ? 0.70 : 0.75);
+  
+  // 프로필 섹션
+  const profilePadding = getResponsivePadding(24, scale);
+  const profileImageSize = getResponsiveSize(80, scale);
+  const profileImageBorderRadius = profileImageSize / 2;
+  const profileImageFontSize = getResponsiveFontSize(40, scale);
+  const profileImageMarginBottom = getResponsivePadding(16, scale);
+  const userNameFontSize = getResponsiveFontSize(24, scale);
+  const userNameMarginBottom = getResponsivePadding(8, scale);
+  const userInfoFontSize = getResponsiveFontSize(16, scale);
+  
+  // 메뉴 섹션
+  const menuSectionPadding = getResponsivePadding(16, scale);
+  const menuItemPaddingVertical = getResponsivePadding(10, scale); // 세로폭 더 축소 (12 → 10)
+  const menuItemPaddingHorizontal = getResponsivePadding(20, scale);
+  
+  // 메뉴 아이콘 컨테이너 (원형)
+  const menuIconContainerSize = getResponsiveSize(48, scale, true);
+  const menuIconContainerBorderRadius = menuIconContainerSize / 2; // 원형을 위한 borderRadius
+  const menuIconSize = getResponsiveFontSize(22, scale);
+  const menuIconMarginRight = getResponsivePadding(16, scale);
+  
+  // 메뉴 텍스트
+  const menuTextFontSize = getResponsiveFontSize(16, scale);
+  const menuTextLineHeight = menuTextFontSize * 1.4;
+  const menuItemMarginBottom = getResponsivePadding(8, scale); // 간격도 조금 축소
+  const menuItemBorderRadius = getResponsivePadding(16, scale);
+  
+  // 하단 섹션 (Safe Area 고려)
+  const bottomSectionPadding = getResponsivePadding(20, scale);
+  const bottomSectionPaddingBottom = Math.max(
+    insets.bottom + getResponsivePadding(20, scale),
+    getResponsivePadding(40, scale)
+  );
 
   return (
     <Modal
@@ -164,58 +191,153 @@ export const SideMenu: React.FC<SideMenuProps> = ({ visible, onClose }) => {
           />
         </Animated.View>
         
-        {/* 사이드 메뉴 - 왼쪽에서 오른쪽으로 슬라이드 */}
+          {/* 사이드 메뉴 - 왼쪽에서 오른쪽으로 슬라이드 */}
         <Animated.View 
           style={[
             styles.menuContainer, 
             { 
-              width: screenWidth * 0.75,
+              width: menuWidth,
               transform: [{ translateX: slideAnim }]
             }
           ]}
         >
           {/* 프로필 섹션 */}
-          <View style={[styles.profileSection, { paddingTop: Math.max(insets.top, 20) + 20 }]}>
-            <View style={styles.profileImageContainer}>
-              <Text style={styles.profileImage}>👤</Text>
+          <View style={[
+            styles.profileSection,
+            {
+              padding: profilePadding,
+              paddingTop: Math.max(insets.top, getResponsivePadding(20, scale)) + profilePadding,
+            }
+          ]}>
+            <View style={[
+              styles.profileImageContainer,
+              {
+                width: profileImageSize,
+                height: profileImageSize,
+                borderRadius: profileImageBorderRadius,
+                marginBottom: profileImageMarginBottom,
+              }
+            ]}>
+              <Ionicons 
+                name="person-circle" 
+                size={profileImageSize * 0.9} 
+                color="#34B79F" 
+              />
             </View>
-            <Text style={styles.userName}>{user?.name || 'Patrick'}</Text>
-            <Text style={styles.userInfo}>Ford Transit Connect</Text>
-            
+            <Text style={[
+              styles.userName, 
+              { 
+                fontSize: userNameFontSize, 
+                marginBottom: userNameMarginBottom 
+              },
+              fontSizeLevel >= 1 && { fontSize: userNameFontSize * 1.2 },
+              fontSizeLevel >= 2 && { fontSize: userNameFontSize * 1.4 }
+            ]}>
+              {user?.name || 'Patrick'}
+            </Text>
+            <Text style={[
+              styles.userInfo, 
+              { fontSize: userInfoFontSize },
+              fontSizeLevel >= 1 && { fontSize: userInfoFontSize * 1.15 },
+              fontSizeLevel >= 2 && { fontSize: userInfoFontSize * 1.3 }
+            ]}>
+              Ford Transit Connect
+            </Text>
           </View>
 
-          {/* 메뉴 항목들 */}
-          <View style={styles.menuSection}>
-            {menuItems.map((item) => (
+          {/* 메뉴 항목들 - ScrollView로 감싸서 오버플로우 방지 */}
+          <ScrollView
+            style={styles.menuScrollView}
+            contentContainerStyle={[
+              styles.menuSection,
+              {
+                padding: menuSectionPadding,
+              }
+            ]}
+            showsVerticalScrollIndicator={false}
+          >
+            {menuItems.map((item, index) => (
               <TouchableOpacity
                 key={item.id}
-                style={styles.menuItem}
+                style={[
+                  styles.menuItem,
+                  {
+                    paddingVertical: menuItemPaddingVertical,
+                    paddingHorizontal: menuItemPaddingHorizontal,
+                    marginBottom: index < menuItems.length - 1 ? menuItemMarginBottom : 0,
+                    borderRadius: menuItemBorderRadius,
+                  }
+                ]}
                 onPress={item.onPress}
-                activeOpacity={0.7}
+                activeOpacity={0.8}
               >
-                <View style={[styles.menuIconContainer, { borderColor: item.color }]}>
-                  <Text style={styles.menuIcon}>{item.icon}</Text>
+                {/* 아이콘 컨테이너 */}
+                <View style={[
+                  styles.menuIconContainer,
+                  {
+                    width: menuIconContainerSize,
+                    height: menuIconContainerSize,
+                    borderRadius: menuIconContainerBorderRadius,
+                    marginRight: menuIconMarginRight,
+                  }
+                ]}>
+                  <Ionicons 
+                    name={item.iconName} 
+                    size={menuIconSize} 
+                    color={Colors.primary}
+                  />
                 </View>
-                <Text style={[styles.menuText, { color: item.color }]}>
+                {/* 메뉴 텍스트 */}
+                <Text 
+                  style={[
+                    styles.menuText,
+                    {
+                      color: Colors.text,
+                      fontSize: menuTextFontSize,
+                      lineHeight: menuTextLineHeight,
+                      flex: 1,
+                    },
+                    fontSizeLevel >= 1 && { fontSize: menuTextFontSize * 1.15, lineHeight: menuTextFontSize * 1.15 * 1.4 },
+                    fontSizeLevel >= 2 && { fontSize: menuTextFontSize * 1.3, lineHeight: menuTextFontSize * 1.3 * 1.4 }
+                  ]}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                >
                   {item.title}
                 </Text>
+                {/* 화살표 아이콘 */}
+                <Ionicons 
+                  name="chevron-forward" 
+                  size={getResponsiveFontSize(20, scale)} 
+                  color={Colors.textLight}
+                  style={{ marginLeft: getResponsivePadding(8, scale) }}
+                />
               </TouchableOpacity>
             ))}
-          </View>
+          </ScrollView>
 
           {/* 하단 섹션 */}
-          <View style={styles.bottomSection}>
-            <TouchableOpacity onPress={handleLogout}>
-              <Text style={styles.logoutText}>로그아웃</Text>
-            </TouchableOpacity>
-            
-            {/* 닫기 버튼 */}
+          <View style={[
+            styles.bottomSection,
+            {
+              padding: bottomSectionPadding,
+              paddingBottom: bottomSectionPaddingBottom,
+            }
+          ]}>
+            {/* 닫기 버튼 - 텍스트로 우측 배치 */}
             <TouchableOpacity 
               style={styles.closeButton}
               onPress={handleClose}
               activeOpacity={0.7}
             >
-              <Text style={styles.closeIcon}>✕</Text>
+              <Text style={[
+                styles.closeText,
+                { fontSize: getResponsiveFontSize(16, scale) },
+                fontSizeLevel >= 1 && { fontSize: getResponsiveFontSize(16, scale) * 1.15 },
+                fontSizeLevel >= 2 && { fontSize: getResponsiveFontSize(16, scale) * 1.3 }
+              ]}>
+                닫기
+              </Text>
             </TouchableOpacity>
           </View>
         </Animated.View>
@@ -256,98 +378,84 @@ const styles = StyleSheet.create({
   // 프로필 섹션
   profileSection: {
     backgroundColor: '#34B79F',
-    padding: 24,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     alignItems: 'center',
+    // padding, paddingTop은 동적으로 적용됨
   },
   profileImageContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 16,
     borderWidth: 3,
     borderColor: '#FFFFFF',
+    // width, height, borderRadius, marginBottom은 동적으로 적용됨
   },
   profileImage: {
-    fontSize: 40,
+    // fontSize는 동적으로 적용됨
   },
   userName: {
-    fontSize: 24,
     fontWeight: 'bold',
     color: '#FFFFFF',
-    marginBottom: 8,
+    // fontSize, marginBottom은 동적으로 적용됨
   },
   userInfo: {
-    fontSize: 16,
     color: '#FFFFFF',
     opacity: 0.9,
+    // fontSize는 동적으로 적용됨
   },
  
   // 메뉴 섹션
-  menuSection: {
+  menuScrollView: {
     flex: 1,
-    padding: 20,
+    backgroundColor: Colors.backgroundGray, // 연한 회색 배경으로 구분감 강화
+  },
+  menuSection: {
+    // padding은 동적으로 적용됨
   },
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 8,
+    backgroundColor: Colors.background, // 흰색 카드 배경
+    shadowColor: Colors.shadow,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    elevation: 2,
+    borderWidth: 1,
+    borderColor: Colors.borderLight,
+    // paddingVertical, paddingHorizontal, marginBottom, borderRadius는 동적으로 적용됨
   },
   menuIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 2,
+    backgroundColor: Colors.primaryPale, // 연한 민트색 배경
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 16,
-  },
-  menuIcon: {
-    fontSize: 20,
+    overflow: 'hidden', // 원형이 확실히 적용되도록
+    // width, height, borderRadius, marginRight는 동적으로 적용됨
   },
   menuText: {
-    fontSize: 16,
-    fontWeight: '500',
-    flex: 1,
+    fontWeight: '600',
+    // fontSize, lineHeight, color는 동적으로 적용됨
   },
 
   // 하단 섹션
   bottomSection: {
-    padding: 20,
-    paddingBottom: 40,
     borderBottomLeftRadius: 24,
     borderBottomRightRadius: 24,
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-end',
     alignItems: 'center',
-  },
-  logoutText: {
-    fontSize: 16,
-    color: '#34B79F',
-    textDecorationLine: 'underline',
-    fontWeight: '500',
+    backgroundColor: Colors.backgroundGray, // 상단과 일관성 유지
+    borderTopWidth: 1,
+    borderTopColor: Colors.borderLight,
+    // padding, paddingBottom은 동적으로 적용됨
   },
   closeButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#F0F0F0',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    // 스타일은 동적으로 적용됨
   },
-  closeIcon: {
-    fontSize: 20,
-    color: '#666666',
-    fontWeight: 'bold',
+  closeText: {
+    color: Colors.primary,
+    fontWeight: '600',
+    // fontSize는 동적으로 적용됨
   },
 });

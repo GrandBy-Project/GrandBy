@@ -16,10 +16,12 @@ import { Header, Button, Input } from '../components';
 import { validatePassword } from '../utils/validation';
 import apiClient from '../api/client';
 import { useAuthStore } from '../store/authStore';
+import { useFontSizeStore } from '../store/fontSizeStore';
 
 export const ChangePasswordScreen = () => {
   const router = useRouter();
   const { user } = useAuthStore();
+  const { fontSizeLevel } = useFontSizeStore();
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -94,7 +96,10 @@ export const ChangePasswordScreen = () => {
 
   return (
     <View style={styles.container}>
-      <Header title="비밀번호 변경" showBackButton={true} />
+      <Header 
+        title="비밀번호 변경" 
+        showMenuButton={true}
+      />
       
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.infoBox}>
