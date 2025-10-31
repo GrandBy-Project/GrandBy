@@ -450,7 +450,7 @@ export const RegisterScreen = () => {
 
         {/* 생년월일 */}
         <View style={styles.section}>
-          <View style={styles.narrow}><Text style={styles.sectionTitle}>생년월일 * (YYYY-MM-DD)</Text></View>
+          <View style={styles.narrow}><Text style={styles.sectionTitle}>생년월일 * (년도-월-일)</Text></View>
           <View style={styles.narrow}>
             <Input
               ref={birthDateRef}
