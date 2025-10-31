@@ -35,7 +35,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       const response = await authApi.login({ email, password });
       set({ user: response.user, isLoading: false });
     } catch (error: any) {
-      const errorMessage = error.response?.data?.detail || '로그인에 실패했습니다.';
+      const errorMessage = error.response?.data?.detail || '아이디 또는 비밀번호가 일치하지 않습니다.';
       set({ error: errorMessage, isLoading: false });
       throw error;
     }
