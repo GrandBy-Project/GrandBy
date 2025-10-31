@@ -47,6 +47,9 @@ active_connections: Dict[str, WebSocket] = {}
 conversation_sessions: Dict[str, list] = {}
 saved_calls: set = set()  # 중복 저장 방지용 플래그
 
+# TTS 재생 완료 시간 추적 (call_sid -> (completion_time, total_playback_duration))
+active_tts_completions: Dict[str, tuple[float, float]] = {}
+
 # ==================== Helper Functions ====================
 
 # 한국 시간대 (KST, UTC+9)
@@ -336,7 +339,7 @@ async def process_streaming_response(
         
         # 재생 완료 대기
         if playback_duration > 0:
-            await asyncio.sleep(playback_duration * 0.9)
+            await asyncio.sleep(playback_duration * 1.1)
         
         return "".join(full_response)
         
@@ -369,7 +372,18 @@ async def _evaluate_end_after_first_audio(rtzr_stt, call_sid: str, user_text: st
         )
 
         # 종료 판단 결과 처리 (first_audio_evaluated 플래그로 중복 방지)
-        if score >= 100:
+        if score == -1:
+            # ⚠️ 최대 통화 시간 임박 경고
+            decision = 'max_time_warning'
+            if rtzr_stt.results_queue:
+                await rtzr_stt.results_queue.put({
+                    'event': 'max_time_warning',
+                    'text': user_text,
+                    'is_final': True,
+                    'breakdown': breakdown
+                })
+                logger.info("⚠️ 최대 통화 시간 경고 이벤트 전달 완료")
+        elif score >= 100:
             decision = 'hard_end'
             # 하드 종료 이벤트를 results_queue에 전달
             if rtzr_stt.results_queue and not (hasattr(rtzr_stt, '_first_audio_evaluated') and rtzr_stt._first_audio_evaluated):
@@ -513,6 +527,12 @@ async def llm_to_clova_tts_pipeline(
                 logger.warning("⚠️ 마지막 문장 TTS 실패, 건너뜀")
         
         logger.info(f"✅ [전체] 총 {sentence_count}개 문장 처리 완료")
+        
+        # ✅ TTS 완료 시점과 재생 시간 기록
+        if call_sid:
+            completion_time = time.time()
+            active_tts_completions[call_sid] = (completion_time, total_playback_duration)
+            logger.info(f"📝 [TTS 추적] {call_sid}: 완료 시점={completion_time:.2f}, 재생 시간={total_playback_duration:.2f}초")
                         
         # 🚀 [마지막 TTS 재생 후] LLM 종료 판단 (백그라운드, 사용자 경험 영향 없음)
         if rtzr_stt and call_sid:
@@ -1392,9 +1412,88 @@ async def media_stream_handler(
                             
                             if event_name == 'soft_close_prompt':
                                 logger.info("🟡 소프트 클로징 트리거 수신")
+                            
+                            if event_name == 'max_time_warning':
+                                logger.info("⚠️ [MAX TIME WARNING] 최대 통화 시간 임박 감지")
+                                
+                                # 사용자나 AI가 말하는 중이면 대기
+                                if rtzr_stt.is_bot_speaking:
+                                    logger.info("⏳ [MAX TIME WARNING] AI 응답 중 - 완료까지 대기")
+                                    while rtzr_stt.is_bot_speaking:
+                                        await asyncio.sleep(0.1)
+                                    # AI 응답 완료 후 추가 대기 (사용자가 응답할 시간)
+                                    await asyncio.sleep(2.0)
+                                
+                                # 종료 안내 멘트
+                                warning_message = "오늘 대화 시간이 다 되었어요. 잠시 후 통화가 마무리됩니다."
+                                
+                                # 대화 세션에 추가
+                                if call_sid in conversation_sessions:
+                                    conversation_sessions[call_sid].append({
+                                        "role": "assistant",
+                                        "content": warning_message
+                                    })
+                                    # 🤖 LLM 종료 판단을 위한 대화 기록 업데이트
+                                    rtzr_stt.update_conversation_history(conversation_sessions[call_sid])
+                                
+                                logger.info(f"🔊 [TTS] 종료 안내 메시지 전송: {warning_message}")
+                                
+                                # TTS 변환 및 전송
+                                audio_data, tts_time = await naver_clova_tts_service.text_to_speech_bytes(warning_message)
+                                if audio_data:
+                                    playback_duration = await send_clova_audio_to_twilio(
+                                        websocket,
+                                        stream_sid,
+                                        audio_data,
+                                        0,
+                                        time.time()
+                                    )
+                                    
+                                    # TTS 완료 시간 기록
+                                    completion_time = time.time()
+                                    active_tts_completions[call_sid] = (completion_time, playback_duration)
+                                    logger.info(f"📝 [TTS 추적] 종료 안내 완료: {playback_duration:.2f}초")
+                                    
+                                    # 재생 완료까지 대기 (20% 여유)
+                                    await asyncio.sleep(playback_duration * 1.2)
+                                    logger.info("✅ [MAX TIME WARNING] 종료 안내 재생 완료")
+                                    
+                                    # 종료 안내 후 1초 추가 대기 (사용자가 인지할 시간)
+                                    await asyncio.sleep(1.0)
+                                    logger.info("⏳ [MAX TIME WARNING] 종료 안내 후 대기 완료, 통화 종료 진행")
+                                else:
+                                    logger.error("❌ [MAX TIME WARNING] TTS 변환 실패")
+                                    await asyncio.sleep(1.0)
+                                
+                                # 종료 안내 후 즉시 통화 종료
+                                state = 'ending'
+                                try:
+                                    await websocket.close()
+                                    logger.info("✅ [MAX TIME WARNING] 통화 종료 완료")
+                                except Exception as e:
+                                    logger.error(f"❌ [MAX TIME WARNING] 통화 종료 오류: {e}")
+                                break
 
                             if event_name == 'hard_end':
-                                logger.info("🔴 [AUTO END] 종료 트리거 수신 - 즉시 종료")
+                                logger.info("🔴 [AUTO END] 종료 트리거 수신")
+                                
+                                # ✅ 실제 TTS 재생 완료까지 대기
+                                if call_sid in active_tts_completions:
+                                    completion_time, playback_duration = active_tts_completions[call_sid]
+                                    elapsed = time.time() - completion_time
+                                    remaining_time = playback_duration - elapsed
+                                    
+                                    if remaining_time > 0:
+                                        # 20% 여유 추가, 최대 10초 제한
+                                        wait_time = min(remaining_time * 1.2, 10.0)
+                                        logger.info(f"⏳ [AUTO END] 종료 메시지 재생 완료 대기: {wait_time:.2f}초 (남은 시간: {remaining_time:.2f}초)")
+                                        await asyncio.sleep(wait_time)
+                                        logger.info("✅ [AUTO END] 종료 메시지 재생 완료, 통화 종료")
+                                    else:
+                                        logger.info("✅ [AUTO END] 종료 메시지 이미 재생 완료, 즉시 통화 종료")
+                                    
+                                    # 추적 정보 삭제
+                                    del active_tts_completions[call_sid]
                                 state = 'ending'
                                 # WebSocket 종료
                                 try:
@@ -1625,6 +1724,9 @@ async def media_stream_handler(
         # 정리 작업 (메모리에서 제거)
         if call_sid and call_sid in active_connections:
             del active_connections[call_sid]
+        if call_sid and call_sid in active_tts_completions:
+            del active_tts_completions[call_sid]
+            logger.debug(f"🗑️ TTS 추적 정보 삭제: {call_sid}")
         if call_sid and call_sid in conversation_sessions:
             del conversation_sessions[call_sid]
         
