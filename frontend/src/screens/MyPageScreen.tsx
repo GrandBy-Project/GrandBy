@@ -20,11 +20,13 @@ import { BottomNavigationBar, Header } from '../components';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { UserRole } from '../types';
 import apiClient, { API_BASE_URL } from '../api/client';
+import { useFontSizeStore } from '../store/fontSizeStore';
 
 export const MyPageScreen = () => {
   const router = useRouter();
   const { user, logout, setUser } = useAuthStore();
   const insets = useSafeAreaInsets();
+  const { fontSizeLevel } = useFontSizeStore();
   const [isUploading, setIsUploading] = useState(false);
 
   // 프로필 이미지 URL 가져오기
@@ -360,7 +362,7 @@ export const MyPageScreen = () => {
       {/* 공통 헤더 */}
       <Header 
         title="마이페이지"
-        showBackButton={true}
+        showMenuButton={true}
       />
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>

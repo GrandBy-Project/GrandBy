@@ -74,7 +74,7 @@ export default function RootLayout() {
       <Stack
         screenOptions={{
           headerShown: false,
-          animation: 'slide_from_right',
+          animation: 'fade', // 페이드 전환으로 더 깔끔한 페이지 전환
         }}
       >
         <Stack.Screen name="index" />

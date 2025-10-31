@@ -20,11 +20,13 @@ import { Header, Button, Input } from '../components';
 import { useAlert } from '../components/GlobalAlertProvider';
 import { validatePhoneNumber, validateName, validateVerificationCode, validatePassword } from '../utils/validation';
 import apiClient from '../api/client';
+import { useFontSizeStore } from '../store/fontSizeStore';
 
 type TabType = 'email' | 'password';
 
 export const FindAccountScreen = () => {
   const router = useRouter();
+  const { fontSizeLevel } = useFontSizeStore();
   const [activeTab, setActiveTab] = useState<TabType>('email');
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const guidelineBaseWidth = 375;
@@ -39,7 +41,10 @@ export const FindAccountScreen = () => {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={0}
     >
-      <Header title="계정 찾기" showBackButton={true} />
+      <Header 
+        title="계정 찾기" 
+        showMenuButton={true}
+      />
       
       <View style={styles.tabContainer}>
         <TouchableOpacity

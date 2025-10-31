@@ -14,6 +14,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Header, BottomNavigationBar } from '../components';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../constants/Colors';
+import { useFontSizeStore } from '../store/fontSizeStore';
 
 interface TodoItem {
   id: string;
@@ -103,6 +104,7 @@ export const TodoDetailScreen = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams();
+  const { fontSizeLevel } = useFontSizeStore();
 
   // 목업 데이터 (실제로는 API에서 받아올 데이터)
   const todo: TodoItem = {
@@ -138,7 +140,10 @@ export const TodoDetailScreen = () => {
   return (
     <View style={styles.container}>
       {/* 공통 헤더 */}
-      <Header title="할일 상세" showBackButton />
+      <Header 
+        title="할일 상세" 
+        showMenuButton={true}
+      />
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* 할일 정보 카드 */}

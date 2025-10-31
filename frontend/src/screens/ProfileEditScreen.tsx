@@ -18,10 +18,12 @@ import { validateName, validatePhoneNumber, validateBirthDate, formatBirthDate }
 import { Gender } from '../types';
 import apiClient from '../api/client';
 import { useAuthStore } from '../store/authStore';
+import { useFontSizeStore } from '../store/fontSizeStore';
 
 export const ProfileEditScreen = () => {
   const router = useRouter();
   const { user, setUser } = useAuthStore();
+  const { fontSizeLevel } = useFontSizeStore();
   
   const [name, setName] = useState(user?.name || '');
   const [phoneNumber, setPhoneNumber] = useState(user?.phone_number || '');
@@ -107,7 +109,10 @@ export const ProfileEditScreen = () => {
 
   return (
     <View style={styles.container}>
-      <Header title="프로필 수정" showBackButton={true} />
+      <Header 
+        title="프로필 수정" 
+        showMenuButton={true}
+      />
       
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.infoBox}>
