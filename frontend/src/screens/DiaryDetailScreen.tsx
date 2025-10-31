@@ -20,7 +20,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { getDiary, deleteDiary, Diary, getComments, createComment, deleteComment, DiaryComment } from '../api/diary';
 import { useAuthStore } from '../store/authStore';
 import { Colors } from '../constants/Colors';
-import { BottomNavigationBar } from '../components';
+import { BottomNavigationBar, Header } from '../components';
 
 export const DiaryDetailScreen = () => {
   const router = useRouter();
@@ -297,21 +297,18 @@ export const DiaryDetailScreen = () => {
 
   return (
     <View style={styles.container}>
-      <View style={[styles.container, { paddingTop: insets.top }]}>
-        {/* 헤더 */}
-        <View style={styles.header}>
-          <View style={styles.placeholder} />
-          <Text style={styles.headerTitle}>일기 상세</Text>
-          
-          {/* 삭제 버튼 - 본인이 작성한 경우만 표시 */}
-          {canDelete ? (
+      {/* 헤더 */}
+      <Header
+        title="일기 상세"
+        showMenuButton={true}
+        rightButton={
+          canDelete ? (
             <TouchableOpacity onPress={handleDelete} style={styles.deleteButton}>
               <Ionicons name="trash-outline" size={24} color="#FF3B30" />
             </TouchableOpacity>
-          ) : (
-            <View style={styles.placeholder} />
-          )}
-        </View>
+          ) : undefined
+        }
+      />
 
       {/* 내용 */}
       <ScrollView
@@ -439,7 +436,6 @@ export const DiaryDetailScreen = () => {
           )}
         </View>
       </ScrollView>
-      </View>
 
       {/* 하단 네비게이션 바 */}
       <BottomNavigationBar />
@@ -477,34 +473,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#FFFFFF',
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E8E8E8',
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#333333',
-  },
   deleteButton: {
     width: 40,
     height: 40,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  placeholder: {
-    width: 40,
   },
   scrollView: {
     flex: 1,

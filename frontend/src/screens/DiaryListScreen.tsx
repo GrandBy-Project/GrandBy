@@ -24,7 +24,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { getDiaries, Diary } from '../api/diary';
 import { useAuthStore } from '../store/authStore';
 import * as connectionsApi from '../api/connections';
-import { BottomNavigationBar } from '../components';
+import { BottomNavigationBar, Header } from '../components';
 
 export const DiaryListScreen = () => {
   const router = useRouter();
@@ -479,26 +479,26 @@ export const DiaryListScreen = () => {
   }
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
+    <View style={styles.container}>
       {/* 헤더 */}
-      <View style={styles.header}>
-        <View style={styles.placeholder} />
-        <Text style={styles.headerTitle}>
-          {user?.role === 'caregiver' && selectedElderlyName
+      <Header
+        title={
+          user?.role === 'caregiver' && selectedElderlyName
             ? `${selectedElderlyName}님의 일기장`
-            : '나의 일기장'}
-        </Text>
-        {user?.role === 'caregiver' && connectedElderly.length > 0 ? (
-          <TouchableOpacity 
-            onPress={() => setShowElderlySelector(true)}
-            style={styles.elderlySelectButton}
-          >
-            <Ionicons name="person-outline" size={20} color="#333333" />
-          </TouchableOpacity>
-        ) : (
-          <View style={styles.placeholder} />
-        )}
-      </View>
+            : '나의 일기장'
+        }
+        showMenuButton={true}
+        rightButton={
+          user?.role === 'caregiver' && connectedElderly.length > 0 ? (
+            <TouchableOpacity
+              onPress={() => setShowElderlySelector(true)}
+              style={styles.elderlySelectButton}
+            >
+              <Ionicons name="person-outline" size={20} color="#333333" />
+            </TouchableOpacity>
+          ) : undefined
+        }
+      />
 
       {/* 어르신 선택 모달 */}
       <Modal
@@ -601,7 +601,7 @@ export const DiaryListScreen = () => {
 
       {/* 일기 작성 플로팅 버튼 */}
       <TouchableOpacity
-        style={[styles.floatingButton, { bottom: insets.bottom + 120 }]}
+        style={[styles.floatingButton, { bottom: insets.bottom + 90}]}
         onPress={() => router.push('/diary-write')}
       >
         <Ionicons name="create" size={28} color="#FFFFFF" />
@@ -623,33 +623,6 @@ const styles = StyleSheet.create({
     marginTop: 16,
     fontSize: 16,
     color: '#666666',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E8E8E8',
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  backButtonText: {
-    fontSize: 28,
-    color: '#333333',
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#333333',
-  },
-  placeholder: {
-    width: 40,
   },
   elderlySelectButton: {
     width: 40,

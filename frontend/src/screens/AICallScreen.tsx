@@ -19,7 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { makeRealtimeAICall, getCallSchedule, updateCallSchedule, CallSchedule, getCallStatus } from '../api/call';
 import { useAuthStore } from '../store/authStore';
-import { BottomNavigationBar, TimePicker } from '../components';
+import { BottomNavigationBar, TimePicker, Header } from '../components';
 
 // 통화 상태 타입
 type CallStatus = 'idle' | 'calling' | 'in_progress' | 'completed' | 'error';
@@ -295,13 +295,12 @@ export const AICallScreen = () => {
   };
   
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
+    <View style={styles.container}>
       {/* 헤더 */}
-      <View style={styles.header}>
-        <View style={styles.placeholder} />
-        <Text style={styles.headerTitle}>AI 통화</Text>
-        <View style={styles.placeholder} />
-      </View>
+      <Header 
+        title="AI 통화"
+        showMenuButton={true}
+      />
       
       {/* 메인 컨텐츠 - ScrollView로 변경 */}
       <ScrollView 
@@ -533,33 +532,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#FFFFFF',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E8E8E8',
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  backButtonText: {
-    fontSize: 28,
-    color: '#333333',
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#333333',
-  },
-  placeholder: {
-    width: 40,
   },
   content: {
     flex: 1,

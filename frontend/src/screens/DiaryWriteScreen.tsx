@@ -22,7 +22,7 @@ import { createDiary, getDiary, updateDiary, Diary } from '../api/diary';
 import { getCallLog, getExtractedTodos, ExtractedTodo } from '../api/call';
 import { createTodo } from '../api/todo';
 import { useAuthStore } from '../store/authStore';
-import { BottomNavigationBar } from '../components';
+import { BottomNavigationBar, Header } from '../components';
 
 // 기분 옵션
 const MOOD_OPTIONS = [
@@ -360,13 +360,12 @@ export const DiaryWriteScreen = () => {
   };
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
+    <View style={styles.container}>
       {/* 헤더 */}
-      <View style={styles.header}>
-        <View style={styles.placeholder} />
-        <Text style={styles.headerTitle}>{isEditMode ? '일기 수정' : '일기 작성'}</Text>
-        <View style={styles.placeholder} />
-      </View>
+      <Header
+        title={isEditMode ? '일기 수정' : '일기 작성'}
+        showMenuButton={true}
+      />
 
       <ScrollView
         style={styles.scrollView}
@@ -609,33 +608,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#FFFFFF',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E8E8E8',
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  backButtonText: {
-    fontSize: 28,
-    color: '#333333',
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#333333',
-  },
-  placeholder: {
-    width: 40,
   },
   scrollView: {
     flex: 1,
