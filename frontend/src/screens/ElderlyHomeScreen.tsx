@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../store/authStore';
@@ -234,6 +235,12 @@ export const ElderlyHomeScreen = () => {
   const { user, logout } = useAuthStore();
   const insets = useSafeAreaInsets();
   const { scale } = useResponsive();
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+  const guidelineBaseWidth = 375;
+  const guidelineBaseHeight = 812;
+  const scalePx = (size: number) => (screenWidth / guidelineBaseWidth) * size;
+  const verticalScale = (size: number) => (screenHeight / guidelineBaseHeight) * size;
+  const moderateScale = (size: number, factor = 0.5) => size + (scalePx(size) - size) * factor;
   // 전역 폰트 크기 상태 사용 (로컬 state 제거)
   const { fontSizeLevel, toggleFontSize, getFontSizeText } = useFontSizeStore();
   const [todayTodos, setTodayTodos] = useState<any[]>([]);
@@ -1011,32 +1018,32 @@ export const ElderlyHomeScreen = () => {
           keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
         >
           <View style={styles.modalOverlay}>
-            <View style={styles.connectionModalContent}>
+            <View style={[styles.connectionModalContent, { padding: scalePx(24) }]}>
             {selectedConnection && (
               <>
-                <Text style={[styles.modalTitle, fontSizeLevel >= 1 && { fontSize: 24 }]}>연결 요청</Text>
+                <Text style={[styles.modalTitle, { fontSize: moderateScale(20) }, fontSizeLevel >= 1 && { fontSize: 24 }]}>연결 요청</Text>
                 
                 <View style={styles.modalProfileSection}>
-                  <Ionicons name="person" size={48} color="#34B79F" style={styles.modalProfileIcon} />
-                  <Text style={[styles.modalProfileName, fontSizeLevel >= 1 && { fontSize: 24 }]}>
+                  <Ionicons name="person" size={moderateScale(48)} color="#34B79F" style={styles.modalProfileIcon} />
+                  <Text style={[styles.modalProfileName, { fontSize: moderateScale(20) }, fontSizeLevel >= 1 && { fontSize: 24 }]}>
                     {selectedConnection.name}님이
                   </Text>
-                  <Text style={[styles.modalProfileSubtitle, fontSizeLevel >= 1 && { fontSize: 18 }]}>
+                  <Text style={[styles.modalProfileSubtitle, { fontSize: moderateScale(16) }, fontSizeLevel >= 1 && { fontSize: 18 }]}>
                     보호자 연결을 요청했습니다
                   </Text>
                 </View>
 
                 <View style={styles.modalInfoSection}>
                   <View style={styles.modalInfoRow}>
-                    <Ionicons name="mail" size={16} color="#666" style={[styles.modalInfoLabel, fontSizeLevel >= 1 && { fontSize: 16 }]} />
-                    <Text style={[styles.modalInfoText, fontSizeLevel >= 1 && { fontSize: 16 }]}>
+                    <Ionicons name="mail" size={moderateScale(16)} color="#666" style={[styles.modalInfoLabel, fontSizeLevel >= 1 && { fontSize: 16 }]} />
+                    <Text style={[styles.modalInfoText, { fontSize: moderateScale(14) }, fontSizeLevel >= 1 && { fontSize: 16 }]}>
                       {selectedConnection.email}
                     </Text>
                   </View>
                   {selectedConnection.phone_number && (
                     <View style={styles.modalInfoRow}>
-                      <Ionicons name="call" size={16} color="#666" style={[styles.modalInfoLabel, fontSizeLevel >= 1 && { fontSize: 16 }]} />
-                      <Text style={[styles.modalInfoText, fontSizeLevel >= 1 && { fontSize: 16 }]}>
+                      <Ionicons name="call" size={moderateScale(16)} color="#666" style={[styles.modalInfoLabel, fontSizeLevel >= 1 && { fontSize: 16 }]} />
+                      <Text style={[styles.modalInfoText, { fontSize: moderateScale(14) }, fontSizeLevel >= 1 && { fontSize: 16 }]}>
                         {selectedConnection.phone_number}
                       </Text>
                     </View>
@@ -1045,39 +1052,39 @@ export const ElderlyHomeScreen = () => {
 
                 <View style={styles.modalPermissionSection}>
                   <View style={styles.modalPermissionTitleRow}>
-                    <Ionicons name="information-circle" size={16} color="#34B79F" />
-                    <Text style={[styles.modalPermissionTitle, fontSizeLevel >= 1 && { fontSize: 16 }]}>
+                    <Ionicons name="information-circle" size={moderateScale(16)} color="#34B79F" />
+                    <Text style={[styles.modalPermissionTitle, { fontSize: moderateScale(14) }, fontSizeLevel >= 1 && { fontSize: 16 }]}>
                       연결하시면 다음을 공유합니다:
                     </Text>
                   </View>
-                  <Text style={[styles.modalPermissionItem, fontSizeLevel >= 1 && { fontSize: 16 }]}>
+                  <Text style={[styles.modalPermissionItem, { fontSize: moderateScale(14) }, fontSizeLevel >= 1 && { fontSize: 16 }]}>
                     • 할일 관리
                   </Text>
-                  <Text style={[styles.modalPermissionItem, fontSizeLevel >= 1 && { fontSize: 16 }]}>
+                  <Text style={[styles.modalPermissionItem, { fontSize: moderateScale(14) }, fontSizeLevel >= 1 && { fontSize: 16 }]}>
                     • 일기 열람
                   </Text>
-                  <Text style={[styles.modalPermissionItem, fontSizeLevel >= 1 && { fontSize: 16 }]}>
+                  <Text style={[styles.modalPermissionItem, { fontSize: moderateScale(14) }, fontSizeLevel >= 1 && { fontSize: 16 }]}>
                     • 건강 정보
                   </Text>
                 </View>
 
                 <View style={styles.modalButtons}>
                   <TouchableOpacity
-                    style={[styles.modalButton, styles.rejectButton]}
+                    style={[styles.modalButton, styles.rejectButton, { paddingVertical: moderateScale(14) }]}
                     onPress={handleRejectConnection}
                     activeOpacity={0.7}
                   >
-                    <Text style={[styles.rejectButtonText, fontSizeLevel >= 1 && { fontSize: 18 }]}>
+                    <Text style={[styles.rejectButtonText, { fontSize: moderateScale(16) }, fontSizeLevel >= 1 && { fontSize: 18 }]}>
                       거절
                     </Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity
-                    style={[styles.modalButton, styles.acceptButton]}
+                    style={[styles.modalButton, styles.acceptButton, { paddingVertical: moderateScale(14) }]}
                     onPress={handleAcceptConnection}
                     activeOpacity={0.7}
                   >
-                    <Text style={[styles.acceptButtonText, fontSizeLevel >= 1 && { fontSize: 18 }]}>
+                    <Text style={[styles.acceptButtonText, { fontSize: moderateScale(16) }, fontSizeLevel >= 1 && { fontSize: 18 }]}>
                       수락
                     </Text>
                   </TouchableOpacity>
@@ -1548,7 +1555,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 20,
     padding: 24,
-    width: '100%',
+    width: '90%',
     maxWidth: 400,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
