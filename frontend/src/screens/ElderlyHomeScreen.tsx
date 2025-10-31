@@ -26,6 +26,8 @@ import * as notificationsApi from '../api/notifications';
 import { Modal } from 'react-native';
 import * as weatherApi from '../api/weather';
 import { getDiaries, Diary } from '../api/diary';
+import { useResponsive, getResponsiveFontSize, getResponsivePadding, getResponsiveSize } from '../hooks/useResponsive';
+import { useFontSizeStore } from '../store/fontSizeStore';
 
 // 커스텀 아이콘 컴포넌트들
 const CheckIcon = ({ size = 24, color = '#34B79F' }: { size?: number; color?: string }) => (
@@ -231,8 +233,9 @@ export const ElderlyHomeScreen = () => {
   const router = useRouter();
   const { user, logout } = useAuthStore();
   const insets = useSafeAreaInsets();
-  // 폰트 크기 단계: 0=작게, 1=크게(기본), 2=더크게
-  const [fontSizeLevel, setFontSizeLevel] = useState(1);
+  const { scale } = useResponsive();
+  // 전역 폰트 크기 상태 사용 (로컬 state 제거)
+  const { fontSizeLevel, toggleFontSize, getFontSizeText } = useFontSizeStore();
   const [todayTodos, setTodayTodos] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [expandedTodoId, setExpandedTodoId] = useState<string | null>(null);
@@ -533,38 +536,44 @@ export const ElderlyHomeScreen = () => {
     );
   };
 
-  const toggleFontSize = () => {
-    setFontSizeLevel((prev) => (prev + 1) % 3); // 0 -> 1 -> 2 -> 0 순환
-  };
-  
-  // 폰트 크기 레벨에 따른 텍스트 반환
-  const getFontSizeText = () => {
-    switch (fontSizeLevel) {
-      case 0: return '작게';
-      case 1: return '크게';
-      case 2: return '더크게';
-      default: return '크게';
-    }
-  };
-
-
   // 현재 날짜 정보
   const today = new Date();
   const dateString = `${today.getMonth() + 1}월 ${today.getDate()}일`;
   const dayNames = ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'];
   const dayString = dayNames[today.getDay()];
 
-  // 폰트 크기 토글 버튼 컴포넌트
-  const FontSizeButton = () => (
-    <TouchableOpacity onPress={toggleFontSize} style={styles.largeViewButton}>
-      <Text style={styles.largeViewText}>{getFontSizeText()}</Text>
-    </TouchableOpacity>
-  );
+  // 폰트 크기 버튼 컴포넌트
+  const FontSizeButton = () => {
+    const fontSizeButtonSize = getResponsiveSize(48, scale, true);
+    const fontSizeButtonBorderRadius = fontSizeButtonSize / 2;
+    const fontSizeButtonTextSize = getResponsiveFontSize(12, scale);
+    
+    return (
+      <TouchableOpacity 
+        onPress={toggleFontSize}
+        style={[
+          styles.fontSizeButton,
+          {
+            width: fontSizeButtonSize,
+            height: fontSizeButtonSize,
+            borderRadius: fontSizeButtonBorderRadius,
+          }
+        ]}
+        activeOpacity={0.7}
+      >
+        <Text style={[styles.fontSizeButtonText, { fontSize: fontSizeButtonTextSize }]}>
+          {getFontSizeText()}
+        </Text>
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <View style={styles.container}>
-      {/* 공통 헤더 */}
+      {/* 공통 헤더 - 폰트 크기 버튼 표시 */}
       <Header 
+        title="그랜비"
+        showMenuButton={true} 
         rightButton={<FontSizeButton />}
       />
 
@@ -581,10 +590,18 @@ export const ElderlyHomeScreen = () => {
           <View style={styles.bannerContent}>
             <Ionicons name="notifications" size={24} color="#FF9500" style={styles.bannerIcon} />
             <View style={styles.bannerText}>
-              <Text style={[styles.bannerTitle, fontSizeLevel >= 1 && { fontSize: 18 }, fontSizeLevel >= 2 && { fontSize: 22 }]}>
+              <Text 
+                style={[styles.bannerTitle, fontSizeLevel >= 1 && { fontSize: 18 }, fontSizeLevel >= 2 && { fontSize: 22 }]}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
                 새로운 연결 요청 ({pendingConnections.length})
               </Text>
-              <Text style={[styles.bannerSubtitle, fontSizeLevel >= 1 && { fontSize: 16 }, fontSizeLevel >= 2 && { fontSize: 18 }]}>
+              <Text 
+                style={[styles.bannerSubtitle, fontSizeLevel >= 1 && { fontSize: 16 }, fontSizeLevel >= 2 && { fontSize: 18 }]}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
                 {pendingConnections[0].name}님이 보호자 연결을 요청했습니다
               </Text>
             </View>
@@ -611,10 +628,18 @@ export const ElderlyHomeScreen = () => {
           <View style={styles.bannerContent}>
             <Ionicons name="call" size={24} color="#F57C00" style={styles.bannerIcon} />
             <View style={styles.bannerText}>
-              <Text style={[styles.bannerTitle, fontSizeLevel >= 1 && { fontSize: 18 }, fontSizeLevel >= 2 && { fontSize: 22 }]}>
+              <Text 
+                style={[styles.bannerTitle, fontSizeLevel >= 1 && { fontSize: 18 }, fontSizeLevel >= 2 && { fontSize: 22 }]}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
                 AI 통화 완료! 일기를 작성해보세요
               </Text>
-              <Text style={[styles.bannerSubtitle, fontSizeLevel >= 1 && { fontSize: 16 }, fontSizeLevel >= 2 && { fontSize: 18 }]}>
+              <Text 
+                style={[styles.bannerSubtitle, fontSizeLevel >= 1 && { fontSize: 16 }, fontSizeLevel >= 2 && { fontSize: 18 }]}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
                 대화를 바탕으로 일기를 작성할 수 있어요
               </Text>
             </View>
@@ -698,34 +723,70 @@ export const ElderlyHomeScreen = () => {
             <View style={[styles.actionIcon, fontSizeLevel >= 1 && styles.actionIconLarge]}>
               <CheckIcon size={fontSizeLevel >= 1 ? 32 : 24} color="#34B79F" />
             </View>
-            <Text style={[styles.actionLabel, fontSizeLevel >= 1 && styles.actionLabelLarge]}>할 일</Text>
+            <Text 
+              style={[styles.actionLabel, fontSizeLevel >= 1 && styles.actionLabelLarge]}
+              numberOfLines={1}
+              ellipsizeMode="tail"
+            >
+              할 일
+            </Text>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.actionButton, fontSizeLevel >= 1 && styles.actionButtonLarge]} onPress={() => router.push('/ai-call')}>
             <View style={[styles.actionIcon, fontSizeLevel >= 1 && styles.actionIconLarge]}>
               <PhoneIcon size={fontSizeLevel >= 1 ? 32 : 24} color="#34B79F" />
             </View>
-            <Text style={[styles.actionLabel, fontSizeLevel >= 1 && styles.actionLabelLarge]}>AI 통화</Text>
+            <Text 
+              style={[styles.actionLabel, fontSizeLevel >= 1 && styles.actionLabelLarge]}
+              numberOfLines={1}
+              ellipsizeMode="tail"
+            >
+              AI 통화
+            </Text>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.actionButton, fontSizeLevel >= 1 && styles.actionButtonLarge]} onPress={() => router.push('/diaries')}>
             <View style={[styles.actionIcon, fontSizeLevel >= 1 && styles.actionIconLarge]}>
               <DiaryIcon size={fontSizeLevel >= 1 ? 32 : 24} color="#34B79F" />
             </View>
-            <Text style={[styles.actionLabel, fontSizeLevel >= 1 && styles.actionLabelLarge]}>일기</Text>
+            <Text 
+              style={[styles.actionLabel, fontSizeLevel >= 1 && styles.actionLabelLarge]}
+              numberOfLines={1}
+              ellipsizeMode="tail"
+            >
+              일기
+            </Text>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.actionButton, fontSizeLevel >= 1 && styles.actionButtonLarge]} onPress={() => Alert.alert('준비중', '알림 기능은 개발 중입니다.')}>
             <View style={[styles.actionIcon, fontSizeLevel >= 1 && styles.actionIconLarge]}>
               <NotificationIcon size={fontSizeLevel >= 1 ? 32 : 24} color="#34B79F" />
             </View>
-            <Text style={[styles.actionLabel, fontSizeLevel >= 1 && styles.actionLabelLarge]}>알림</Text>
+            <Text 
+              style={[styles.actionLabel, fontSizeLevel >= 1 && styles.actionLabelLarge]}
+              numberOfLines={1}
+              ellipsizeMode="tail"
+            >
+              알림
+            </Text>
           </TouchableOpacity>
         </View>
 
         {/* 오늘의 일정 카드 - 미완료 */}
         <View style={styles.scheduleCard}>
           <View style={styles.cardHeader}>
-            <Text style={[styles.cardTitle, fontSizeLevel >= 1 && styles.cardTitleLarge]}>오늘의 일정</Text>
+            <Text 
+              style={[styles.cardTitle, fontSizeLevel >= 1 && styles.cardTitleLarge]}
+              numberOfLines={1}
+              ellipsizeMode="tail"
+            >
+              오늘의 일정
+            </Text>
             <TouchableOpacity onPress={() => router.push('/todos')}>
-              <Text style={[styles.viewAllText, fontSizeLevel >= 1 && styles.viewAllTextLarge]}>전체보기</Text>
+              <Text 
+                style={[styles.viewAllText, fontSizeLevel >= 1 && styles.viewAllTextLarge]}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
+                전체보기
+              </Text>
             </TouchableOpacity>
           </View>
           
@@ -759,10 +820,18 @@ export const ElderlyHomeScreen = () => {
                         </Text>
                       </View>
                       <View style={styles.scheduleContent}>
-                        <Text style={[styles.scheduleTitle, fontSizeLevel >= 1 && styles.scheduleTitleLarge]}>
+                        <Text 
+                          style={[styles.scheduleTitle, fontSizeLevel >= 1 && styles.scheduleTitleLarge]}
+                          numberOfLines={1}
+                          ellipsizeMode="tail"
+                        >
                           {todo.title}
                         </Text>
-                        <Text style={[styles.scheduleLocation, fontSizeLevel >= 1 && styles.scheduleLocationLarge]}>
+                        <Text 
+                          style={[styles.scheduleLocation, fontSizeLevel >= 1 && styles.scheduleLocationLarge]}
+                          numberOfLines={1}
+                          ellipsizeMode="tail"
+                        >
                           {todo.description || ''}
                         </Text>
                         <Text style={[styles.scheduleDate, fontSizeLevel >= 1 && styles.scheduleDateLarge]}>
@@ -806,7 +875,13 @@ export const ElderlyHomeScreen = () => {
           return completedTodos.length > 0 && (
             <View style={styles.scheduleCard}>
               <View style={styles.cardHeader}>
-                <Text style={[styles.cardTitle, fontSizeLevel >= 1 && styles.cardTitleLarge]}>완료한 일정</Text>
+                <Text 
+                  style={[styles.cardTitle, fontSizeLevel >= 1 && styles.cardTitleLarge]}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                >
+                  완료한 일정
+                </Text>
                 <View style={styles.completedBadge}>
                   <Text style={[styles.completedBadgeText, fontSizeLevel >= 1 && { fontSize: 16 }]}>
                     {completedTodos.length}
@@ -830,10 +905,18 @@ export const ElderlyHomeScreen = () => {
                         </Text>
                       </View>
                       <View style={styles.scheduleContent}>
-                        <Text style={[styles.scheduleTitle, styles.completedTitleText, fontSizeLevel >= 1 && styles.scheduleTitleLarge]}>
+                        <Text 
+                          style={[styles.scheduleTitle, styles.completedTitleText, fontSizeLevel >= 1 && styles.scheduleTitleLarge]}
+                          numberOfLines={1}
+                          ellipsizeMode="tail"
+                        >
                           {todo.title}
                         </Text>
-                        <Text style={[styles.scheduleLocation, styles.completedDescText, fontSizeLevel >= 1 && styles.scheduleLocationLarge]}>
+                        <Text 
+                          style={[styles.scheduleLocation, styles.completedDescText, fontSizeLevel >= 1 && styles.scheduleLocationLarge]}
+                          numberOfLines={1}
+                          ellipsizeMode="tail"
+                        >
                           {todo.description || ''}
                         </Text>
                         <Text style={[styles.scheduleDate, styles.completedDescText, fontSizeLevel >= 1 && styles.scheduleDateLarge]}>
@@ -871,9 +954,21 @@ export const ElderlyHomeScreen = () => {
         {/* 건강 상태 요약 */}
         <View style={styles.healthSummaryCard}>
           <View style={styles.cardHeader}>
-            <Text style={[styles.cardTitle, fontSizeLevel >= 1 && styles.cardTitleLarge]}>건강 상태</Text>
+            <Text 
+              style={[styles.cardTitle, fontSizeLevel >= 1 && styles.cardTitleLarge]}
+              numberOfLines={1}
+              ellipsizeMode="tail"
+            >
+              건강 상태
+            </Text>
             <TouchableOpacity>
-              <Text style={[styles.viewAllText, fontSizeLevel >= 1 && styles.viewAllTextLarge]}>상세보기</Text>
+              <Text 
+                style={[styles.viewAllText, fontSizeLevel >= 1 && styles.viewAllTextLarge]}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
+                상세보기
+              </Text>
             </TouchableOpacity>
           </View>
           
@@ -1005,31 +1100,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F8F9FA',
   },
-  largeViewButton: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: '#34B79F',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-    elevation: 5,
-    borderWidth: 2,
-    borderColor: '#FFFFFF',
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-  },
-  largeViewText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    textAlign: 'center',
-    lineHeight: 16,
-    letterSpacing: -0.3,
-  },
   content: {
     flex: 1,
     backgroundColor: '#F8F9FA',
@@ -1064,6 +1134,26 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     marginBottom: 4,
     opacity: 0.9,
+  },
+  fontSizeButton: {
+    backgroundColor: '#34B79F',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 5,
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+    // width, height, borderRadius는 동적으로 적용됨
+  },
+  fontSizeButtonText: {
+    fontWeight: '700',
+    color: '#FFFFFF',
+    textAlign: 'center',
+    letterSpacing: -0.3,
+    // fontSize는 동적으로 적용됨
   },
   moreButton: {
     width: 32,
