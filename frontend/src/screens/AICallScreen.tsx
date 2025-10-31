@@ -19,13 +19,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { makeRealtimeAICall, getCallSchedule, updateCallSchedule, CallSchedule, getCallStatus } from '../api/call';
 import { useAuthStore } from '../store/authStore';
+import { BottomNavigationBar, TimePicker, Header } from '../components';
 
 // 통화 상태 타입
 type CallStatus = 'idle' | 'calling' | 'in_progress' | 'completed' | 'error';
 
-// 시간 선택 옵션
-const HOURS = Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, '0'));
-const MINUTES = Array.from({ length: 60 }, (_, i) => i.toString().padStart(2, '0'));
 
 export const AICallScreen = () => {
   const router = useRouter();
@@ -44,12 +42,6 @@ export const AICallScreen = () => {
   const [scheduledTime, setScheduledTime] = useState('14:00');
   const [scheduleLoading, setScheduleLoading] = useState(false);
   const [isEditingTime, setIsEditingTime] = useState(false);
-  const [selectedHour, setSelectedHour] = useState('14');
-  const [selectedMinute, setSelectedMinute] = useState('00');
-  
-  // 시간 선택 스크롤 ref
-  const hourScrollRef = useRef<ScrollView>(null);
-  const minuteScrollRef = useRef<ScrollView>(null);
   
   /**
    * 초기 설정 로드
@@ -132,10 +124,6 @@ export const AICallScreen = () => {
       
       if (timeString) {
         setScheduledTime(timeString);
-        // 시간과 분 분리
-        const [hour, minute] = timeString.split(':');
-        setSelectedHour(hour);
-        setSelectedMinute(minute);
       }
     } catch (error: any) {
       console.error('자동 통화 스케줄 로드 실패:', error);
@@ -191,49 +179,28 @@ export const AICallScreen = () => {
    * 시간 수정 시작
    */
   const startEditingTime = () => {
-    // 현재 시간 분리
-    const [hour, minute] = scheduledTime.split(':');
-    setSelectedHour(hour);
-    setSelectedMinute(minute);
     setIsEditingTime(true);
   };
-  
+
   /**
-   * 시간 선택기가 열릴 때 현재 시간으로 스크롤
+   * TimePicker에서 시간 변경 핸들러
    */
-  useEffect(() => {
-    if (isEditingTime) {
-      const hourIndex = parseInt(selectedHour);
-      hourScrollRef.current?.scrollTo({
-        y: hourIndex * 44, // timeOption 높이 (padding + height)
-        animated: false,
-      });
-      
-      const minuteIndex = parseInt(selectedMinute);
-      minuteScrollRef.current?.scrollTo({
-        y: minuteIndex * 44,
-        animated: false,
-      });
-    }
-  }, [isEditingTime]);
+  const handleTimePickerChange = (time: string) => {
+    setScheduledTime(time);
+  };
   
   /**
    * 시간 수정 저장
    */
   const saveTimeChange = async () => {
-    const newTime = `${selectedHour}:${selectedMinute}`;
     setIsEditingTime(false);
-    await handleTimeChange(newTime);
+    await handleTimeChange(scheduledTime);
   };
   
   /**
    * 시간 수정 취소
    */
   const cancelTimeEdit = () => {
-    // 원래 시간으로 복원
-    const [hour, minute] = scheduledTime.split(':');
-    setSelectedHour(hour);
-    setSelectedMinute(minute);
     setIsEditingTime(false);
   };
   
@@ -328,19 +295,12 @@ export const AICallScreen = () => {
   };
   
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
+    <View style={styles.container}>
       {/* 헤더 */}
-      <View style={styles.header}>
-        <TouchableOpacity 
-          onPress={() => router.back()}
-          style={styles.backButton}
-          disabled={isLoading}
-        >
-          <Text style={styles.backButtonText}>←</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>AI 통화</Text>
-        <View style={styles.placeholder} />
-      </View>
+      <Header 
+        title="AI 통화"
+        showMenuButton={true}
+      />
       
       {/* 메인 컨텐츠 - ScrollView로 변경 */}
       <ScrollView 
@@ -501,83 +461,11 @@ export const AICallScreen = () => {
               
               {isEditingTime ? (
                 <View style={styles.timeEditContainer}>
-                  {/* 시간/분 선택기 */}
-                  <View style={styles.timePickerRow}>
-                    {/* 시간 선택 */}
-                    <View style={styles.timePickerColumn}>
-                      <Text style={styles.timePickerLabel}>시</Text>
-                      <ScrollView 
-                        ref={hourScrollRef}
-                        style={styles.timeScrollView}
-                        showsVerticalScrollIndicator={false}
-                        nestedScrollEnabled={true}
-                      >
-                        {HOURS.map((hour) => (
-                          <TouchableOpacity
-                            key={hour}
-                            style={[
-                              styles.timeOption,
-                              selectedHour === hour && styles.timeOptionSelected,
-                            ]}
-                            onPress={() => setSelectedHour(hour)}
-                          >
-                            <Text
-                              style={[
-                                styles.timeOptionText,
-                                selectedHour === hour && styles.timeOptionTextSelected,
-                              ]}
-                            >
-                              {hour}
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
-                      </ScrollView>
-                    </View>
-                    
-                    <Text style={styles.timeSeparator}>:</Text>
-                    
-                    {/* 분 선택 (1분 단위) */}
-                    <View style={styles.timePickerColumn}>
-                      <Text style={styles.timePickerLabel}>분</Text>
-                      <ScrollView 
-                        ref={minuteScrollRef}
-                        style={styles.timeScrollView}
-                        showsVerticalScrollIndicator={false}
-                        nestedScrollEnabled={true}
-                      >
-                        {MINUTES.map((minute) => (
-                          <TouchableOpacity
-                            key={minute}
-                            style={[
-                              styles.timeOption,
-                              selectedMinute === minute && styles.timeOptionSelected,
-                            ]}
-                            onPress={() => setSelectedMinute(minute)}
-                          >
-                            <Text
-                              style={[
-                                styles.timeOptionText,
-                                selectedMinute === minute && styles.timeOptionTextSelected,
-                              ]}
-                            >
-                              {minute}
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
-                      </ScrollView>
-                    </View>
-                  </View>
-                  
-                  {/* 선택된 시간 미리보기 */}
-                  <View style={styles.timePreview}>
-                    <Text style={styles.timePreviewLabel}>선택된 시간</Text>
-                    <View style={styles.timePreviewContent}>
-                      <Ionicons name="time" size={28} color="#34B79F" style={{ marginRight: 8 }} />
-                      <Text style={styles.timePreviewText}>
-                        {selectedHour}:{selectedMinute}
-                      </Text>
-                    </View>
-                  </View>
+                  {/* 시간 선택기 */}
+                  <TimePicker
+                    value={scheduledTime}
+                    onChange={handleTimePickerChange}
+                  />
                   
                   {/* 버튼 */}
                   <View style={styles.timeEditButtons}>
@@ -633,6 +521,9 @@ export const AICallScreen = () => {
            </View>
          )}
       </ScrollView>
+      
+      {/* 하단 네비게이션 바 */}
+      <BottomNavigationBar />
     </View>
   );
 };
@@ -641,33 +532,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#FFFFFF',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E8E8E8',
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  backButtonText: {
-    fontSize: 28,
-    color: '#333333',
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#333333',
-  },
-  placeholder: {
-    width: 40,
   },
   content: {
     flex: 1,
@@ -876,74 +740,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#34B79F',
-  },
-  timePickerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 20,
-  },
-  timePickerColumn: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  timePickerLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#666666',
-    marginBottom: 12,
-  },
-  timeScrollView: {
-    maxHeight: 180,
-    width: '100%',
-  },
-  timeOption: {
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    marginVertical: 4,
-    borderRadius: 8,
-    alignItems: 'center',
-    backgroundColor: '#F8F8F8',
-  },
-  timeOptionSelected: {
-    backgroundColor: '#34B79F',
-  },
-  timeOptionText: {
-    fontSize: 18,
-    fontWeight: '500',
-    color: '#333333',
-  },
-  timeOptionTextSelected: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-  },
-  timeSeparator: {
-    fontSize: 32,
-    fontWeight: '600',
-    color: '#34B79F',
-    marginHorizontal: 16,
-    marginTop: 24,
-  },
-  timePreview: {
-    backgroundColor: '#F0F9F7',
-    padding: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  timePreviewLabel: {
-    fontSize: 13,
-    color: '#666666',
-    marginBottom: 8,
-  },
-  timePreviewContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  timePreviewText: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#34B79F',
   },
   timeEditButtons: {
     flexDirection: 'row',

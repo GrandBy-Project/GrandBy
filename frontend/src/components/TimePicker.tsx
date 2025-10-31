@@ -1,0 +1,332 @@
+/**
+ * 수직 스크롤 가능한 시간 선택기 컴포넌트
+ */
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+} from 'react-native';
+import { Colors } from '../constants/Colors';
+
+interface TimePickerProps {
+  value: string; // "HH:mm" 형식
+  onChange: (time: string) => void; // "HH:mm" 형식으로 반환
+}
+
+const HOURS = Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, '0'));
+const MINUTES = Array.from({ length: 60 }, (_, i) => i.toString().padStart(2, '0'));
+
+const CONTAINER_HEIGHT = 180;
+const ITEM_HEIGHT = 50;
+const PADDING_TOP = (CONTAINER_HEIGHT - ITEM_HEIGHT) / 2;
+
+export const TimePicker: React.FC<TimePickerProps> = ({ value, onChange }) => {
+  const [selectedHour, setSelectedHour] = useState('00');
+  const [selectedMinute, setSelectedMinute] = useState('00');
+  const [centerHour, setCenterHour] = useState('00'); // 스크롤 중 가운데 항목
+  const [centerMinute, setCenterMinute] = useState('00'); // 스크롤 중 가운데 항목
+  const hourScrollRef = useRef<ScrollView>(null);
+  const minuteScrollRef = useRef<ScrollView>(null);
+
+  // 초기값 설정 및 value 변경 시 업데이트
+  useEffect(() => {
+      if (value && value.includes(':')) {
+      const [h, m] = value.split(':');
+      setSelectedHour(h || '00');
+      setSelectedMinute(m || '00');
+      setCenterHour(h || '00');
+      setCenterMinute(m || '00');
+    } else {
+      // value가 없으면 현재 시간으로 설정
+      const now = new Date();
+      const hour = now.getHours().toString().padStart(2, '0');
+      const minute = now.getMinutes().toString().padStart(2, '0');
+      setSelectedHour(hour);
+      setSelectedMinute(minute);
+      setCenterHour(hour);
+      setCenterMinute(minute);
+      onChange(`${hour}:${minute}`);
+    }
+  }, [value]);
+
+  // 초기 스크롤 위치 설정
+  useEffect(() => {
+    const hourIndex = parseInt(selectedHour);
+    const minuteIndex = parseInt(selectedMinute);
+    
+    // ITEM_HEIGHT를 사용하여 일관성 유지
+    const hourScrollY = calculateScrollPosition(hourIndex, ITEM_HEIGHT);
+    const minuteScrollY = calculateScrollPosition(minuteIndex, ITEM_HEIGHT);
+    
+    // 약간의 지연 후 스크롤 (레이아웃 완료 대기)
+    setTimeout(() => {
+      hourScrollRef.current?.scrollTo({
+        y: Math.max(0, hourScrollY),
+        animated: false,
+      });
+      minuteScrollRef.current?.scrollTo({
+        y: Math.max(0, minuteScrollY),
+        animated: false,
+      });
+    }, 150);
+  }, [selectedHour, selectedMinute]);
+
+  // 스크롤 위치에서 가운데 항목 인덱스 계산
+  const calculateCenterIndex = (scrollY: number, itemHeight: number): number => {
+    // 뷰포트의 중심 위치
+    const viewportCenter = CONTAINER_HEIGHT / 2;
+    
+    // 스크롤된 위치에서 뷰포트 중심에 있는 항목의 절대 Y 좌표 (contentContainer 기준)
+    const centerPositionInContent = scrollY + viewportCenter;
+    
+    // paddingTop을 제외한 실제 아이템 영역 기준 위치
+    const centerPositionInItems = centerPositionInContent - PADDING_TOP;
+    
+    // 아이템 인덱스 계산
+    // 각 아이템의 중심 위치는: paddingTop + (index * itemHeight) + (itemHeight / 2)
+    // 따라서 centerPositionInItems = (index * itemHeight) + (itemHeight / 2)일 때
+    // index = (centerPositionInItems - itemHeight / 2) / itemHeight
+    const index = Math.round((centerPositionInItems - itemHeight / 2) / itemHeight);
+    
+    return Math.max(0, index);
+  };
+
+  // 인덱스에서 스크롤 위치 계산
+  const calculateScrollPosition = (index: number, itemHeight: number): number => {
+    // 목표: index 항목의 중심이 뷰포트 중심에 오도록 스크롤
+    
+    // 1. index 항목의 중심 Y 좌표 (contentContainer 기준)
+
+    const itemCenterY = PADDING_TOP + (index * itemHeight) + (itemHeight / 2);
+    
+    // 2. 뷰포트의 중심
+    const viewportCenter = CONTAINER_HEIGHT / 2;
+    
+    // 3. 항목 중심을 뷰포트 중심에 맞추기 위한 스크롤 위치
+
+    return itemCenterY - viewportCenter;
+  };
+
+  // 시간 스크롤 중 처리 (가운데 항목 업데이트)
+  const handleHourScroll = (event: any) => {
+    const scrollY = event.nativeEvent.contentOffset.y;
+    const centerIndex = calculateCenterIndex(scrollY, ITEM_HEIGHT);
+    const clampedIndex = Math.min(Math.max(centerIndex, 0), HOURS.length - 1);
+    const newHour = HOURS[clampedIndex];
+    setCenterHour(newHour);
+  };
+
+  // 시간 스크롤 종료 처리
+  const handleHourScrollEnd = (event: any) => {
+    const scrollY = event.nativeEvent.contentOffset.y;
+    const centerIndex = calculateCenterIndex(scrollY, ITEM_HEIGHT);
+    const clampedIndex = Math.min(Math.max(centerIndex, 0), HOURS.length - 1);
+    const newHour = HOURS[clampedIndex];
+    
+    // snapToInterval이 이미 스냅 처리를 하므로, scrollTo 호출 제거
+    // 선택된 값만 업데이트
+    setSelectedHour(newHour);
+    setCenterHour(newHour);
+    onChange(`${newHour}:${selectedMinute}`);
+  };
+
+  // 분 스크롤 중 처리 (가운데 항목 업데이트)
+  const handleMinuteScroll = (event: any) => {
+    const scrollY = event.nativeEvent.contentOffset.y;
+    const centerIndex = calculateCenterIndex(scrollY, ITEM_HEIGHT);
+    const clampedIndex = Math.min(Math.max(centerIndex, 0), MINUTES.length - 1);
+    const newMinute = MINUTES[clampedIndex];
+    setCenterMinute(newMinute);
+  };
+
+  // 분 스크롤 종료 처리
+  const handleMinuteScrollEnd = (event: any) => {
+    const scrollY = event.nativeEvent.contentOffset.y;
+    const centerIndex = calculateCenterIndex(scrollY, ITEM_HEIGHT);
+    const clampedIndex = Math.min(Math.max(centerIndex, 0), MINUTES.length - 1);
+    const newMinute = MINUTES[clampedIndex];
+    
+    // snapToInterval이 이미 스냅 처리를 하므로, scrollTo 호출 제거
+    // 선택된 값만 업데이트
+    setSelectedMinute(newMinute);
+    setCenterMinute(newMinute);
+    onChange(`${selectedHour}:${newMinute}`);
+  };
+
+
+  return (
+    <View style={styles.container}>
+      {/* 선택된 시간 표시 */}
+      <View style={styles.timeDisplay}>
+        <Text style={styles.timeDisplayText}>
+          {selectedHour}:{selectedMinute}
+        </Text>
+      </View>
+
+      {/* 시간 선택기 */}
+      <View style={styles.pickerContainer}>
+        {/* 시간 선택 */}
+        <View style={styles.pickerColumn}>
+          {/* 고정된 선택 박스 (배경 역할) */}
+          <View style={styles.selectedBox} />
+          
+          <ScrollView
+            ref={hourScrollRef}
+            style={styles.scrollView}
+            contentContainerStyle={styles.scrollViewContent}
+            showsVerticalScrollIndicator={false}
+            nestedScrollEnabled={true}
+            onScroll={handleHourScroll}
+            onMomentumScrollEnd={handleHourScrollEnd}
+            snapToInterval={ITEM_HEIGHT}
+            decelerationRate="fast"
+            scrollEventThrottle={16}
+          >
+            {HOURS.map((hour, index) => (
+              <View
+                key={hour}
+                style={styles.timeItem}
+              >
+                <Text
+                  style={[
+                    styles.timeItemText,
+                    centerHour === hour && styles.timeItemTextSelected,
+                  ]}
+                >
+                  {hour}
+                </Text>
+              </View>
+            ))}
+          </ScrollView>
+        </View>
+
+        <Text style={styles.separator}>:</Text>
+
+        {/* 분 선택 */}
+        <View style={styles.pickerColumn}>
+          {/* 고정된 선택 박스 (배경 역할) */}
+          <View style={styles.selectedBox} />
+          
+          <ScrollView
+            ref={minuteScrollRef}
+            style={styles.scrollView}
+            contentContainerStyle={styles.scrollViewContent}
+            showsVerticalScrollIndicator={false}
+            nestedScrollEnabled={true}
+            onScroll={handleMinuteScroll}
+            onMomentumScrollEnd={handleMinuteScrollEnd}
+            onScrollEndDrag={handleMinuteScrollEnd}
+            snapToInterval={ITEM_HEIGHT}
+            decelerationRate="fast"
+            scrollEventThrottle={16}
+          >
+            {MINUTES.map((minute, index) => (
+              <View
+                key={minute}
+                style={styles.timeItem}
+              >
+                <Text
+                  style={[
+                    styles.timeItemText,
+                    centerMinute === minute && styles.timeItemTextSelected,
+                  ]}
+                >
+                  {minute}
+                </Text>
+              </View>
+            ))}
+          </ScrollView>
+        </View>
+      </View>
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    width: '100%',
+  },
+  timeDisplay: {
+    alignItems: 'center',
+    marginBottom: 20,
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    backgroundColor: Colors.primaryPale,
+    borderRadius: 16,
+    borderWidth: 3,
+    borderColor: Colors.primary,
+    shadowColor: Colors.shadow,
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  timeDisplayText: {
+    fontSize: 32,
+    fontWeight: '700',
+    color: Colors.primary,
+    letterSpacing: 2,
+  },
+  pickerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: CONTAINER_HEIGHT,
+  },
+  pickerColumn: {
+    flex: 1,
+    alignItems: 'center',
+    position: 'relative',
+  },
+  scrollView: {
+    width: '100%',
+    height: CONTAINER_HEIGHT,
+    backgroundColor: 'transparent', // 투명 배경
+  },
+  // 고정된 선택 박스 (가운데 위치, 배경 역할)
+  selectedBox: {
+    position: 'absolute',
+    top: PADDING_TOP - 1, // 약간 올려서 정렬
+    left: 0,
+    right: 0,
+    height: ITEM_HEIGHT,
+    backgroundColor: Colors.primary,
+    borderRadius: 8,
+    zIndex: 0, // 배경 레이어
+    pointerEvents: 'none',
+  },
+  scrollViewContent: {
+    paddingTop: PADDING_TOP,
+    paddingBottom: PADDING_TOP,
+  },
+  timeItem: {
+    height: ITEM_HEIGHT,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  timeItemText: {
+    fontSize: 18,
+    fontWeight: '500',
+    color: Colors.text,
+  },
+  timeItemTextSelected: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: Colors.textWhite,
+  },
+  separator: {
+    fontSize: 32,
+    fontWeight: '600',
+    color: Colors.primary,
+    marginHorizontal: 16,
+    marginTop: -4, 
+    lineHeight: ITEM_HEIGHT, // 정확한 수직 정렬을 위해
+  },
+});
+
