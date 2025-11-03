@@ -144,12 +144,20 @@ class NotificationService:
             for fcm_token in valid_tokens:
                 try:
                     # 메시지 구성
+                    # data 값은 모두 문자열이어야 하며 None이 포함되면 안 됨
+                    safe_data = {}
+                    if data:
+                        for k, v in data.items():
+                            if v is None:
+                                continue
+                            # Firebase data payload는 문자열만 허용됨
+                            safe_data[str(k)] = str(v)
                     message = messaging.Message(
                         notification=messaging.Notification(
                             title=title,
                             body=body
                         ),
-                        data=data or {},
+                        data=safe_data,
                         token=fcm_token,
                         android=messaging.AndroidConfig(
                             priority="high" if priority == "high" else "normal"
