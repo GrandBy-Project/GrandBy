@@ -47,6 +47,7 @@ export const MyPageScreen = () => {
   const [isLoadingElderly, setIsLoadingElderly] = useState(false);
   const [showPrivacyPolicy, setShowPrivacyPolicy] = useState(false);
   const [showTerms, setShowTerms] = useState(false);
+  const [showImageOptionsModal, setShowImageOptionsModal] = useState(false);
   
   // 확인 모달 상태
   const [confirmModal, setConfirmModal] = useState<{
@@ -127,11 +128,15 @@ export const MyPageScreen = () => {
       setNotificationSettings(prev => ({ ...prev, [key]: !value }));
       
       // 사용자에게 알림
-      Alert.alert(
-        '설정 저장 실패', 
-        '설정을 저장할 수 없습니다. 네트워크 연결을 확인해주세요.',
-        [{ text: '확인' }]
-      );
+      setConfirmModal({
+        visible: true,
+        title: '설정 저장 실패',
+        message: '설정을 저장할 수 없습니다. 네트워크 연결을 확인해주세요.',
+        confirmText: '확인',
+        onConfirm: () => {
+          setConfirmModal(prev => ({ ...prev, visible: false }));
+        },
+      });
     }
   };
 
@@ -147,7 +152,7 @@ export const MyPageScreen = () => {
       },
       {
         id: 'push_todo_reminder_enabled',
-        title: '할 일 리마인더',
+        title: '할 일 알림이',
         description: '할 일 시작 10분 전 알림',
         value: notificationSettings.push_todo_reminder_enabled,
         disabled: !notificationSettings.push_notification_enabled,
@@ -179,8 +184,8 @@ export const MyPageScreen = () => {
       },
       {
         id: 'push_call_enabled',
-        title: 'AI 전화 완료 알림',
-        description: 'AI 전화가 완료될 때 알림',
+        title: '하루와의 전화 완료 알림',
+        description: '하루와 전화가 완료될 때 알림',
         value: notificationSettings.push_call_enabled,
         disabled: !notificationSettings.push_notification_enabled,
         roles: [UserRole.ELDERLY],
@@ -517,7 +522,15 @@ export const MyPageScreen = () => {
       const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
       
       if (!permissionResult.granted) {
-        Alert.alert('권한 필요', '사진 라이브러리 접근 권한이 필요합니다.');
+        setConfirmModal({
+          visible: true,
+          title: '권한 필요',
+          message: '사진 라이브러리 접근 권한이 필요합니다.',
+          confirmText: '확인',
+          onConfirm: () => {
+            setConfirmModal(prev => ({ ...prev, visible: false }));
+          },
+        });
         return;
       }
 
@@ -537,7 +550,15 @@ export const MyPageScreen = () => {
       await uploadProfileImage(imageUri);
     } catch (error) {
       console.error('이미지 선택 오류:', error);
-      Alert.alert('오류', '이미지를 선택하는 중 오류가 발생했습니다.');
+      setConfirmModal({
+        visible: true,
+        title: '오류',
+        message: '이미지를 선택하는 중 오류가 발생했습니다.',
+        confirmText: '확인',
+        onConfirm: () => {
+          setConfirmModal(prev => ({ ...prev, visible: false }));
+        },
+      });
     }
   };
 
@@ -568,12 +589,28 @@ export const MyPageScreen = () => {
       // 사용자 정보 업데이트
       if (response.data) {
         setUser(response.data);
-        Alert.alert('성공', '프로필 사진이 업데이트되었습니다.');
+        setConfirmModal({
+          visible: true,
+          title: '성공',
+          message: '프로필 사진이 업데이트되었습니다.',
+          confirmText: '확인',
+          onConfirm: () => {
+            setConfirmModal(prev => ({ ...prev, visible: false }));
+          },
+        });
       }
     } catch (error: any) {
       console.error('이미지 업로드 오류:', error);
       const errorMessage = error.response?.data?.detail || '이미지 업로드 중 오류가 발생했습니다.';
-      Alert.alert('오류', errorMessage);
+      setConfirmModal({
+        visible: true,
+        title: '오류',
+        message: errorMessage,
+        confirmText: '확인',
+        onConfirm: () => {
+          setConfirmModal(prev => ({ ...prev, visible: false }));
+        },
+      });
     } finally {
       setIsUploading(false);
     }
@@ -581,69 +618,63 @@ export const MyPageScreen = () => {
 
   // 프로필 이미지 삭제
   const handleImageDelete = async () => {
-    Alert.alert(
-      '프로필 사진 삭제',
-      '프로필 사진을 삭제하시겠습니까?',
-      [
-        { text: '취소', style: 'cancel' },
-        {
-          text: '삭제',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              setIsUploading(true);
-              const response = await apiClient.delete('/api/users/profile-image');
-              
-              // 사용자 정보 업데이트
-              if (response.data) {
-                setUser(response.data);
-                Alert.alert('성공', '프로필 사진이 삭제되었습니다.');
-              }
-            } catch (error: any) {
-              console.error('이미지 삭제 오류:', error);
-              const errorMessage = error.response?.data?.detail || '이미지 삭제 중 오류가 발생했습니다.';
-              Alert.alert('오류', errorMessage);
-            } finally {
-              setIsUploading(false);
-            }
-          },
-        },
-      ]
-    );
+    setConfirmModal({
+      visible: true,
+      title: '프로필 사진 삭제',
+      message: '프로필 사진을 삭제하시겠습니까?',
+      confirmText: '삭제',
+      cancelText: '취소',
+      onConfirm: async () => {
+        setConfirmModal(prev => ({ ...prev, visible: false }));
+        try {
+          setIsUploading(true);
+          const response = await apiClient.delete('/api/users/profile-image');
+          
+          // 사용자 정보 업데이트
+          if (response.data) {
+            setUser(response.data);
+            setConfirmModal({
+              visible: true,
+              title: '성공',
+              message: '프로필 사진이 삭제되었습니다.',
+              confirmText: '확인',
+              onConfirm: () => {
+                setConfirmModal(prev => ({ ...prev, visible: false }));
+              },
+            });
+          }
+        } catch (error: any) {
+          console.error('이미지 삭제 오류:', error);
+          const errorMessage = error.response?.data?.detail || '이미지 삭제 중 오류가 발생했습니다.';
+          setConfirmModal({
+            visible: true,
+            title: '오류',
+            message: errorMessage,
+            confirmText: '확인',
+            onConfirm: () => {
+              setConfirmModal(prev => ({ ...prev, visible: false }));
+            },
+          });
+        } finally {
+          setIsUploading(false);
+        }
+      },
+      onCancel: () => {
+        setConfirmModal(prev => ({ ...prev, visible: false }));
+      },
+    });
   };
 
   // 프로필 이미지 편집 옵션 표시
   const showImageOptions = () => {
-    const options = user?.profile_image_url
-      ? ['사진 선택', '사진 삭제', '취소']
-      : ['사진 선택', '취소'];
-    
-    const cancelButtonIndex = options.length - 1;
-    const destructiveButtonIndex = user?.profile_image_url ? 1 : undefined;
-
-    Alert.alert(
-      '프로필 사진',
-      '프로필 사진을 변경하거나 삭제할 수 있습니다.',
-      options.map((option, index) => ({
-        text: option,
-        style: index === cancelButtonIndex ? 'cancel' : 
-               index === destructiveButtonIndex ? 'destructive' : 'default',
-        onPress: () => {
-          if (option === '사진 선택') {
-            handleImagePick();
-          } else if (option === '사진 삭제') {
-            handleImageDelete();
-          }
-        },
-      }))
-    );
+    setShowImageOptionsModal(true);
   };
 
   const handleDeleteAccount = async () => {
     setConfirmModal({
       visible: true,
       title: '계정 삭제',
-      message: '계정을 삭제하시겠습니까?\n\n⚠️ 중요:\n• 30일 이내에는 복구 가능합니다\n• 30일 후에는 모든 데이터가 영구 삭제됩니다\n• 관련된 할일, 일기 등이 익명화됩니다',
+      message: '계정을 삭제하시겠습니까?\n\n중요 -\n• 30일 이내에는 복구 가능합니다.\n• 30일 후에는 모든 데이터가 영구 삭제됩니다.\n• 관련된 할일, 일기 등이 익명화됩니다.',
       confirmText: '삭제',
       cancelText: '취소',
       onConfirm: () => {
@@ -1468,6 +1499,63 @@ export const MyPageScreen = () => {
         </View>
       </Modal>
 
+      {/* 프로필 사진 편집 옵션 모달 */}
+      <Modal
+        visible={showImageOptionsModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowImageOptionsModal(false)}
+      >
+        <Pressable 
+          style={styles.modalBackdrop} 
+          onPress={() => setShowImageOptionsModal(false)}
+        >
+          <Pressable style={styles.actionSheetModalContainer} onPress={() => {}}>
+            <Text style={[styles.actionSheetTitle, { fontSize: modalTitleFontSize }]}>
+              프로필 사진
+            </Text>
+            <Text style={[styles.actionSheetMessage, { fontSize: modalTextFontSize, marginBottom: 16 }]}>
+              프로필 사진을 변경하거나 삭제할 수 있습니다.
+            </Text>
+            <TouchableOpacity
+              style={styles.actionSheetButton}
+              onPress={() => {
+                setShowImageOptionsModal(false);
+                handleImagePick();
+              }}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.actionSheetButtonText, { fontSize: modalTextFontSize }]}>
+                사진 선택
+              </Text>
+            </TouchableOpacity>
+            {user?.profile_image_url && (
+              <TouchableOpacity
+                style={[styles.actionSheetButton, styles.actionSheetDestructiveButton]}
+                onPress={() => {
+                  setShowImageOptionsModal(false);
+                  handleImageDelete();
+                }}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.actionSheetDestructiveButtonText, { fontSize: modalTextFontSize }]}>
+                  사진 삭제
+                </Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              style={[styles.actionSheetButton, styles.actionSheetCancelButton]}
+              onPress={() => setShowImageOptionsModal(false)}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.actionSheetCancelButtonText, { fontSize: modalTextFontSize }]}>
+                취소
+              </Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       {/* 확인 모달 (로그아웃, 계정 삭제, 연결 해제 등) */}
       <Modal
         visible={confirmModal.visible}
@@ -1923,5 +2011,57 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '700',
+  },
+  // 액션 시트 모달 (프로필 사진 옵션)
+  actionSheetModalContainer: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 12,
+  },
+  actionSheetTitle: {
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 8,
+    // fontSize는 동적으로 적용
+  },
+  actionSheetMessage: {
+    color: '#374151',
+    marginBottom: 16,
+    // fontSize는 동적으로 적용
+  },
+  actionSheetButton: {
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    backgroundColor: '#F9FAFB',
+    marginBottom: 8,
+    alignItems: 'center',
+  },
+  actionSheetCancelButton: {
+    backgroundColor: '#F3F4F6',
+    marginTop: 8,
+    marginBottom: 0,
+  },
+  actionSheetDestructiveButton: {
+    backgroundColor: '#FFF5F5',
+  },
+  actionSheetButtonText: {
+    color: '#111827',
+    fontWeight: '600',
+    // fontSize는 동적으로 적용
+  },
+  actionSheetCancelButtonText: {
+    color: '#374151',
+    fontWeight: '600',
+    // fontSize는 동적으로 적용
+  },
+  actionSheetDestructiveButtonText: {
+    color: '#DC2626',
+    fontWeight: '600',
+    // fontSize는 동적으로 적용
   },
 });
