@@ -892,19 +892,15 @@ async def change_password(
     - 현재 비밀번호 확인 필수
     - 새 비밀번호 유효성 검증
     """
-    # 소셜 로그인 사용자는 비밀번호 변경 불가
-    if not current_user.password_hash:
-        raise HTTPException(
-            status_code=400,
-            detail="소셜 로그인 사용자는 비밀번호를 변경할 수 없습니다"
-        )
-    
-    # 현재 비밀번호 확인
-    if not pwd_context.verify(request.current_password, current_user.password_hash):
-        raise HTTPException(
-            status_code=400,
-            detail="현재 비밀번호가 일치하지 않습니다"
-        )
+    # 비밀번호가 있는 경우 현재 비밀번호 확인 필요
+    if current_user.password_hash:
+        # 현재 비밀번호 확인
+        if not pwd_context.verify(request.current_password, current_user.password_hash):
+            raise HTTPException(
+                status_code=400,
+                detail="현재 비밀번호가 일치하지 않습니다"
+            )
+    # 비밀번호가 없는 경우 (소셜 로그인 등) - 현재 비밀번호 확인 없이 새 비밀번호 설정 허용
     
     # 새 비밀번호 검증
     if len(request.new_password) < 6:
@@ -913,8 +909,8 @@ async def change_password(
             detail="비밀번호는 최소 6자 이상이어야 합니다"
         )
     
-    # 새 비밀번호가 현재 비밀번호와 동일한지 확인
-    if request.current_password == request.new_password:
+    # 새 비밀번호가 현재 비밀번호와 동일한지 확인 (비밀번호가 있는 경우만)
+    if current_user.password_hash and request.current_password == request.new_password:
         raise HTTPException(
             status_code=400,
             detail="새 비밀번호는 현재 비밀번호와 달라야 합니다"

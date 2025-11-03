@@ -16,6 +16,7 @@ import {
   LayoutAnimation,
   Platform,
   UIManager,
+  Modal,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -40,6 +41,8 @@ export const MyPageScreen = () => {
   const slideAnim = useRef(new Animated.Value(0)).current;
   const [connectedCaregivers, setConnectedCaregivers] = useState<ConnectionWithUserInfo[]>([]);
   const [isLoadingCaregivers, setIsLoadingCaregivers] = useState(false);
+  const [showPrivacyPolicy, setShowPrivacyPolicy] = useState(false);
+  const [showTerms, setShowTerms] = useState(false);
 
   // Android에서 LayoutAnimation 활성화
   if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -219,6 +222,157 @@ export const MyPageScreen = () => {
         },
       ]
     );
+  };
+
+  // 개인정보 처리방침 텍스트
+  const getPrivacyPolicyText = () => {
+    return `제1조 (개인정보의 처리 목적)
+그랜드바이(이하 "회사")는 다음의 목적을 위하여 개인정보를 처리합니다. 처리하고 있는 개인정보는 다음의 목적 이외의 용도로는 이용되지 않으며, 이용 목적이 변경되는 경우에는 개인정보 보호법 제18조에 따라 별도의 동의를 받는 등 필요한 조치를 이행할 예정입니다.
+
+1. 회원 관리
+- 회원 가입의사 확인, 회원제 서비스 제공에 따른 본인 식별·인증, 회원자격 유지·관리
+- 각종 고지·통지, 고충처리, 분쟁 조정을 위한 기록 보존
+
+2. 서비스 제공
+- 일기장 서비스 제공, AI 전화 서비스 제공
+- 할 일 관리 서비스 제공, 보호자-어르신 연결 서비스 제공
+- 맞춤형 콘텐츠 제공 및 서비스 개선
+
+3. 안전 및 보안 관리
+- 이상 징후 탐지 및 보호자 알림
+- 부정 이용 방지 및 서비스 안정성 확보
+
+제2조 (개인정보의 처리 및 보유기간)
+1. 회사는 법령에 따른 개인정보 보유·이용기간 또는 정보주체로부터 개인정보를 수집 시에 동의받은 개인정보 보유·이용기간 내에서 개인정보를 처리·보유합니다.
+2. 각각의 개인정보 처리 및 보유 기간은 다음과 같습니다.
+- 회원 가입 및 관리: 회원 탈퇴 시까지 (단, 관계 법령 위반에 따른 수사·조사 등이 진행중인 경우에는 해당 수사·조사 종료 시까지)
+- 재화 또는 서비스 제공: 재화·서비스 공급완료 및 요금결제·정산 완료 시까지
+- 전화 상담 등 서비스 이용 기록: 3년 (통신비밀보호법)
+
+제3조 (처리하는 개인정보의 항목)
+회사는 다음의 개인정보 항목을 처리하고 있습니다.
+1. 필수항목: 이메일, 비밀번호, 이름, 전화번호, 생년월일, 성별, 사용자 유형(어르신/보호자)
+2. 선택항목: 프로필 사진, 알림 수신 설정
+3. 자동 수집항목: IP주소, 쿠키, 서비스 이용 기록, 접속 로그
+
+제4조 (개인정보의 제3자 제공)
+회사는 정보주체의 개인정보를 제1조(개인정보의 처리 목적)에서 명시한 범위 내에서만 처리하며, 정보주체의 동의, 법률의 특별한 규정 등 개인정보 보호법 제17조 및 제18조에 해당하는 경우에만 개인정보를 제3자에게 제공합니다.
+
+제5조 (개인정보처리의 위탁)
+회사는 원활한 개인정보 업무처리를 위하여 다음과 같이 개인정보 처리업무를 위탁하고 있습니다.
+- 클라우드 서비스 제공업체: 서버 운영 및 데이터 보관
+- 푸시 알림 서비스 제공업체: 알림 발송 서비스
+
+제6조 (정보주체의 권리·의무 및 그 행사방법)
+1. 정보주체는 회사에 대해 언제든지 다음 각 호의 개인정보 보호 관련 권리를 행사할 수 있습니다.
+- 개인정보 처리정지 요구
+- 개인정보 열람요구
+- 개인정보 정정·삭제요구
+- 개인정보 처리정지 요구
+
+2. 제1항에 따른 권리 행사는 회사에 대해 서면, 전자우편, 모사전송(FAX) 등을 통하여 하실 수 있으며 회사는 이에 대해 지체 없이 조치하겠습니다.
+
+제7조 (개인정보의 파기)
+회사는 개인정보 보유기간의 경과, 처리목적 달성 등 개인정보가 불필요하게 되었을 때에는 지체없이 해당 개인정보를 파기합니다.
+
+제8조 (개인정보 보호책임자)
+회사는 개인정보 처리에 관한 업무를 총괄해서 책임지고, 개인정보 처리와 관련한 정보주체의 불만처리 및 피해구제 등을 위하여 아래와 같이 개인정보 보호책임자를 지정하고 있습니다.
+
+- 개인정보 보호책임자
+  이메일: privacy@grandby.kr
+  전화번호: 02-1234-5678
+
+제9조 (개인정보의 안전성 확보 조치)
+회사는 개인정보의 안전성 확보를 위해 다음과 같은 조치를 취하고 있습니다.
+1. 관리적 조치: 내부관리계획 수립·시행, 정기적 직원 교육 등
+2. 기술적 조치: 개인정보처리시스템 등의 접근권한 관리, 접근통제시스템 설치, 고유식별정보 등의 암호화, 보안프로그램 설치
+3. 물리적 조치: 전산실, 자료보관실 등의 접근통제
+
+제10조 (개인정보 처리방침 변경)
+이 개인정보 처리방침은 2024년 1월 1일부터 적용되며, 법령 및 방침에 따른 변경내용의 추가, 삭제 및 정정이 있는 경우에는 변경사항의 시행 7일 전부터 공지사항을 통하여 고지할 것입니다.`;
+  };
+
+  // 이용약관 텍스트
+  const getTermsText = () => {
+    return `제1조 (목적)
+이 약관은 그랜드바이(이하 "회사")가 제공하는 어르신 돌봄 서비스(이하 "서비스")의 이용과 관련하여 회사와 회원 간의 권리, 의무 및 책임사항, 기타 필요한 사항을 규정함을 목적으로 합니다.
+
+제2조 (정의)
+1. "서비스"란 회사가 제공하는 어르신 일상 관리 및 보호자 연계 서비스를 말합니다.
+2. "회원"이란 이 약관에 동의하고 회사와 이용계약을 체결한 자를 말하며, 어르신 회원과 보호자 회원으로 구분됩니다.
+3. "어르신 회원"이란 본인의 건강과 일상을 관리하고자 하는 자를 말합니다.
+4. "보호자 회원"이란 어르신 회원과 연결되어 어르신의 상태를 확인하고 돌봄을 제공하는 자를 말합니다.
+
+제3조 (약관의 게시와 개정)
+1. 회사는 이 약관의 내용을 회원이 쉽게 알 수 있도록 서비스 초기 화면에 게시합니다.
+2. 회사는 필요한 경우 관련 법령을 위배하지 않는 범위에서 이 약관을 개정할 수 있습니다.
+3. 회사가 약관을 개정할 경우에는 적용일자 및 개정사유를 명시하여 현행약관과 함께 서비스의 초기화면에 그 적용일자 7일 이전부터 적용일자 전일까지 공지합니다.
+
+제4조 (이용계약의 체결)
+1. 이용계약은 회원으로 가입하고자 하는 자가 약관의 내용에 동의를 한 다음 회원가입 신청을 하고 회사가 이러한 신청에 대하여 승낙함으로써 체결됩니다.
+2. 회사는 다음 각 호에 해당하는 신청에 대하여는 승낙을 하지 않거나 사후에 이용계약을 해지할 수 있습니다.
+- 가입 신청자가 이 약관에 의하여 이전에 회원자격을 상실한 적이 있는 경우
+- 실명이 아니거나 타인의 명의를 이용한 경우
+- 회사가 요구하는 정보를 제공하지 않거나 허위 정보를 제공한 경우
+- 기타 회원으로 등록하는 것이 회사의 기술상 현저히 지장이 있다고 판단되는 경우
+
+제5조 (서비스의 제공 및 변경)
+1. 회사는 다음과 같은 서비스를 제공합니다.
+- 일기장 서비스: 어르신의 일상을 기록하고 관리할 수 있는 서비스
+- 할 일 관리 서비스: 할 일 등록, 완료 확인 등 일정 관리 서비스
+- AI 전화 서비스: 정기적으로 안부 확인 전화를 드리는 서비스 (어르신 회원만 해당)
+- 보호자 연계 서비스: 보호자와 어르신을 연결하여 정보를 공유하는 서비스
+- 알림 서비스: 중요한 일정이나 상태 변화에 대한 알림 서비스
+
+2. 회사는 서비스의 내용을 변경할 수 있으며, 변경 시에는 사전에 공지합니다.
+
+제6조 (서비스의 중단)
+1. 회사는 컴퓨터 등 정보통신설비의 보수점검·교체 및 고장, 통신의 두절 등의 사유가 발생한 경우에는 서비스의 제공을 일시적으로 중단할 수 있습니다.
+2. 회사는 제1항의 사유로 서비스의 제공이 일시적으로 중단됨으로 인하여 회원 또는 제3자가 입은 손해에 대하여 배상합니다. 단, 회사가 고의 또는 과실이 없음을 입증하는 경우에는 그러하지 아니합니다.
+
+제7조 (회원의 의무)
+1. 회원은 다음 행위를 하여서는 안 됩니다.
+- 신청 또는 변경 시 허위내용의 등록
+- 타인의 정보 도용
+- 회사가 게시한 정보의 변경
+- 회사가 정한 정보 이외의 정보(컴퓨터 프로그램 등) 등의 송신 또는 게시
+- 회사와 기타 제3자의 저작권 등 지적재산권에 대한 침해
+- 회사 및 기타 제3자의 명예를 손상시키거나 업무를 방해하는 행위
+- 외설 또는 폭력적인 메시지, 화상, 음성, 기타 공서양속에 반하는 정보를 공개 또는 게시하는 행위
+
+2. 보호자 회원은 연결된 어르신 회원의 동의 없이 개인정보를 제3자에게 제공하거나 부적절하게 이용하여서는 안 됩니다.
+
+제8조 (개인정보보호)
+1. 회사는 회원의 개인정보 보호를 위하여 노력합니다. 회원의 개인정보 보호에 관해서는 관련법령 및 회사가 정하는 "개인정보 처리방침"에 정한 바에 따릅니다.
+
+제9조 (회사의 의무)
+1. 회사는 법령과 이 약관이 금지하거나 공서양속에 반하는 행위를 하지 않으며, 이 약관이 정하는 바에 따라 지속적이고, 안정적으로 서비스를 제공하는데 최선을 다하여야 합니다.
+2. 회사는 회원이 서비스를 이용함에 있어 회원에게 법률상 손해를 입힐 가능성이 있는 물리적·기술적 장치의 설치 및 관리에 최선을 다합니다.
+
+제10조 (회원의 게시물)
+1. 회원이 서비스 내에 게시한 게시물의 저작권은 해당 게시물의 저작자에게 귀속됩니다.
+2. 회원이 서비스 내에 게시한 게시물은 회사의 서비스 운영, 홍보 등의 목적으로 사용될 수 있습니다.
+
+제11조 (이용계약의 해지)
+1. 회원은 언제든지 회사에게 회원 탈퇴를 요청할 수 있으며, 회사는 즉시 회원 탈퇴를 처리합니다.
+2. 회원이 다음 각 호의 사유에 해당하는 경우, 회사는 이용계약을 해지할 수 있습니다.
+- 제7조 제1항에서 정한 회원의 의무를 위반한 경우
+- 다른 회원의 권리나 이익을 침해한 경우
+- 기타 이 약관을 위반한 경우
+
+제12조 (손해배상)
+1. 회사는 무료로 제공되는 서비스와 관련하여 회원에게 어떠한 손해가 발생하더라도 동 손해가 회사의 중대한 과실에 의한 경우를 제외하고 이에 대하여 책임을 부담하지 아니합니다.
+
+제13조 (면책조항)
+1. 회사는 천재지변 또는 이에 준하는 불가항력으로 인하여 서비스를 제공할 수 없는 경우에는 서비스 제공에 관한 책임이 면제됩니다.
+2. 회사는 회원의 귀책사유로 인한 서비스 이용의 장애에 대하여는 책임을 지지 않습니다.
+
+제14조 (준거법 및 관할법원)
+1. 회사와 회원 간 제기된 소송은 대한민국 법을 준거법으로 합니다.
+2. 회사와 회원 간 발생한 분쟁에 관한 소송은 제소 당시의 회원의 주소에 의하고, 주소가 없는 경우에는 거소를 관할하는 지방법원의 전속관할로 합니다.
+
+부칙
+이 약관은 2024년 1월 1일부터 시행됩니다.`;
   };
 
   // 알림 설정 펼침/접힘 토글
@@ -522,17 +676,8 @@ export const MyPageScreen = () => {
     },
   ];
 
-  // 개인정보 관리 메뉴 항목들
-  const personalItems = [
-    {
-      id: 'profile-edit',
-      title: '프로필 수정',
-      description: '이름, 전화번호 등 수정',
-      iconName: 'account-edit' as const,
-      iconLibrary: 'MaterialCommunityIcons' as const,
-      color: '#4bbcfb', // 파스텔 블루
-      onPress: () => router.push('/profile-edit'),
-    },
+  // 개인정보 및 약관 메뉴 항목들
+  const privacyItems = [
     {
       id: 'password-change',
       title: '비밀번호 변경',
@@ -542,10 +687,6 @@ export const MyPageScreen = () => {
       color: '#fb9a4b', // 파스텔 오렌지
       onPress: () => router.push('/change-password'),
     },
-  ];
-
-  // 개인정보 보호 및 약관 메뉴 항목들
-  const privacyItems = [
     {
       id: 'privacy-policy',
       title: '개인정보 처리방침',
@@ -553,7 +694,7 @@ export const MyPageScreen = () => {
       iconName: 'shield-checkmark' as const,
       iconLibrary: 'Ionicons' as const,
       color: '#83fb4b', // 파스텔 그린
-      onPress: () => Alert.alert('개인정보 처리방침', '개인정보 처리방침을 확인할 수 있습니다.'),
+      onPress: () => setShowPrivacyPolicy(true),
     },
     {
       id: 'terms',
@@ -562,7 +703,7 @@ export const MyPageScreen = () => {
       iconName: 'document-text' as const,
       iconLibrary: 'Ionicons' as const,
       color: '#ce4bfb', // 파스텔 퍼플
-      onPress: () => Alert.alert('이용약관', '서비스 이용약관을 확인할 수 있습니다.'),
+      onPress: () => setShowTerms(true),
     }
   ];
 
@@ -640,6 +781,13 @@ export const MyPageScreen = () => {
                 </Text>
               </View>
             </View>
+            <TouchableOpacity
+              style={styles.editButton}
+              onPress={() => router.push('/profile-edit')}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.editButtonText}>수정</Text>
+            </TouchableOpacity>
           </View>
 
           {/* 사용자 정보 리스트 */}
@@ -740,57 +888,6 @@ export const MyPageScreen = () => {
             </View>
           </View>
         )}
-
-        {/* 개인정보 관리 */}
-        <View style={[styles.settingsSection, { marginBottom: sectionMarginBottom }]}>
-          <View style={[styles.sectionHeader, { marginBottom: sectionHeaderMarginBottom }]}>
-            <View style={[
-              styles.sectionIconContainer,
-              { 
-                width: sectionIconSize,
-                height: sectionIconSize,
-                borderRadius: sectionIconSize / 2,
-                marginRight: sectionIconMarginRight,
-              }
-            ]}>
-              <Ionicons name="settings-outline" size={sectionIconFontSize} color="#34B79F" />
-            </View>
-            <Text style={[styles.sectionTitle, { fontSize: sectionTitleFontSize }]}>개인정보 관리</Text>
-          </View>
-          <View style={styles.settingsList}>
-            {personalItems.map((item) => {
-              const IconComponent = item.iconLibrary === 'MaterialCommunityIcons' ? MaterialCommunityIcons : MaterialIcons;
-              return (
-                <TouchableOpacity
-                  key={item.id}
-                  style={[styles.settingItem, { padding: settingItemPadding }]}
-                  onPress={item.onPress}
-                  activeOpacity={0.7}
-                >
-                  <View style={styles.settingLeft}>
-                    <View style={[
-                      styles.settingIconContainer, 
-                      { 
-                        backgroundColor: item.color,
-                        width: settingIconSize,
-                        height: settingIconSize,
-                        borderRadius: settingIconSize / 2,
-                        marginRight: settingIconMarginRight,
-                      }
-                    ]}>
-                      <IconComponent name={item.iconName as any} size={settingIconInnerSize} color="#FFFFFF" />
-                    </View>
-                    <View style={styles.settingTextContainer}>
-                      <Text style={[styles.settingTitle, { fontSize: settingTitleFontSize }]}>{item.title}</Text>
-                      <Text style={[styles.settingDescription, { fontSize: settingDescriptionFontSize }]}>{item.description}</Text>
-                    </View>
-                  </View>
-                  <Ionicons name="chevron-forward" size={getResponsiveFontSize(24, scale)} color="#C7C7CC" />
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </View>
 
         {/* 알림 설정 */}
         <View style={[styles.settingsSection, { marginBottom: sectionMarginBottom }]}>
@@ -927,7 +1024,7 @@ export const MyPageScreen = () => {
           </View>
         </View>
 
-        {/* 개인정보 보호 및 약관 */}
+        {/* 개인정보 및 약관 */}
         <View style={[styles.settingsSection, { marginBottom: sectionMarginBottom }]}>
           <View style={[styles.sectionHeader, { marginBottom: sectionHeaderMarginBottom }]}>
             <View style={[
@@ -941,37 +1038,40 @@ export const MyPageScreen = () => {
             ]}>
               <Ionicons name="shield-checkmark-outline" size={sectionIconFontSize} color="#34B79F" />
             </View>
-            <Text style={[styles.sectionTitle, { fontSize: sectionTitleFontSize }]}>개인정보 보호 및 약관</Text>
+            <Text style={[styles.sectionTitle, { fontSize: sectionTitleFontSize }]}>개인정보 및 약관</Text>
           </View>
           <View style={styles.settingsList}>
-            {privacyItems.map((item) => (
-              <TouchableOpacity
-                key={item.id}
-                style={[styles.settingItem, { padding: settingItemPadding }]}
-                onPress={item.onPress}
-                activeOpacity={0.7}
-              >
-                <View style={styles.settingLeft}>
-                  <View style={[
-                    styles.settingIconContainer, 
-                    { 
-                      backgroundColor: item.color,
-                      width: settingIconSize,
-                      height: settingIconSize,
-                      borderRadius: settingIconSize / 2,
-                      marginRight: settingIconMarginRight,
-                    }
-                  ]}>
-                    <Ionicons name={item.iconName as any} size={settingIconInnerSize} color="#FFFFFF" />
+            {privacyItems.map((item) => {
+              const IconComponent = item.iconLibrary === 'MaterialCommunityIcons' ? MaterialCommunityIcons : Ionicons;
+              return (
+                <TouchableOpacity
+                  key={item.id}
+                  style={[styles.settingItem, { padding: settingItemPadding }]}
+                  onPress={item.onPress}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.settingLeft}>
+                    <View style={[
+                      styles.settingIconContainer, 
+                      { 
+                        backgroundColor: item.color,
+                        width: settingIconSize,
+                        height: settingIconSize,
+                        borderRadius: settingIconSize / 2,
+                        marginRight: settingIconMarginRight,
+                      }
+                    ]}>
+                      <IconComponent name={item.iconName as any} size={settingIconInnerSize} color="#FFFFFF" />
+                    </View>
+                    <View style={styles.settingTextContainer}>
+                      <Text style={[styles.settingTitle, { fontSize: settingTitleFontSize }]}>{item.title}</Text>
+                      <Text style={[styles.settingDescription, { fontSize: settingDescriptionFontSize }]}>{item.description}</Text>
+                    </View>
                   </View>
-                  <View style={styles.settingTextContainer}>
-                    <Text style={[styles.settingTitle, { fontSize: settingTitleFontSize }]}>{item.title}</Text>
-                    <Text style={[styles.settingDescription, { fontSize: settingDescriptionFontSize }]}>{item.description}</Text>
-                  </View>
-                </View>
-                <Ionicons name="chevron-forward" size={getResponsiveFontSize(24, scale)} color="#C7C7CC" />
-              </TouchableOpacity>
-            ))}
+                  <Ionicons name="chevron-forward" size={getResponsiveFontSize(24, scale)} color="#C7C7CC" />
+                </TouchableOpacity>
+              );
+            })}
           </View>
         </View>
 
@@ -1001,6 +1101,56 @@ export const MyPageScreen = () => {
 
       {/* 하단 네비게이션 바 */}
       <BottomNavigationBar />
+
+      {/* 개인정보 처리방침 모달 */}
+      <Modal
+        visible={showPrivacyPolicy}
+        animationType="slide"
+        transparent={false}
+        onRequestClose={() => setShowPrivacyPolicy(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>개인정보 처리방침</Text>
+            <TouchableOpacity
+              style={styles.modalCloseButton}
+              onPress={() => setShowPrivacyPolicy(false)}
+            >
+              <Ionicons name="close" size={24} color="#333333" />
+            </TouchableOpacity>
+          </View>
+          <ScrollView style={styles.modalContent}>
+            <Text style={styles.modalText}>
+              {getPrivacyPolicyText()}
+            </Text>
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* 이용약관 모달 */}
+      <Modal
+        visible={showTerms}
+        animationType="slide"
+        transparent={false}
+        onRequestClose={() => setShowTerms(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>이용약관</Text>
+            <TouchableOpacity
+              style={styles.modalCloseButton}
+              onPress={() => setShowTerms(false)}
+            >
+              <Ionicons name="close" size={24} color="#333333" />
+            </TouchableOpacity>
+          </View>
+          <ScrollView style={styles.modalContent}>
+            <Text style={styles.modalText}>
+              {getTermsText()}
+            </Text>
+          </ScrollView>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -1092,6 +1242,19 @@ const styles = StyleSheet.create({
   },
   profileInfo: {
     flex: 1,
+  },
+  editButton: {
+    backgroundColor: '#F0F9F7',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#34B79F',
+  },
+  editButtonText: {
+    color: '#34B79F',
+    fontSize: 14,
+    fontWeight: '600',
   },
   userName: {
     fontSize: 24,
@@ -1297,5 +1460,36 @@ const styles = StyleSheet.create({
   },
   bottomSpacer: {
     height: 20,
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E5E7',
+    paddingTop: Platform.OS === 'ios' ? 60 : 20,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333333',
+  },
+  modalCloseButton: {
+    padding: 4,
+  },
+  modalContent: {
+    flex: 1,
+    padding: 20,
+  },
+  modalText: {
+    fontSize: 14,
+    lineHeight: 22,
+    color: '#333333',
   },
 });

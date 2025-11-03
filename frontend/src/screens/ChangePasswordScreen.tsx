@@ -20,7 +20,7 @@ import { useFontSizeStore } from '../store/fontSizeStore';
 
 export const ChangePasswordScreen = () => {
   const router = useRouter();
-  const { user } = useAuthStore();
+  const { user, logout } = useAuthStore();
   const { fontSizeLevel } = useFontSizeStore();
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -32,15 +32,6 @@ export const ChangePasswordScreen = () => {
 
   const handleChangePassword = async () => {
     try {
-      // 소셜 로그인 사용자 체크
-      if (user?.auth_provider !== 'email') {
-        Alert.alert(
-          '비밀번호 변경 불가',
-          '소셜 로그인 계정은 비밀번호를 변경할 수 없습니다.'
-        );
-        return;
-      }
-
       // 입력값 검증
       if (!currentPassword) {
         Alert.alert('입력 오류', '현재 비밀번호를 입력해주세요.');
@@ -70,21 +61,26 @@ export const ChangePasswordScreen = () => {
         new_password: newPassword,
       });
 
+      // 비밀번호 변경 성공 후 로그아웃
       Alert.alert(
         '비밀번호 변경 완료',
-        '비밀번호가 성공적으로 변경되었습니다.',
+        '비밀번호가 성공적으로 변경되었습니다.\n보안을 위해 다시 로그인해주세요.',
         [
           {
             text: '확인',
-            onPress: () => router.back(),
+            onPress: async () => {
+              // 입력값 초기화
+              setCurrentPassword('');
+              setNewPassword('');
+              setConfirmPassword('');
+              
+              // 로그아웃 처리
+              await logout();
+              router.replace('/');
+            },
           },
         ]
       );
-
-      // 입력값 초기화
-      setCurrentPassword('');
-      setNewPassword('');
-      setConfirmPassword('');
     } catch (error: any) {
       console.error('비밀번호 변경 오류:', error);
       const errorMessage = error.response?.data?.detail || '비밀번호 변경에 실패했습니다.';
@@ -109,63 +105,54 @@ export const ChangePasswordScreen = () => {
           </Text>
         </View>
 
-        {user?.auth_provider !== 'email' ? (
-          <View style={styles.socialLoginNotice}>
-            <Ionicons name="information-circle" size={48} color="#E65100" />
-            <Text style={styles.socialLoginNoticeText}>
-              소셜 로그인 계정은 비밀번호를 변경할 수 없습니다.{'\n'}
-              연동된 소셜 계정에서 비밀번호를 관리해주세요.
-            </Text>
-          </View>
-        ) : (
-          <View style={styles.form}>
-            <Input
-              label="현재 비밀번호"
-              value={currentPassword}
-              onChangeText={setCurrentPassword}
-              placeholder="현재 비밀번호"
-              secureTextEntry
-              returnKeyType="next"
-              onSubmitEditing={() => newPasswordRef.current?.focus()}
-            />
+        <View style={styles.form}>
+          <Input
+            label="현재 비밀번호"
+            value={currentPassword}
+            onChangeText={setCurrentPassword}
+            placeholder="현재 비밀번호"
+            secureTextEntry
+            returnKeyType="next"
+            onSubmitEditing={() => newPasswordRef.current?.focus()}
+          />
 
-            <View style={styles.divider} />
+          <View style={styles.divider} />
 
-            <Input
-              ref={newPasswordRef}
-              label="새 비밀번호"
-              value={newPassword}
-              onChangeText={setNewPassword}
-              placeholder="6자 이상"
-              secureTextEntry
-              returnKeyType="next"
-              onSubmitEditing={() => confirmPasswordRef.current?.focus()}
-            />
+          <Input
+            ref={newPasswordRef}
+            label="새 비밀번호"
+            value={newPassword}
+            onChangeText={setNewPassword}
+            placeholder="6자 이상"
+            secureTextEntry
+            returnKeyType="next"
+            onSubmitEditing={() => confirmPasswordRef.current?.focus()}
+          />
 
-            <Input
-              ref={confirmPasswordRef}
-              label="새 비밀번호 확인"
-              value={confirmPassword}
-              onChangeText={setConfirmPassword}
-              placeholder="새 비밀번호 재입력"
-              secureTextEntry
-              returnKeyType="done"
-              onSubmitEditing={handleChangePassword}
-            />
+          <Input
+            ref={confirmPasswordRef}
+            label="새 비밀번호 확인"
+            value={confirmPassword}
+            onChangeText={setConfirmPassword}
+            placeholder="새 비밀번호 재입력"
+            secureTextEntry
+            returnKeyType="done"
+            onSubmitEditing={handleChangePassword}
+          />
 
-            <Text style={styles.helperText}>
-              • 6자 이상 입력해주세요{'\n'}
-              • 현재 비밀번호와 다른 비밀번호를 사용해주세요{'\n'}
-              • 안전한 비밀번호를 위해 영문, 숫자, 특수문자를 조합하는 것을 권장합니다
-            </Text>
+          <Text style={styles.helperText}>
+            • 6자 이상 입력해주세요{'\n'}
+            • 현재 비밀번호와 다른 비밀번호를 사용해주세요{'\n'}
+            • 안전한 비밀번호를 위해 영문, 숫자, 특수문자를 조합하는 것을 권장합니다{'\n'}
+            • 비밀번호 변경 후 보안을 위해 자동으로 로그아웃됩니다
+          </Text>
 
-            <Button
-              title={isLoading ? '변경 중...' : '비밀번호 변경'}
-              onPress={handleChangePassword}
-              disabled={isLoading || !currentPassword || !newPassword || !confirmPassword}
-            />
-          </View>
-        )}
+          <Button
+            title={isLoading ? '변경 중...' : '비밀번호 변경'}
+            onPress={handleChangePassword}
+            disabled={isLoading || !currentPassword || !newPassword || !confirmPassword}
+          />
+        </View>
       </ScrollView>
     </View>
   );
@@ -196,21 +183,6 @@ const styles = StyleSheet.create({
     color: '#1976D2',
     lineHeight: 20,
     marginLeft: 12,
-  },
-  socialLoginNotice: {
-    backgroundColor: '#FFF3E0',
-    borderRadius: 12,
-    padding: 20,
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#FFE0B2',
-  },
-  socialLoginNoticeText: {
-    fontSize: 15,
-    color: '#E65100',
-    textAlign: 'center',
-    lineHeight: 22,
-    marginTop: 12,
   },
   form: {
     gap: 8,
