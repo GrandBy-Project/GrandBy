@@ -1,15 +1,23 @@
-import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Colors } from '../constants/Colors';
+import { useErrorStore } from '../store/errorStore';
+
+type AlertButton = {
+  text: string;
+  style?: 'default' | 'cancel' | 'destructive';
+  onPress?: () => void;
+};
 
 type AlertState = {
   visible: boolean;
   title: string;
   message: string;
+  buttons: AlertButton[];
 };
 
 type AlertContextValue = {
-  show: (title: string, message: string) => void;
+  show: (title: string, message: string, buttons?: AlertButton[]) => void;
   hide: () => void;
 };
 
@@ -22,15 +30,26 @@ export const useAlert = (): AlertContextValue => {
 };
 
 export const GlobalAlertProvider: React.FC<React.PropsWithChildren> = ({ children }) => {
-  const [state, setState] = useState<AlertState>({ visible: false, title: '', message: '' });
+  const [state, setState] = useState<AlertState>({ visible: false, title: '', message: '', buttons: [] });
+  const { error, clearError } = useErrorStore();
 
-  const show = useCallback((title: string, message: string) => {
-    setState({ visible: true, title, message });
+  const show = useCallback((title: string, message: string, buttons?: AlertButton[]) => {
+    // 버튼이 제공되지 않으면 기본 "확인" 버튼 사용
+    const defaultButtons: AlertButton[] = buttons || [{ text: '확인' }];
+    setState({ visible: true, title, message, buttons: defaultButtons });
   }, []);
 
   const hide = useCallback(() => setState((s) => ({ ...s, visible: false })), []);
 
   const value = useMemo(() => ({ show, hide }), [show, hide]);
+
+  // ✅ errorStore의 error가 변경되면 자동으로 팝업 표시
+  useEffect(() => {
+    if (error) {
+      show(error.title, error.message);
+      clearError();
+    }
+  }, [error, show, clearError]);
 
   return (
     <AlertContext.Provider value={value}>
@@ -47,9 +66,39 @@ export const GlobalAlertProvider: React.FC<React.PropsWithChildren> = ({ childre
             <Text style={styles.modalTitle}>{state.title}</Text>
             <Text style={styles.modalMessage}>{state.message}</Text>
             <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.modalButton} onPress={hide} activeOpacity={0.8}>
-                <Text style={styles.modalButtonText}>확인</Text>
-              </TouchableOpacity>
+              {state.buttons.map((button, index) => {
+                const handlePress = () => {
+                  button.onPress?.();
+                  hide();
+                };
+                
+                const isDestructive = button.style === 'destructive';
+                const isCancel = button.style === 'cancel';
+                
+                return (
+                  <TouchableOpacity
+                    key={index}
+                    style={[
+                      styles.modalButton,
+                      isDestructive && styles.modalButtonDestructive,
+                      isCancel && styles.modalButtonCancel,
+                      index > 0 && styles.modalButtonSpacing,
+                    ]}
+                    onPress={handlePress}
+                    activeOpacity={0.8}
+                  >
+                    <Text
+                      style={[
+                        styles.modalButtonText,
+                        isDestructive && styles.modalButtonTextDestructive,
+                        isCancel && styles.modalButtonTextCancel,
+                      ]}
+                    >
+                      {button.text}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           </Pressable>
         </Pressable>
@@ -88,18 +137,36 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   modalActions: {
-    alignItems: 'flex-end',
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
   },
   modalButton: {
     backgroundColor: Colors.primary,
     borderRadius: 10,
     paddingVertical: 10,
     paddingHorizontal: 16,
+    minWidth: 60,
+    alignItems: 'center',
+  },
+  modalButtonSpacing: {
+    marginLeft: 8,
+  },
+  modalButtonDestructive: {
+    backgroundColor: '#EF4444',
+  },
+  modalButtonCancel: {
+    backgroundColor: '#F3F4F6',
   },
   modalButtonText: {
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '700',
+  },
+  modalButtonTextDestructive: {
+    color: '#FFFFFF',
+  },
+  modalButtonTextCancel: {
+    color: '#374151',
   },
 });
 

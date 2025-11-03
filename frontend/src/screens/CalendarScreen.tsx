@@ -8,7 +8,6 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Alert,
   TextInput,
   Modal,
   Platform,
@@ -29,12 +28,14 @@ import { useAuthStore } from '../store/authStore';
 import { Colors } from '../constants/Colors';
 import { useFontSizeStore } from '../store/fontSizeStore';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useAlert } from '../components/GlobalAlertProvider';
 
 export const CalendarScreen = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
   const { fontSizeLevel } = useFontSizeStore();
+  const { show } = useAlert();
 
   // 날짜 선택 상태
   const [selectedDay, setSelectedDay] = useState(new Date());
@@ -272,7 +273,7 @@ export const CalendarScreen = () => {
       console.error('❌ 에러 상세:', JSON.stringify(error, null, 2));
       console.error('❌ 응답 데이터:', error.response?.data);
       console.error('❌ 응답 상태:', error.response?.status);
-      Alert.alert('오류', `일정을 불러오는데 실패했습니다.\n${error.message || JSON.stringify(error)}`);
+      show('오류', `일정을 불러오는데 실패했습니다.\n${error.message || JSON.stringify(error)}`);
     } finally {
       setIsLoading(false);
     }
@@ -625,27 +626,27 @@ export const CalendarScreen = () => {
 
   const handleSaveSchedule = async () => {
     if (!newSchedule.date) {
-      Alert.alert('알림', '날짜를 선택해주세요.');
+      show('알림', '날짜를 선택해주세요.');
       return;
     }
 
     if (!newSchedule.title.trim()) {
-      Alert.alert('알림', '제목을 입력해주세요.');
+      show('알림', '제목을 입력해주세요.');
       return;
     }
 
     if (!newSchedule.description.trim()) {
-      Alert.alert('알림', '내용을 입력해주세요.');
+      show('알림', '내용을 입력해주세요.');
       return;
     }
 
     if (!newSchedule.time) {
-      Alert.alert('알림', '시간을 선택해주세요.');
+      show('알림', '시간을 선택해주세요.');
       return;
     }
 
     if (!user) {
-      Alert.alert('오류', '로그인이 필요합니다.');
+      show('오류', '로그인이 필요합니다.');
       return;
     }
 
@@ -674,10 +675,10 @@ export const CalendarScreen = () => {
 
       setNewSchedule({ title: '', description: '', time: '', date: '' });
       setShowAddModal(false);
-      Alert.alert('저장 완료', '일정이 추가되었습니다.');
+      show('저장 완료', '일정이 추가되었습니다.');
     } catch (error: any) {
       console.error('❌ 일정 생성 실패:', error);
-      Alert.alert('오류', '일정을 저장하는데 실패했습니다.');
+      show('오류', '일정을 저장하는데 실패했습니다.');
     } finally {
       setIsLoading(false);
     }
@@ -710,7 +711,7 @@ export const CalendarScreen = () => {
   };
 
   const handleDeleteSchedule = (todoId: string) => {
-    Alert.alert(
+    show(
       '일정 삭제',
       '이 일정을 삭제하시겠습니까?',
       [
@@ -731,10 +732,10 @@ export const CalendarScreen = () => {
               // 일정 다시 불러오기
               await loadSchedules();
 
-              Alert.alert('삭제 완료', '일정이 삭제되었습니다.');
+              show('삭제 완료', '일정이 삭제되었습니다.');
             } catch (error: any) {
               console.error('❌ 일정 삭제 실패:', error);
-              Alert.alert('오류', '일정을 삭제하는데 실패했습니다.');
+              show('오류', '일정을 삭제하는데 실패했습니다.');
             } finally {
               setIsLoading(false);
             }
@@ -1314,7 +1315,7 @@ export const CalendarScreen = () => {
 
 
             {/* 하단 여백 */}
-            <View style={{ height: 100 + Math.max(insets.bottom, 10) }} />
+            <View style={{ height: 20 }} />
           </>
         )}
       </ScrollView>

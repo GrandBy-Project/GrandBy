@@ -9,7 +9,6 @@ import {
   ScrollView,
   TouchableOpacity,
   TextInput,
-  Alert,
   Modal,
   Platform,
   ActivityIndicator,
@@ -20,6 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as todoApi from '../api/todo';
 import { useAuthStore } from '../store/authStore';
 import { Colors } from '../constants/Colors';
+import { useAlert } from '../components/GlobalAlertProvider';
 
 interface TodoItem {
   id: string;
@@ -38,6 +38,7 @@ export const GuardianTodoAddScreen = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
+  const { show } = useAlert();
   const [isSaving, setIsSaving] = useState(false);
   
   // 쿼리 파라미터로 어르신 ID와 이름 받기
@@ -49,7 +50,7 @@ export const GuardianTodoAddScreen = () => {
   // elderlyId가 없으면 뒤로가기
   useEffect(() => {
     if (!elderlyId) {
-      Alert.alert('오류', '어르신 정보가 없습니다.', [
+      show('오류', '어르신 정보가 없습니다.', [
         { text: '확인', onPress: () => router.back() }
       ]);
     }
@@ -100,17 +101,17 @@ export const GuardianTodoAddScreen = () => {
 
   const handleSaveTodo = async () => {
     if (!newTodo.title.trim()) {
-      Alert.alert('알림', '할일 제목을 입력해주세요.');
+      show('알림', '할일 제목을 입력해주세요.');
       return;
     }
 
     if (!newTodo.category) {
-      Alert.alert('알림', '카테고리를 선택해주세요.');
+      show('알림', '카테고리를 선택해주세요.');
       return;
     }
 
     if (!newTodo.time) {
-      Alert.alert('알림', '시간을 선택해주세요.');
+      show('알림', '시간을 선택해주세요.');
       return;
     }
 
@@ -141,7 +142,7 @@ export const GuardianTodoAddScreen = () => {
       const result = await todoApi.createTodo(todoData);
       console.log('✅ TODO 생성 성공:', result.todo_id);
 
-      Alert.alert(
+      show(
         '저장 완료',
         '어르신의 할일이 등록되었습니다.',
         [
@@ -153,7 +154,7 @@ export const GuardianTodoAddScreen = () => {
       );
     } catch (error: any) {
       console.error('TODO 저장 실패:', error);
-      Alert.alert('오류', '할일 등록에 실패했습니다.');
+      show('오류', '할일 등록에 실패했습니다.');
     } finally {
       setIsSaving(false);
     }

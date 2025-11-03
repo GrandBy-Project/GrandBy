@@ -7,7 +7,6 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  Alert,
   TextInput,
   TouchableOpacity,
   KeyboardAvoidingView,
@@ -23,6 +22,7 @@ import apiClient from '../api/client';
 import { useAuthStore } from '../store/authStore';
 import { useFontSizeStore } from '../store/fontSizeStore';
 import { useResponsive, getResponsiveFontSize, getResponsivePadding, getResponsiveSize } from '../hooks/useResponsive';
+import { useAlert } from '../components/GlobalAlertProvider';
 
 export const ProfileEditScreen = () => {
   const router = useRouter();
@@ -30,6 +30,7 @@ export const ProfileEditScreen = () => {
   const { fontSizeLevel } = useFontSizeStore();
   const insets = useSafeAreaInsets();
   const { scale } = useResponsive();
+  const { show } = useAlert();
   
   const [name, setName] = useState(user?.name || '');
   const [phoneNumber, setPhoneNumber] = useState(user?.phone_number || '');
@@ -79,24 +80,24 @@ export const ProfileEditScreen = () => {
       // 입력값 검증
       const nameValidation = validateName(name);
       if (!nameValidation.valid) {
-        Alert.alert('입력 오류', nameValidation.message);
+        show('입력 오류', nameValidation.message);
         return;
       }
 
       const phoneValidation = validatePhoneNumber(phoneNumber);
       if (!phoneValidation.valid) {
-        Alert.alert('입력 오류', phoneValidation.message);
+        show('입력 오류', phoneValidation.message);
         return;
       }
 
       const birthDateValidation = validateBirthDate(birthDate);
       if (!birthDateValidation.valid) {
-        Alert.alert('입력 오류', birthDateValidation.message);
+        show('입력 오류', birthDateValidation.message);
         return;
       }
 
       if (!gender) {
-        Alert.alert('입력 오류', '성별을 선택해주세요.');
+        show('입력 오류', '성별을 선택해주세요.');
         return;
       }
 
@@ -112,7 +113,7 @@ export const ProfileEditScreen = () => {
       // 사용자 정보 업데이트
       if (response.data) {
         setUser(response.data);
-        Alert.alert(
+        show(
           '프로필 수정 완료',
           '프로필이 성공적으로 수정되었습니다.',
           [
@@ -126,7 +127,7 @@ export const ProfileEditScreen = () => {
     } catch (error: any) {
       console.error('프로필 수정 오류:', error);
       const errorMessage = error.response?.data?.detail || '프로필 수정에 실패했습니다.';
-      Alert.alert('오류', errorMessage);
+      show('오류', errorMessage);
     } finally {
       setIsLoading(false);
     }

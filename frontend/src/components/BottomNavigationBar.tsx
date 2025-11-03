@@ -3,7 +3,7 @@
  */
 import React from 'react';
 import { View, TouchableOpacity, StyleSheet } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useSegments } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../constants/Colors';
@@ -11,11 +11,18 @@ import { useResponsive, getResponsiveFontSize, getResponsivePadding, getResponsi
 
 export const BottomNavigationBar: React.FC = () => {
   const router = useRouter();
+  const segments = useSegments();
   const insets = useSafeAreaInsets();
   const { scale } = useResponsive();
 
   const handleHome = () => {
-    router.push('/home');
+    const currentRoute = segments.join('/');
+    // 현재 경로가 home인 경우 새로고침, 아닌 경우 home으로 이동
+    if (currentRoute === 'home' || currentRoute === '(tabs)/home') {
+      router.replace('/home');
+    } else {
+      router.push('/home');
+    }
   };
 
   // 순수 비율 기반 동적 계산
