@@ -12,10 +12,13 @@ import {
   Modal,
   Platform,
   ActivityIndicator,
+  Image,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Header, BottomNavigationBar } from '../components';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Calendar } from 'react-native-calendars';
+import { Ionicons } from '@expo/vector-icons';
 import * as todoApi from '../api/todo';
 import { useAuthStore } from '../store/authStore';
 import { Colors } from '../constants/Colors';
@@ -68,20 +71,25 @@ export const GuardianTodoAddScreen = () => {
     recurringType: 'daily' as 'daily' | 'weekly' | 'monthly',
     reminderEnabled: true,
     reminderTime: '',
+    recurringDays: [] as number[], // 주간 반복 요일: [0,1,2,3,4,5,6] (월~일)
   });
 
   // 모달 상태
-  const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [showTimeModal, setShowTimeModal] = useState(false);
   const [showRecurringModal, setShowRecurringModal] = useState(false);
+  const [showDatePickerModal, setShowDatePickerModal] = useState(false);
+  const [showWeeklyDaysModal, setShowWeeklyDaysModal] = useState(false);
+  
+  // 입력 필드 포커스 상태
+  const [focusedField, setFocusedField] = useState<string | null>(null);
 
   // 카테고리 옵션 (Backend Enum과 일치)
   const categories = [
-    { id: 'MEDICINE', name: '💊 약 복용', color: '#FF6B6B' },
-    { id: 'HOSPITAL', name: '🏥 병원 방문', color: '#4ECDC4' },
-    { id: 'EXERCISE', name: '🏃 운동', color: '#45B7D1' },
-    { id: 'MEAL', name: '🍽️ 식사', color: '#96CEB4' },
-    { id: 'OTHER', name: '📝 기타', color: '#95A5A6' },
+    { id: 'MEDICINE', name: '약 복용', icon: 'medical', color: '#FF6B6B' },
+    { id: 'HOSPITAL', name: '병원 방문', icon: 'medical-outline', color: '#4ECDC4' },
+    { id: 'EXERCISE', name: '운동', icon: 'fitness', color: '#45B7D1' },
+    { id: 'MEAL', name: '식사', icon: 'restaurant', color: '#96CEB4' },
+    { id: 'OTHER', name: '기타', icon: 'list', color: '#95A5A6' },
   ];
 
   // 시간 옵션
@@ -125,6 +133,11 @@ export const GuardianTodoAddScreen = () => {
         : (parseInt(timeStr) === 12 ? 0 : parseInt(timeStr));
       const formattedTime = `${hour.toString().padStart(2, '0')}:00`;
 
+      // 반복 설정에 따른 추가 데이터 처리
+      const selectedDate = new Date(newTodo.date);
+      const selectedDayOfMonth = selectedDate.getDate(); // 1~31
+      const selectedWeekday = selectedDate.getDay() === 0 ? 6 : selectedDate.getDay() - 1; // 월요일=0, 일요일=6
+      
       // API 요청 데이터
       const todoData: todoApi.TodoCreateRequest = {
         elderly_id: newTodo.elderlyId,
@@ -133,8 +146,15 @@ export const GuardianTodoAddScreen = () => {
         category: newTodo.category as any, // 이미 대문자로 저장됨
         due_date: newTodo.date,
         due_time: formattedTime,
+        is_shared_with_caregiver: true, // 보호자와 공유 설정
         is_recurring: newTodo.isRecurring,
         recurring_type: newTodo.isRecurring ? newTodo.recurringType.toUpperCase() as any : undefined,
+        recurring_days: newTodo.isRecurring && newTodo.recurringType === 'weekly' 
+          ? (newTodo.recurringDays.length > 0 ? newTodo.recurringDays : [selectedWeekday])
+          : undefined,
+        recurring_day_of_month: newTodo.isRecurring && newTodo.recurringType === 'monthly'
+          ? selectedDayOfMonth
+          : undefined,
       };
 
       console.log('📤 TODO 생성 요청:', JSON.stringify(todoData, null, 2));
@@ -164,13 +184,41 @@ export const GuardianTodoAddScreen = () => {
     return categories.find(cat => cat.id === id);
   };
 
-  const formatDate = () => {
-    const today = new Date();
-    const month = today.getMonth() + 1;
-    const date = today.getDate();
+  const formatDate = (dateString?: string) => {
+    const date = dateString ? new Date(dateString) : new Date(newTodo.date);
+    const month = date.getMonth() + 1;
+    const day = date.getDate();
     const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
-    const day = dayNames[today.getDay()];
-    return `${month}월 ${date}일 (${day})`;
+    const dayName = dayNames[date.getDay()];
+    return `${month}월 ${day}일 ${dayName}`;
+  };
+
+  const formatDateForDisplay = (dateString: string): string => {
+    const date = new Date(dateString);
+    const today = new Date();
+    const isToday = dateString === today.toISOString().split('T')[0];
+    
+    if (isToday) {
+      return `오늘 ${formatDate(dateString)}`;
+    }
+    
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const isYesterday = dateString === yesterday.toISOString().split('T')[0];
+    
+    if (isYesterday) {
+      return `어제 ${formatDate(dateString)}`;
+    }
+    
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const isTomorrow = dateString === tomorrow.toISOString().split('T')[0];
+    
+    if (isTomorrow) {
+      return `내일 ${formatDate(dateString)}`;
+    }
+    
+    return formatDate(dateString);
   };
 
   return (
@@ -189,8 +237,10 @@ export const GuardianTodoAddScreen = () => {
             style={styles.titleInput}
             value={newTodo.title}
             onChangeText={(text) => setNewTodo({ ...newTodo, title: text })}
-            placeholder="어르신이 해야 할 일을 입력해주세요"
+            placeholder={focusedField !== 'title' ? "어르신이 해야 할 일을 입력해주세요" : undefined}
             placeholderTextColor="#999999"
+            onFocus={() => setFocusedField('title')}
+            onBlur={() => setFocusedField(null)}
           />
         </View>
 
@@ -201,27 +251,72 @@ export const GuardianTodoAddScreen = () => {
             style={styles.descriptionInput}
             value={newTodo.description}
             onChangeText={(text) => setNewTodo({ ...newTodo, description: text })}
-            placeholder="할일에 대한 자세한 설명을 입력해주세요"
+            placeholder={focusedField !== 'description' ? "할일에 대한 자세한 설명을 입력해주세요" : undefined}
             placeholderTextColor="#999999"
             multiline
             numberOfLines={4}
+            onFocus={() => setFocusedField('description')}
+            onBlur={() => setFocusedField(null)}
           />
         </View>
 
         {/* 카테고리 선택 */}
         <View style={styles.inputSection}>
           <Text style={styles.inputLabel}>카테고리 *</Text>
+          <View style={styles.categoryGridInline}>
+            {categories.map((category) => (
+              <TouchableOpacity
+                key={category.id}
+                style={[
+                  styles.categoryCardInline,
+                  newTodo.category === category.id && styles.categoryCardInlineSelected,
+                ]}
+                onPress={() => setNewTodo({ ...newTodo, category: category.id })}
+                activeOpacity={0.7}
+              >
+                <View style={[
+                  styles.categoryCardIconContainerInline,
+                  { backgroundColor: category.color + '15' }
+                ]}>
+                  <Ionicons 
+                    name={category.icon as any} 
+                    size={28} 
+                    color={category.color} 
+                  />
+                </View>
+                <Text style={[
+                  styles.categoryCardTextInline,
+                  newTodo.category === category.id && styles.categoryCardTextInlineSelected
+                ]}>
+                  {category.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+            {/* 장식용 캐릭터 카드 (3x2 그리드를 채우기 위해) */}
+            <View style={styles.categoryCardInlineDisabled}>
+              <Image 
+                source={require('../../assets/haru-character.png')} 
+                style={styles.decorativeCharacterImage}
+                resizeMode="contain"
+              />
+            </View>
+          </View>
+        </View>
+
+        {/* 날짜 선택 */}
+        <View style={styles.inputSection}>
+          <Text style={styles.inputLabel}>날짜</Text>
           <TouchableOpacity
-            style={styles.categoryButton}
-            onPress={() => setShowCategoryModal(true)}
+            style={styles.dateButton}
+            onPress={() => setShowDatePickerModal(true)}
             activeOpacity={0.7}
           >
-            <Text style={[
-              styles.categoryButtonText,
-              !newTodo.category && styles.placeholderText
-            ]}>
-              {newTodo.category ? getCategoryById(newTodo.category)?.name : '카테고리를 선택해주세요'}
-            </Text>
+            <View style={styles.dateButtonContent}>
+              <Ionicons name="calendar-outline" size={20} color="#34B79F" />
+              <Text style={styles.dateButtonText}>
+                {formatDateForDisplay(newTodo.date)}
+              </Text>
+            </View>
             <Text style={styles.dropdownIcon}>▼</Text>
           </TouchableOpacity>
         </View>
@@ -234,22 +329,20 @@ export const GuardianTodoAddScreen = () => {
             onPress={() => setShowTimeModal(true)}
             activeOpacity={0.7}
           >
-            <Text style={[
-              styles.timeButtonText,
-              !newTodo.time && styles.placeholderText
-            ]}>
-              {newTodo.time || '시간을 선택해주세요'}
-            </Text>
+            <View style={styles.timeButtonContent}>
+              {newTodo.time && (
+                <Ionicons name="time-outline" size={20} color="#34B79F" />
+              )}
+              <Text style={[
+                styles.timeButtonText,
+                !newTodo.time && styles.placeholderText,
+                newTodo.time && { marginLeft: 12 }
+              ]}>
+                {newTodo.time || '시간을 선택해주세요'}
+              </Text>
+            </View>
             <Text style={styles.dropdownIcon}>▼</Text>
           </TouchableOpacity>
-        </View>
-
-        {/* 날짜 표시 */}
-        <View style={styles.inputSection}>
-          <Text style={styles.inputLabel}>날짜</Text>
-          <View style={styles.dateDisplay}>
-            <Text style={styles.dateText}>오늘 ({formatDate()})</Text>
-          </View>
         </View>
 
         {/* 반복 설정 */}
@@ -270,16 +363,44 @@ export const GuardianTodoAddScreen = () => {
           </View>
           
           {newTodo.isRecurring && (
-            <TouchableOpacity
-              style={styles.recurringButton}
-              onPress={() => setShowRecurringModal(true)}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.recurringButtonText}>
-                {recurringOptions.find(opt => opt.id === newTodo.recurringType)?.name || '반복 주기 선택'}
-              </Text>
-              <Text style={styles.dropdownIcon}>▼</Text>
-            </TouchableOpacity>
+            <>
+              <TouchableOpacity
+                style={styles.recurringButton}
+                onPress={() => setShowRecurringModal(true)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.recurringButtonText}>
+                  {recurringOptions.find(opt => opt.id === newTodo.recurringType)?.name || '반복 주기 선택'}
+                </Text>
+                <Text style={styles.dropdownIcon}>▼</Text>
+              </TouchableOpacity>
+              
+              {newTodo.recurringType === 'weekly' && (
+                <TouchableOpacity
+                  style={styles.recurringButton}
+                  onPress={() => setShowWeeklyDaysModal(true)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.recurringButtonText}>
+                    {newTodo.recurringDays.length > 0 
+                      ? `${newTodo.recurringDays.length}개 요일 선택됨`
+                      : '반복 요일 선택'}
+                  </Text>
+                  <Text style={styles.dropdownIcon}>▼</Text>
+                </TouchableOpacity>
+              )}
+              
+              <View style={styles.recurringInfo}>
+                <View style={styles.recurringInfoContent}>
+                  <Ionicons name="repeat-outline" size={16} color="#34B79F" />
+                  <Text style={styles.recurringInfoText}>
+                    {newTodo.recurringType === 'daily' && '매일 반복됩니다'}
+                    {newTodo.recurringType === 'weekly' && '선택한 요일마다 반복됩니다'}
+                    {newTodo.recurringType === 'monthly' && '선택한 날짜의 날짜마다 반복됩니다'}
+                  </Text>
+                </View>
+              </View>
+            </>
           )}
         </View>
 
@@ -302,15 +423,18 @@ export const GuardianTodoAddScreen = () => {
           
           {newTodo.reminderEnabled && (
             <View style={styles.reminderInfo}>
-              <Text style={styles.reminderText}>
-                💡 설정한 시간 10분 전에 어르신께 알림이 전송됩니다.
-              </Text>
+              <View style={styles.reminderInfoContent}>
+                <Ionicons name="notifications-outline" size={16} color="#B8860B" />
+                <Text style={styles.reminderText}>
+                  설정한 시간 10분 전에 어르신께 알림이 전송됩니다.
+                </Text>
+              </View>
             </View>
           )}
         </View>
 
         {/* 하단 여백 */}
-        <View style={{ height: 120 + Math.max(insets.bottom, 10) }} />
+        <View style={{ height: 20 }} />
       </ScrollView>
 
       {/* 저장 버튼 */}
@@ -329,44 +453,6 @@ export const GuardianTodoAddScreen = () => {
         </TouchableOpacity>
       </View>
 
-      {/* 카테고리 선택 모달 */}
-      <Modal
-        visible={showCategoryModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowCategoryModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>카테고리 선택</Text>
-              <TouchableOpacity onPress={() => setShowCategoryModal(false)}>
-                <Text style={styles.modalCloseText}>✕</Text>
-              </TouchableOpacity>
-            </View>
-            
-            <ScrollView style={styles.modalBody}>
-              {categories.map((category) => (
-                <TouchableOpacity
-                  key={category.id}
-                  style={[
-                    styles.categoryOption,
-                    { borderLeftColor: category.color },
-                    newTodo.category === category.id && styles.categoryOptionSelected
-                  ]}
-                  onPress={() => {
-                    setNewTodo({ ...newTodo, category: category.id });
-                    setShowCategoryModal(false);
-                  }}
-                >
-                  <Text style={styles.categoryOptionText}>{category.name}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
-
       {/* 시간 선택 모달 */}
       <Modal
         visible={showTimeModal}
@@ -378,7 +464,10 @@ export const GuardianTodoAddScreen = () => {
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>시간 선택</Text>
-              <TouchableOpacity onPress={() => setShowTimeModal(false)}>
+              <TouchableOpacity 
+                onPress={() => setShowTimeModal(false)}
+                style={{ padding: 4 }}
+              >
                 <Text style={styles.modalCloseText}>✕</Text>
               </TouchableOpacity>
             </View>
@@ -420,18 +509,22 @@ export const GuardianTodoAddScreen = () => {
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>반복 주기 선택</Text>
-              <TouchableOpacity onPress={() => setShowRecurringModal(false)}>
+              <TouchableOpacity 
+                onPress={() => setShowRecurringModal(false)}
+                style={{ padding: 4 }}
+              >
                 <Text style={styles.modalCloseText}>✕</Text>
               </TouchableOpacity>
             </View>
             
             <View style={styles.modalBody}>
-              {recurringOptions.map((option) => (
+              {recurringOptions.map((option, index) => (
                 <TouchableOpacity
                   key={option.id}
                   style={[
                     styles.recurringOption,
-                    newTodo.recurringType === option.id && styles.recurringOptionSelected
+                    newTodo.recurringType === option.id && styles.recurringOptionSelected,
+                    index === recurringOptions.length - 1 && styles.recurringOptionLast
                   ]}
                   onPress={() => {
                     setNewTodo({ ...newTodo, recurringType: option.id as 'daily' | 'weekly' | 'monthly' });
@@ -451,6 +544,140 @@ export const GuardianTodoAddScreen = () => {
         </View>
       </Modal>
 
+      {/* 날짜 선택 모달 */}
+      <Modal
+        visible={showDatePickerModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowDatePickerModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.calendarModalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>날짜 선택</Text>
+              <TouchableOpacity 
+                onPress={() => setShowDatePickerModal(false)}
+                style={{ padding: 4 }}
+              >
+                <Text style={styles.modalCloseText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.calendarContainer}>
+              <Calendar
+                onDayPress={(day) => {
+                  setNewTodo({ ...newTodo, date: day.dateString });
+                  setShowDatePickerModal(false);
+                }}
+                markedDates={{
+                  [newTodo.date]: { 
+                    selected: true, 
+                    selectedColor: '#34B79F',
+                    selectedTextColor: '#FFFFFF'
+                  }
+                }}
+                monthFormat={'yyyy년 M월'}
+                current={newTodo.date}
+                minDate={new Date().toISOString().split('T')[0]}
+                theme={{
+                  calendarBackground: '#FFFFFF',
+                  textSectionTitleColor: '#666666',
+                  selectedDayBackgroundColor: '#34B79F',
+                  selectedDayTextColor: '#FFFFFF',
+                  todayTextColor: '#34B79F',
+                  dayTextColor: '#333333',
+                  textDisabledColor: '#CCCCCC',
+                  dotColor: '#34B79F',
+                  selectedDotColor: '#FFFFFF',
+                  arrowColor: '#34B79F',
+                  monthTextColor: '#333333',
+                  textDayFontWeight: '500',
+                  textMonthFontWeight: 'bold',
+                  textDayHeaderFontWeight: '600',
+                  textDayFontSize: 16,
+                  textMonthFontSize: 18,
+                  textDayHeaderFontSize: 12,
+                }}
+                enableSwipeMonths={true}
+              />
+              
+              <TouchableOpacity
+                style={styles.todayButton}
+                onPress={() => {
+                  const today = new Date().toISOString().split('T')[0];
+                  setNewTodo({ ...newTodo, date: today });
+                  setShowDatePickerModal(false);
+                }}
+              >
+                <Ionicons name="today-outline" size={18} color="#34B79F" />
+                <Text style={styles.todayButtonText}>오늘</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 주간 반복 요일 선택 모달 */}
+      <Modal
+        visible={showWeeklyDaysModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowWeeklyDaysModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>반복 요일 선택</Text>
+              <TouchableOpacity 
+                onPress={() => setShowWeeklyDaysModal(false)}
+                style={{ padding: 4 }}
+              >
+                <Text style={styles.modalCloseText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.modalBody}>
+              {['월', '화', '수', '목', '금', '토', '일'].map((dayName, index) => {
+                const isSelected = newTodo.recurringDays.includes(index);
+                const isLast = index === ['월', '화', '수', '목', '금', '토', '일'].length - 1;
+                return (
+                  <TouchableOpacity
+                    key={index}
+                    style={[
+                      styles.weeklyDayOption,
+                      isSelected && styles.weeklyDayOptionSelected,
+                      isLast && styles.weeklyDayOptionLast
+                    ]}
+                    onPress={() => {
+                      const updatedDays = isSelected
+                        ? newTodo.recurringDays.filter(d => d !== index)
+                        : [...newTodo.recurringDays, index];
+                      setNewTodo({ ...newTodo, recurringDays: updatedDays });
+                    }}
+                  >
+                    <Text style={[
+                      styles.weeklyDayOptionText,
+                      isSelected && styles.weeklyDayOptionTextSelected
+                    ]}>
+                      {dayName}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            
+            <View style={styles.modalFooter}>
+              <TouchableOpacity
+                style={styles.modalFooterButton}
+                onPress={() => setShowWeeklyDaysModal(false)}
+              >
+                <Text style={styles.modalFooterButtonText}>완료</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {/* 하단 네비게이션 바 */}
       <BottomNavigationBar />
     </View>
@@ -460,7 +687,7 @@ export const GuardianTodoAddScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F5F5',
+    backgroundColor: '#FFFFFF',
   },
   content: {
     flex: 1,
@@ -469,17 +696,17 @@ const styles = StyleSheet.create({
   
   // 입력 섹션
   inputSection: {
-    marginBottom: 24,
+    marginBottom: 28,
   },
   inputLabel: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '600',
     color: '#333333',
     marginBottom: 12,
   },
   titleInput: {
     borderWidth: 1,
-    borderColor: '#E0E0E0',
+    borderColor: '#E8E8E8',
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 14,
@@ -489,7 +716,7 @@ const styles = StyleSheet.create({
   },
   descriptionInput: {
     borderWidth: 1,
-    borderColor: '#E0E0E0',
+    borderColor: '#E8E8E8',
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 14,
@@ -506,11 +733,24 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#E0E0E0',
+    borderColor: '#E8E8E8',
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 14,
     backgroundColor: '#FFFFFF',
+  },
+  categoryButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  categoryIconBadge: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    marginRight: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   categoryButtonText: {
     fontSize: 16,
@@ -522,11 +762,16 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#E0E0E0',
+    borderColor: '#E8E8E8',
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 14,
     backgroundColor: '#FFFFFF',
+  },
+  timeButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
   },
   timeButtonText: {
     fontSize: 16,
@@ -542,17 +787,28 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   
-  // 날짜 표시
-  dateDisplay: {
-    backgroundColor: '#E8F5E8',
+  // 날짜 선택 버튼
+  dateButton: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E8E8E8',
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 14,
+    backgroundColor: '#FFFFFF',
   },
-  dateText: {
+  dateButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  dateButtonText: {
     fontSize: 16,
-    color: '#34B79F',
-    fontWeight: '600',
+    color: '#333333',
+    fontWeight: '500',
+    marginLeft: 12,
   },
   
   // 토글 섹션
@@ -588,16 +844,33 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#E0E0E0',
+    borderColor: '#E8E8E8',
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 14,
     backgroundColor: '#FFFFFF',
+    marginTop: 8,
   },
   recurringButtonText: {
     fontSize: 16,
     color: '#333333',
     fontWeight: '500',
+  },
+  recurringInfo: {
+    backgroundColor: '#E6F7F4',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 8,
+  },
+  recurringInfoContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  recurringInfoText: {
+    fontSize: 13,
+    color: '#34B79F',
+    lineHeight: 18,
   },
   
   // 알림 정보
@@ -607,10 +880,16 @@ const styles = StyleSheet.create({
     padding: 12,
     marginTop: 8,
   },
+  reminderInfoContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   reminderText: {
     fontSize: 14,
     color: '#B8860B',
     lineHeight: 20,
+    flex: 1,
   },
   
   // 하단 버튼
@@ -618,18 +897,18 @@ const styles = StyleSheet.create({
     padding: 20,
     backgroundColor: '#FFFFFF',
     borderTopWidth: 1,
-    borderTopColor: '#E0E0E0',
+    borderTopColor: '#E8E8E8',
   },
   saveButton: {
     backgroundColor: '#34B79F',
     borderRadius: 16,
     paddingVertical: 16,
     alignItems: 'center',
-    shadowColor: '#34B79F',
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
+    shadowOpacity: 0.15,
     shadowRadius: 8,
-    elevation: 6,
+    elevation: 4,
   },
   saveButtonText: {
     color: '#FFFFFF',
@@ -661,37 +940,134 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
+    borderBottomColor: '#E8E8E8',
   },
   modalTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '700',
     color: '#333333',
   },
   modalCloseText: {
-    fontSize: 18,
-    color: '#666666',
-    fontWeight: 'bold',
+    fontSize: 24,
+    color: '#999999',
+    fontWeight: 'normal',
+    lineHeight: 24,
   },
   modalBody: {
     maxHeight: 300,
   },
   
-  // 카테고리 옵션
-  categoryOption: {
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
-    borderLeftWidth: 4,
+  // 카테고리 옵션 (인라인 그리드)
+  categoryGridInline: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    justifyContent: 'center',
   },
-  categoryOptionSelected: {
-    backgroundColor: '#F0FFF0',
+  categoryCardInline: {
+    width: '31%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 12,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#F0F0F0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
   },
-  categoryOptionText: {
-    fontSize: 16,
-    color: '#333333',
+  categoryCardInlineSelected: {
+    borderColor: '#34B79F',
+    backgroundColor: '#F0FDFA',
+    shadowColor: '#34B79F',
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  categoryCardIconContainerInline: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  categoryCardTextInline: {
+    fontSize: 13,
+    color: '#666666',
     fontWeight: '500',
+    textAlign: 'center',
+  },
+  categoryCardTextInlineSelected: {
+    color: '#34B79F',
+    fontWeight: '600',
+  },
+  categoryCardInlineDisabled: {
+    width: '31%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#F0F0F0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+    overflow: 'hidden',
+  },
+  decorativeCharacterImage: {
+    width: 75,
+    height: 75,
+  },
+  
+  // 카테고리 옵션 (모달용)
+  categoryGridContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    padding: 16,
+    justifyContent: 'space-between',
+  },
+  categoryCard: {
+    width: '48%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 12,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#F0F0F0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  categoryCardSelected: {
+    borderColor: '#34B79F',
+    backgroundColor: '#F0FDFA',
+    shadowColor: '#34B79F',
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  categoryCardIconContainer: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  categoryCardText: {
+    fontSize: 15,
+    color: '#333333',
+    fontWeight: '600',
+    textAlign: 'center',
   },
   
   // 시간 옵션
@@ -724,6 +1100,9 @@ const styles = StyleSheet.create({
   recurringOptionSelected: {
     backgroundColor: '#E6F7F4',
   },
+  recurringOptionLast: {
+    borderBottomWidth: 0,
+  },
   recurringOptionText: {
     fontSize: 16,
     color: '#333333',
@@ -732,5 +1111,81 @@ const styles = StyleSheet.create({
   recurringOptionTextSelected: {
     color: '#34B79F',
     fontWeight: '600',
+  },
+  
+  // 주간 반복 요일 옵션
+  weeklyDayOption: {
+    flexDirection: 'row',
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+    alignItems: 'center',
+  },
+  weeklyDayOptionSelected: {
+    backgroundColor: '#E6F7F4',
+  },
+  weeklyDayOptionLast: {
+    borderBottomWidth: 0,
+  },
+  weeklyDayOptionText: {
+    fontSize: 16,
+    color: '#333333',
+    fontWeight: '500',
+  },
+  weeklyDayOptionTextSelected: {
+    color: '#34B79F',
+    fontWeight: '600',
+  },
+  
+  // 모달 푸터
+  modalFooter: {
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#F0F0F0',
+  },
+  modalFooterButton: {
+    backgroundColor: '#34B79F',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  modalFooterButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  
+  // 날짜 선택 캘린더 모달
+  calendarModalContent: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    width: '95%',
+    maxHeight: '80%',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    elevation: 8,
+    paddingBottom: 10,
+  },
+  calendarContainer: {
+    padding: 10,
+  },
+  todayButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#E6F7F4',
+    borderRadius: 12,
+    paddingVertical: 12,
+    marginTop: 10,
+    marginHorizontal: 10,
+  },
+  todayButtonText: {
+    fontSize: 16,
+    color: '#34B79F',
+    fontWeight: '600',
+    marginLeft: 8,
   },
 });
