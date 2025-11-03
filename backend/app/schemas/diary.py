@@ -38,6 +38,7 @@ class DiaryResponse(BaseModel):
     status: DiaryStatus
     created_at: datetime
     updated_at: datetime
+    comment_count: int = 0  # 댓글 개수
     
     class Config:
         from_attributes = True

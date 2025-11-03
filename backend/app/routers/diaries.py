@@ -5,7 +5,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import and_
+from sqlalchemy import and_, func
 from typing import List, Optional
 from datetime import date as date_type
 from app.database import get_db
@@ -63,7 +63,46 @@ async def get_diaries(
         query = query.filter(Diary.date <= end_date)
     
     diaries = query.order_by(Diary.created_at.desc()).offset(skip).limit(limit).all()
-    return diaries
+    
+    # 댓글 개수 계산
+    if diaries:
+        diary_ids = [diary.diary_id for diary in diaries]
+        
+        # 각 다이어리의 댓글 개수를 한 번에 조회
+        comment_counts = db.query(
+            DiaryComment.diary_id,
+            func.count(DiaryComment.comment_id).label('count')
+        ).filter(
+            DiaryComment.diary_id.in_(diary_ids)
+        ).group_by(DiaryComment.diary_id).all()
+        
+        # 딕셔너리로 변환하여 빠른 조회
+        count_dict = {diary_id: count for diary_id, count in comment_counts}
+        
+        # 각 다이어리에 댓글 개수 추가하여 DiaryResponse 생성
+        result = []
+        for diary in diaries:
+            comment_count = count_dict.get(diary.diary_id, 0)
+            diary_dict = {
+                "diary_id": diary.diary_id,
+                "user_id": diary.user_id,
+                "author_id": diary.author_id,
+                "date": diary.date,
+                "title": diary.title,
+                "content": diary.content,
+                "mood": diary.mood,
+                "author_type": diary.author_type,
+                "is_auto_generated": diary.is_auto_generated,
+                "status": diary.status,
+                "created_at": diary.created_at,
+                "updated_at": diary.updated_at,
+                "comment_count": comment_count,
+            }
+            result.append(DiaryResponse(**diary_dict))
+        
+        return result
+    
+    return []
 
 
 @router.post("/", response_model=List[DiaryResponse])
@@ -131,7 +170,27 @@ async def create_diary(
     for diary in created_diaries:
         db.refresh(diary)
     
-    return created_diaries
+    # DiaryResponse 생성 (새로 생성된 다이어리는 댓글이 없으므로 comment_count = 0)
+    result = []
+    for diary in created_diaries:
+        diary_dict = {
+            "diary_id": diary.diary_id,
+            "user_id": diary.user_id,
+            "author_id": diary.author_id,
+            "date": diary.date,
+            "title": diary.title,
+            "content": diary.content,
+            "mood": diary.mood,
+            "author_type": diary.author_type,
+            "is_auto_generated": diary.is_auto_generated,
+            "status": diary.status,
+            "created_at": diary.created_at,
+            "updated_at": diary.updated_at,
+            "comment_count": 0,  # 새로 생성된 다이어리는 댓글이 없음
+        }
+        result.append(DiaryResponse(**diary_dict))
+    
+    return result
 
 
 @router.get("/{diary_id}", response_model=DiaryResponse)
@@ -150,12 +209,12 @@ async def get_diary(
         raise HTTPException(status_code=404, detail="일기를 찾을 수 없습니다.")
     
     # 권한 확인
+    has_permission = False
     if diary.user_id == current_user.user_id:
         # 본인의 일기
-        return diary
-    
-    # 보호자인 경우: 연결된 어르신의 일기인지 확인
-    if current_user.role == UserRole.CAREGIVER:
+        has_permission = True
+    elif current_user.role == UserRole.CAREGIVER:
+        # 보호자인 경우: 연결된 어르신의 일기인지 확인
         connection = db.query(UserConnection).filter(
             and_(
                 UserConnection.caregiver_id == current_user.user_id,
@@ -165,12 +224,37 @@ async def get_diary(
         ).first()
         
         if connection:
-            return diary
+            has_permission = True
     
-    raise HTTPException(
-        status_code=403,
-        detail="해당 일기를 조회할 권한이 없습니다."
-    )
+    if not has_permission:
+        raise HTTPException(
+            status_code=403,
+            detail="해당 일기를 조회할 권한이 없습니다."
+        )
+    
+    # 댓글 개수 계산
+    comment_count = db.query(func.count(DiaryComment.comment_id)).filter(
+        DiaryComment.diary_id == diary_id
+    ).scalar() or 0
+    
+    # DiaryResponse 생성
+    diary_dict = {
+        "diary_id": diary.diary_id,
+        "user_id": diary.user_id,
+        "author_id": diary.author_id,
+        "date": diary.date,
+        "title": diary.title,
+        "content": diary.content,
+        "mood": diary.mood,
+        "author_type": diary.author_type,
+        "is_auto_generated": diary.is_auto_generated,
+        "status": diary.status,
+        "created_at": diary.created_at,
+        "updated_at": diary.updated_at,
+        "comment_count": comment_count,
+    }
+    
+    return DiaryResponse(**diary_dict)
 
 
 @router.put("/{diary_id}", response_model=DiaryResponse)
@@ -214,7 +298,29 @@ async def update_diary(
     db.commit()
     db.refresh(diary)
     
-    return diary
+    # 댓글 개수 계산
+    comment_count = db.query(func.count(DiaryComment.comment_id)).filter(
+        DiaryComment.diary_id == diary_id
+    ).scalar() or 0
+    
+    # DiaryResponse 생성
+    diary_dict = {
+        "diary_id": diary.diary_id,
+        "user_id": diary.user_id,
+        "author_id": diary.author_id,
+        "date": diary.date,
+        "title": diary.title,
+        "content": diary.content,
+        "mood": diary.mood,
+        "author_type": diary.author_type,
+        "is_auto_generated": diary.is_auto_generated,
+        "status": diary.status,
+        "created_at": diary.created_at,
+        "updated_at": diary.updated_at,
+        "comment_count": comment_count,
+    }
+    
+    return DiaryResponse(**diary_dict)
 
 
 @router.delete("/{diary_id}")
