@@ -13,7 +13,7 @@
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/grandby-logo.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
@@ -54,7 +54,7 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/pushLogo96.png",
+          "icon": "./assets/haruPushLogo.png",
           "color": "#ffffff",
           "sounds": [],
           "modes": [
