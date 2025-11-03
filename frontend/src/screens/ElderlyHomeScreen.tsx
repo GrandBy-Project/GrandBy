@@ -12,6 +12,7 @@ import {
   Platform,
   useWindowDimensions,
   Animated,
+  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../store/authStore';
@@ -291,6 +292,27 @@ export const ElderlyHomeScreen = () => {
       'other': '기타',
     };
     return categoryMap[category] || '기타';
+  };
+
+  // 전화 앱으로 연결 (Android 대상)
+  const dialPhoneNumber = async (rawNumber?: string) => {
+    try {
+      if (!rawNumber) {
+        show('연락처 없음', '이 보호자에게 등록된 전화번호가 없습니다.');
+        return;
+      }
+      const sanitized = rawNumber.replace(/[^\d+]/g, '');
+      const url = `tel:${sanitized}`;
+      const supported = await Linking.canOpenURL(url);
+      if (!supported) {
+        show('실패', '이 기기에서 전화를 걸 수 없습니다.');
+        return;
+      }
+      await Linking.openURL(url);
+    } catch (error) {
+      console.error('전화 앱 열기 실패:', error);
+      show('오류', '전화 앱을 열 수 없습니다.');
+    }
   };
 
   // TODO 완료 처리
@@ -875,7 +897,6 @@ export const ElderlyHomeScreen = () => {
                       {caregiver.name}
                     </Text>
                     <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
-                      <Ionicons name="call-outline" size={14} color="#999" style={{ marginRight: 4 }} />
                       <Text 
                         style={[styles.metricLabel, { fontSize: 14 }, fontSizeLevel >= 1 && styles.metricLabelLarge]}
                         numberOfLines={1}
@@ -886,24 +907,20 @@ export const ElderlyHomeScreen = () => {
                     </View>
                   </View>
                   <View style={{ marginLeft: 8, alignItems: 'center', justifyContent: 'center' }}>
-                    <View 
-                      style={{ 
-                        width: 24,
-                        height: 24,
-                        borderRadius: 12,
-                        backgroundColor: '#E8F5F3',
+                    <TouchableOpacity
+                      onPress={() => dialPhoneNumber(caregiver.phone_number)}
+                      activeOpacity={0.7}
+                      style={{
+                        width: 32,
+                        height: 32,
+                        borderRadius: 16,
+                        backgroundColor: '#34B79F',
                         alignItems: 'center',
                         justifyContent: 'center',
                       }}
                     >
-                      <Animated.View 
-                        style={{
-                          transform: [{ scale: pulseAnim }],
-                        }}
-                      >
-                        <Ionicons name="heart" size={14} color="#FF6B9D" />
-                      </Animated.View>
-                    </View>
+                      <Ionicons name="call" size={16} color="#FFFFFF" />
+                    </TouchableOpacity>
                   </View>
                 </View>
               ))}
