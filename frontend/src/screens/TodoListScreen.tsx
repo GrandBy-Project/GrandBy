@@ -8,7 +8,6 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Alert,
   Animated,
   ActivityIndicator,
 } from 'react-native';
@@ -19,6 +18,7 @@ import { Colors } from '../constants/Colors';
 import * as todoApi from '../api/todo';
 import { TokenManager } from '../api/client';
 import { useFontSizeStore } from '../store/fontSizeStore';
+import { useAlert } from '../components/GlobalAlertProvider';
 
 interface TodoItem {
   id: string;
@@ -36,6 +36,7 @@ export const TodoListScreen = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { fontSizeLevel } = useFontSizeStore();
+  const { show } = useAlert();
   const [showSuccessAnimation, setShowSuccessAnimation] = useState(false);
   const [completedTodoTitle, setCompletedTodoTitle] = useState('');
   const [fadeAnim] = useState(new Animated.Value(0));
@@ -72,7 +73,7 @@ export const TodoListScreen = () => {
       setTodos(mappedTodos);
     } catch (error: any) {
       console.error('TODO 목록 불러오기 실패:', error);
-      Alert.alert('오류', '할 일 목록을 불러오지 못했습니다.');
+      show('오류', '할 일 목록을 불러오지 못했습니다.');
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -164,7 +165,7 @@ export const TodoListScreen = () => {
       }
     } catch (error: any) {
       console.error('TODO 상태 변경 실패:', error);
-      Alert.alert('오류', '할 일 상태를 변경하지 못했습니다.');
+      show('오류', '할 일 상태를 변경하지 못했습니다.');
     }
   };
 
@@ -591,7 +592,7 @@ export const TodoListScreen = () => {
         )}
 
         {/* 하단 여백 (네비게이션 바 공간 확보) */}
-        <View style={[styles.bottomSpacer, { height: 100 + Math.max(insets.bottom, 10) }]} />
+        <View style={{ height: 20 }} />
           </>
         )}
       </ScrollView>

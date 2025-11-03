@@ -7,6 +7,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 interface FontSizeState {
   fontSizeLevel: number; // 0=작게, 1=크게(기본), 2=더크게
+  
   setFontSizeLevel: (level: number) => void;
   toggleFontSize: () => void;
   getFontSizeText: () => string;
