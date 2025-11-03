@@ -54,7 +54,7 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/icon.png",
+          "icon": "./assets/pushLogo96.png",
           "color": "#ffffff",
           "sounds": [],
           "modes": [
