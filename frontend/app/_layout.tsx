@@ -90,7 +90,6 @@ export default function RootLayout() {
         <Stack.Screen name="register" />
         <Stack.Screen name="home" />
         <Stack.Screen name="mypage" />
-        <Stack.Screen name="settings" />
         <Stack.Screen name="todos" />
         <Stack.Screen name="todo-detail" />
         <Stack.Screen name="todo-write" />
