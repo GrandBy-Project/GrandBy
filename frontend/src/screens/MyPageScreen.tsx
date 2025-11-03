@@ -1,7 +1,7 @@
 /**
  * 마이페이지 화면 (어르신/보호자 공통)
  */
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,11 @@ import {
   Alert,
   Image,
   ActivityIndicator,
+  Switch,
+  Animated,
+  LayoutAnimation,
+  Platform,
+  UIManager,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -28,6 +33,162 @@ export const MyPageScreen = () => {
   const insets = useSafeAreaInsets();
   const { fontSizeLevel } = useFontSizeStore();
   const [isUploading, setIsUploading] = useState(false);
+  const [isNotificationExpanded, setIsNotificationExpanded] = useState(false);
+  const slideAnim = useRef(new Animated.Value(0)).current;
+
+  // Android에서 LayoutAnimation 활성화
+  if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+    UIManager.setLayoutAnimationEnabledExperimental(true);
+  }
+
+  // 알림 설정 상태 관리
+  const [notificationSettings, setNotificationSettings] = useState({
+    push_notification_enabled: true,
+    push_todo_reminder_enabled: true,
+    push_todo_incomplete_enabled: true,
+    push_todo_created_enabled: true,
+    push_diary_enabled: true,
+    push_call_enabled: true,
+    push_connection_enabled: true,
+  });
+
+  // 알림 설정 로드
+  useEffect(() => {
+    loadNotificationSettings();
+  }, []);
+
+  const loadNotificationSettings = async () => {
+    try {
+      const response = await apiClient.get('/api/users/settings');
+      if (response.data) {
+        setNotificationSettings(prev => ({
+          ...prev,
+          ...response.data,
+        }));
+        console.log('✅ 알림 설정 로드 성공:', response.data);
+      }
+    } catch (error: any) {
+      console.error('알림 설정 로드 실패:', error);
+    }
+  };
+
+  const updateNotificationSetting = async (key: string, value: boolean) => {
+    // 먼저 로컬 상태 업데이트
+    setNotificationSettings(prev => ({ ...prev, [key]: value }));
+    
+    // 백엔드에 설정 저장
+    try {
+      await apiClient.put('/api/users/settings', {
+        [key]: value,
+      });
+      console.log('✅ 알림 설정 저장 성공:', key, value);
+    } catch (error: any) {
+      console.error('알림 설정 저장 실패:', error);
+      
+      // 실패 시 이전 값으로 되돌리기
+      setNotificationSettings(prev => ({ ...prev, [key]: !value }));
+      
+      // 사용자에게 알림
+      Alert.alert(
+        '설정 저장 실패', 
+        '설정을 저장할 수 없습니다. 네트워크 연결을 확인해주세요.',
+        [{ text: '확인' }]
+      );
+    }
+  };
+
+  // 사용자 역할에 따른 알림 설정 필터링
+  const getNotificationSettingsList = () => {
+    const allSettings = [
+      {
+        id: 'push_notification_enabled',
+        title: '푸시 알림 전체',
+        description: '모든 푸시 알림을 켜거나 끕니다',
+        value: notificationSettings.push_notification_enabled,
+        roles: [UserRole.ELDERLY, UserRole.CAREGIVER],
+      },
+      {
+        id: 'push_todo_reminder_enabled',
+        title: '할 일 리마인더',
+        description: '할 일 시작 10분 전 알림',
+        value: notificationSettings.push_todo_reminder_enabled,
+        disabled: !notificationSettings.push_notification_enabled,
+        roles: [UserRole.ELDERLY],
+      },
+      {
+        id: 'push_todo_incomplete_enabled',
+        title: '미완료 할 일 알림',
+        description: '매일 밤 9시 미완료 할 일 알림',
+        value: notificationSettings.push_todo_incomplete_enabled,
+        disabled: !notificationSettings.push_notification_enabled,
+        roles: [UserRole.ELDERLY],
+      },
+      {
+        id: 'push_todo_created_enabled',
+        title: '새 할 일 생성 알림',
+        description: '보호자가 새 할 일을 추가할 때 알림',
+        value: notificationSettings.push_todo_created_enabled,
+        disabled: !notificationSettings.push_notification_enabled,
+        roles: [UserRole.ELDERLY],
+      },
+      {
+        id: 'push_diary_enabled',
+        title: '일기 생성 알림',
+        description: 'AI 전화 후 일기가 생성될 때 알림',
+        value: notificationSettings.push_diary_enabled,
+        disabled: !notificationSettings.push_notification_enabled,
+        roles: [UserRole.CAREGIVER],
+      },
+      {
+        id: 'push_call_enabled',
+        title: 'AI 전화 완료 알림',
+        description: 'AI 전화가 완료될 때 알림',
+        value: notificationSettings.push_call_enabled,
+        disabled: !notificationSettings.push_notification_enabled,
+        roles: [UserRole.ELDERLY],
+      },
+      {
+        id: 'push_connection_enabled',
+        title: '연결 요청/수락 알림',
+        description: '보호자-어르신 연결 관련 알림',
+        value: notificationSettings.push_connection_enabled,
+        disabled: !notificationSettings.push_notification_enabled,
+        roles: [UserRole.ELDERLY, UserRole.CAREGIVER],
+      },
+    ];
+
+    return allSettings.filter(setting => 
+      setting.roles.includes(user?.role as UserRole)
+    );
+  };
+
+  const notificationSettingsList = getNotificationSettingsList();
+
+  // 알림 설정 펼침/접힘 토글
+  const toggleNotificationExpanded = () => {
+    const toValue = isNotificationExpanded ? 0 : 1;
+    
+    // LayoutAnimation으로 부드러운 전환 효과
+    LayoutAnimation.configureNext({
+      duration: 300,
+      create: {
+        type: LayoutAnimation.Types.easeInEaseOut,
+        property: LayoutAnimation.Properties.opacity,
+      },
+      update: {
+        type: LayoutAnimation.Types.easeInEaseOut,
+      },
+    });
+
+    // 슬라이드 애니메이션
+    Animated.timing(slideAnim, {
+      toValue,
+      duration: 300,
+      useNativeDriver: true,
+    }).start();
+
+    setIsNotificationExpanded(!isNotificationExpanded);
+  };
 
   // 프로필 이미지 URL 가져오기
   const getProfileImageUrl = () => {
@@ -432,7 +593,10 @@ export const MyPageScreen = () => {
 
         {/* 개인정보 관리 */}
         <View style={styles.settingsSection}>
-          <Text style={styles.sectionTitle}>개인정보 관리</Text>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionIcon}>⚙️</Text>
+            <Text style={styles.sectionTitle}>개인정보 관리</Text>
+          </View>
           <View style={styles.settingsList}>
             {personalItems.map((item) => {
               const IconComponent = item.iconLibrary === 'MaterialCommunityIcons' ? MaterialCommunityIcons : MaterialIcons;
@@ -459,9 +623,128 @@ export const MyPageScreen = () => {
           </View>
         </View>
 
+        {/* 알림 설정 */}
+        <View style={styles.settingsSection}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionIcon}>🔔</Text>
+            <Text style={styles.sectionTitle}>알림 설정</Text>
+          </View>
+          <View style={styles.settingsList}>
+            {/* 푸시 알림 전체 토글 */}
+            {notificationSettingsList.filter(setting => setting.id === 'push_notification_enabled').map((setting) => (
+              <View key={setting.id} style={styles.settingItem}>
+                <TouchableOpacity
+                  style={styles.settingLeft}
+                  onPress={toggleNotificationExpanded}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.settingTitle}>
+                    {setting.title}
+                  </Text>
+                  {setting.description && (
+                    <Text style={styles.settingDescription}>
+                      {setting.description}
+                    </Text>
+                  )}
+                  <Text style={styles.expandHint}>
+                    {isNotificationExpanded ? '상세 설정 접기' : '상세 설정 보기'}
+                  </Text>
+                </TouchableOpacity>
+                <View style={styles.settingRight}>
+                  <Switch
+                    value={setting.value}
+                    onValueChange={(value) => updateNotificationSetting(setting.id, value)}
+                    trackColor={{ false: '#E5E5E7', true: '#34B79F' }}
+                    thumbColor={setting.value ? '#FFFFFF' : '#FFFFFF'}
+                  />
+                  <TouchableOpacity
+                    onPress={toggleNotificationExpanded}
+                    activeOpacity={0.7}
+                    style={{ marginLeft: 8, padding: 4 }}
+                  >
+                    <Animated.View
+                      style={{
+                        transform: [{
+                          rotate: slideAnim.interpolate({
+                            inputRange: [0, 1],
+                            outputRange: ['0deg', '180deg'],
+                          }),
+                        }],
+                      }}
+                    >
+                      <Ionicons 
+                        name="chevron-down" 
+                        size={20} 
+                        color="#C7C7CC"
+                      />
+                    </Animated.View>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
+            
+            {/* 상세 알림 설정들 (접힘/펼침) */}
+            {isNotificationExpanded && (
+              <Animated.View
+                style={{
+                  opacity: slideAnim.interpolate({
+                    inputRange: [0, 0.5, 1],
+                    outputRange: [0, 0.5, 1],
+                  }),
+                  transform: [{
+                    translateY: slideAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [-10, 0],
+                    }),
+                  }],
+                }}
+              >
+                {notificationSettingsList
+                  .filter(setting => setting.id !== 'push_notification_enabled')
+                  .map((setting) => (
+                    <View key={setting.id} style={[styles.settingItem, styles.nestedSettingItem]}>
+                      <View style={styles.settingLeft}>
+                        <Text style={[
+                          styles.settingTitle,
+                          setting.disabled && styles.disabledText
+                        ]}>
+                          {setting.title}
+                        </Text>
+                        {setting.description && (
+                          <Text style={[
+                            styles.settingDescription,
+                            setting.disabled && styles.disabledText
+                          ]}>
+                            {setting.description}
+                          </Text>
+                        )}
+                      </View>
+                      <Switch
+                        value={setting.value}
+                        onValueChange={(value) => updateNotificationSetting(setting.id, value)}
+                        trackColor={{ false: '#E5E5E7', true: '#34B79F' }}
+                        thumbColor={setting.value ? '#FFFFFF' : '#FFFFFF'}
+                        disabled={setting.disabled}
+                      />
+                    </View>
+                  ))}
+                <View style={styles.nestedInfoBox}>
+                  <Ionicons name="information-circle-outline" size={16} color="#34B79F" />
+                  <Text style={styles.nestedInfoText}>
+                    각 알림을 개별적으로 켜거나 끌 수 있습니다
+                  </Text>
+                </View>
+              </Animated.View>
+            )}
+          </View>
+        </View>
+
         {/* 개인정보 보호 및 약관 */}
         <View style={styles.settingsSection}>
-          <Text style={styles.sectionTitle}>개인정보 보호 및 약관</Text>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionIcon}>🛡️</Text>
+            <Text style={styles.sectionTitle}>개인정보 보호 및 약관</Text>
+          </View>
           <View style={styles.settingsList}>
             {privacyItems.map((item) => (
               <TouchableOpacity
@@ -646,14 +929,22 @@ const styles = StyleSheet.create({
 
   // 설정 섹션
   settingsSection: {
-    marginBottom: 20,
+    marginBottom: 24,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    paddingHorizontal: 4,
+  },
+  sectionIcon: {
+    fontSize: 20,
+    marginRight: 8,
   },
   sectionTitle: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: 'bold',
     color: '#333333',
-    marginBottom: 16,
-    paddingHorizontal: 4,
   },
   settingsList: {
     backgroundColor: '#FFFFFF',
@@ -671,11 +962,42 @@ const styles = StyleSheet.create({
     padding: 20,
     borderBottomWidth: 1,
     borderBottomColor: '#F0F0F0',
+    minHeight: 60, // 터치 영역 확보
   },
   settingLeft: {
+    flex: 1,
+  },
+  settingRight: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  nestedSettingItem: {
+    paddingLeft: 40, // 들여쓰기로 상세 설정임을 표시
+    backgroundColor: '#FAFAFA',
+  },
+  expandHint: {
+    fontSize: 12,
+    color: '#34B79F',
+    marginTop: 6,
+    fontWeight: '500',
+  },
+  nestedInfoBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    paddingLeft: 40,
+    backgroundColor: '#F0F9F7',
+    borderLeftWidth: 3,
+    borderLeftColor: '#34B79F',
+    marginTop: 4,
+    marginHorizontal: 0,
+  },
+  nestedInfoText: {
+    fontSize: 13,
+    color: '#34B79F',
+    marginLeft: 8,
     flex: 1,
+    lineHeight: 18,
   },
   settingIconContainer: {
     width: 44,
@@ -697,6 +1019,11 @@ const styles = StyleSheet.create({
   settingDescription: {
     fontSize: 14,
     color: '#666666',
+    marginTop: 4,
+    lineHeight: 18,
+  },
+  disabledText: {
+    color: '#999999',
   },
 
   // 로그아웃 섹션

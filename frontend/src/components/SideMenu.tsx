@@ -119,15 +119,6 @@ export const SideMenu: React.FC<SideMenuProps> = ({ visible, onClose }) => {
         handleClose();
       },
     },
-    {
-      id: 'settings',
-      iconName: 'settings-outline' as keyof typeof Ionicons.glyphMap,
-      title: '설정',
-      onPress: () => {
-        router.push('/settings');
-        handleClose();
-      },
-    },
   ];
 
   // 순수 비율 기반 동적 계산
