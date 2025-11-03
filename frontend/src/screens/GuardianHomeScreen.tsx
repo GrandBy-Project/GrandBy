@@ -112,6 +112,28 @@ export const GuardianHomeScreen = () => {
     }
   };
 
+  // 안부전화: 전화 앱으로 연결 (Android)
+  const dialPhoneNumber = async (rawNumber?: string) => {
+    try {
+      if (!rawNumber) {
+        show('연락처 없음', '어르신의 전화번호가 등록되어 있지 않습니다.');
+        return;
+      }
+      const { Linking } = await import('react-native');
+      const sanitized = rawNumber.replace(/[^\d+]/g, '');
+      const url = `tel:${sanitized}`;
+      const supported = await Linking.canOpenURL(url);
+      if (!supported) {
+        show('실패', '이 기기에서 전화를 걸 수 없습니다.');
+        return;
+      }
+      await Linking.openURL(url);
+    } catch (error) {
+      console.error('전화 앱 열기 실패:', error);
+      show('오류', '전화 앱을 열 수 없습니다.');
+    }
+  };
+
   const handleLogout = async () => {
     show(
       '로그아웃',
@@ -179,9 +201,13 @@ export const GuardianHomeScreen = () => {
               <Text style={styles.elderlyStatLabel}>완료율</Text>
             </View>
             <View style={styles.elderlyStatDivider} />
-            <TouchableOpacity style={styles.elderlyStat}>
-              <Ionicons name="call" size={20} color="#FF3B30" />
-              <Text style={styles.elderlyStatLabel}>긴급연락</Text>
+            <TouchableOpacity 
+              style={styles.elderlyStat}
+              activeOpacity={0.7}
+              onPress={() => dialPhoneNumber(currentElderly.emergencyContact)}
+            >
+              <Ionicons name="call" size={20} color="#34B79F" />
+              <Text style={styles.elderlyStatLabel}>안부전화</Text>
             </TouchableOpacity>
           </View>
 
