@@ -997,6 +997,7 @@ async def update_push_token(
     
     - 앱 시작 시 자동으로 호출
     - Expo Push Token 저장
+    - 동일 토큰을 가진 다른 사용자의 토큰은 자동으로 정리 (중복 방지)
     """
     
     # FCM 토큰 또는 Expo Push Token 모두 허용
@@ -1018,17 +1019,55 @@ async def update_push_token(
             detail="유효하지 않은 푸시 토큰 형식입니다."
         )
     
+    # 🔧 B. 중복 토큰 정리: 동일한 토큰을 가진 다른 사용자의 토큰 제거
+    other_users_with_same_token = db.query(User).filter(
+        and_(
+            User.push_token == token_data.push_token,
+            User.user_id != current_user.user_id
+        )
+    ).all()
+    
+    for other_user in other_users_with_same_token:
+        logger.info(f"🔄 중복 토큰 정리: {other_user.user_id}의 토큰 제거 (동일 기기)")
+        other_user.push_token = None
+        other_user.push_token_updated_at = None
+    
+    # 현재 사용자 토큰 업데이트
     current_user.push_token = token_data.push_token
     current_user.push_token_updated_at = datetime.utcnow()
     
     db.commit()
     
-    logger.info(f"✅ 푸시 토큰 업데이트 완료: {current_user.user_id}")
+    logger.info(f"✅ 푸시 토큰 업데이트 완료: {current_user.user_id} (중복 {len(other_users_with_same_token)}개 정리됨)")
     
     return {
         "success": True,
         "message": "푸시 토큰이 업데이트되었습니다.",
         "updated_at": current_user.push_token_updated_at.isoformat()
+    }
+
+
+# ==================== 푸시 토큰 삭제 ====================
+@router.delete("/push-token")
+async def delete_push_token(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    푸시 알림 토큰 삭제 (로그아웃 시 호출)
+    
+    - 로그아웃 시 서버에서 푸시 토큰을 제거하여 더 이상 알림이 전송되지 않도록 함
+    """
+    current_user.push_token = None
+    current_user.push_token_updated_at = None
+    
+    db.commit()
+    
+    logger.info(f"✅ 푸시 토큰 삭제 완료: {current_user.user_id}")
+    
+    return {
+        "success": True,
+        "message": "푸시 토큰이 삭제되었습니다."
     }
 
 

@@ -29,9 +29,24 @@ export const login = async (data: LoginRequest): Promise<AuthResponse> => {
 };
 
 /**
+ * 푸시 토큰 삭제
+ */
+export const deletePushToken = async (): Promise<void> => {
+  try {
+    await apiClient.delete('/api/users/push-token');
+  } catch (error) {
+    // 토큰 삭제 실패해도 로그아웃은 진행 (에러 무시)
+    console.warn('푸시 토큰 삭제 실패:', error);
+  }
+};
+
+/**
  * 로그아웃
  */
 export const logout = async (): Promise<void> => {
+  // 🔧 A. 로그아웃 시 서버에서 푸시 토큰 삭제
+  await deletePushToken();
+  // 로컬 토큰 삭제
   await TokenManager.clearTokens();
 };
 
