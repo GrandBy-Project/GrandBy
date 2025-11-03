@@ -93,6 +93,7 @@ export default function RootLayout() {
         <Stack.Screen name="todos" />
         <Stack.Screen name="todo-detail" />
         <Stack.Screen name="todo-write" />
+        <Stack.Screen name="guardian-todo-add" />
         <Stack.Screen name="calendar" />
         <Stack.Screen name="ai-call" />
       </Stack>

@@ -10,7 +10,7 @@ from typing import List, Optional, Dict
 import uuid
 
 from app.models.todo import Todo, TodoStatus, CreatorType, RecurringType
-from app.models.user import User, UserRole
+from app.models.user import User, UserRole, UserConnection, ConnectionStatus
 from app.schemas.todo import (
     TodoCreate, 
     TodoUpdate, 
@@ -79,9 +79,24 @@ class TodoService:
         
         # 권한 및 creator_type 결정
         if creator.role == UserRole.CAREGIVER:
-            # 보호자는 어르신에게 TODO 할당 가능
+            # 보호자는 어르신에게 TODO 할당 가능 (연결 확인 필요)
+            connection = db.query(UserConnection).filter(
+                and_(
+                    UserConnection.caregiver_id == creator_id,
+                    UserConnection.elderly_id == todo_data.elderly_id,
+                    UserConnection.status == ConnectionStatus.ACTIVE
+                )
+            ).first()
+            
+            if not connection:
+                logger.error(f"❌ 연결되지 않은 어르신: {todo_data.elderly_id}")
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="해당 어르신과 연결되어 있지 않습니다."
+                )
+            
             creator_type_value = CreatorType.CAREGIVER
-            logger.info(f"✅ 보호자가 TODO 생성")
+            logger.info(f"✅ 보호자가 TODO 생성 (연결 확인 완료)")
         elif creator.role == UserRole.ELDERLY and creator.user_id == todo_data.elderly_id:
             # 어르신은 본인 일정만 생성 가능
             creator_type_value = CreatorType.ELDERLY
