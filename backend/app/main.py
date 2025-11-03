@@ -1410,19 +1410,25 @@ async def media_stream_handler(
                             event_name = result.get('event')
                             logger.debug(f"🔍 [결과 수신] event={event_name}, keys={list(result.keys())}")
                             
-                            # if event_name == 'soft_close_prompt':
-                            #     logger.info("🟡 소프트 클로징 트리거 수신")
                             
                             if event_name == 'max_time_warning':
                                 logger.info("⚠️ [MAX TIME WARNING] 최대 통화 시간 임박 감지")
                                 
-                                # 사용자나 AI가 말하는 중이면 대기
+                                # 1. AI TTS 출력 중인지 체크
                                 if rtzr_stt.is_bot_speaking:
                                     logger.info("⏳ [MAX TIME WARNING] AI 응답 중 - 완료까지 대기")
                                     while rtzr_stt.is_bot_speaking:
                                         await asyncio.sleep(0.1)
                                     # AI 응답 완료 후 추가 대기 (사용자가 응답할 시간)
                                     await asyncio.sleep(2.0)
+                                
+                                # 2. 사용자 발화 중인지 체크
+                                if rtzr_stt.is_user_speaking():
+                                    logger.info("⏳ [MAX TIME WARNING] 사용자 발화 중 - 완료까지 대기")
+                                    while rtzr_stt.is_user_speaking():
+                                        await asyncio.sleep(0.1)
+                                    # 사용자 발화 완료 후 추가 대기
+                                    await asyncio.sleep(0.5)
                                 
                                 # 종료 안내 멘트
                                 warning_message = "오늘 대화 시간이 다 되었어요. 잠시 후 통화가 마무리됩니다."
