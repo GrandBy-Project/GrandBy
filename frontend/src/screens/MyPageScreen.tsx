@@ -26,12 +26,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { UserRole } from '../types';
 import apiClient, { API_BASE_URL } from '../api/client';
 import { useFontSizeStore } from '../store/fontSizeStore';
+import { useResponsive, getResponsiveFontSize, getResponsivePadding, getResponsiveSize } from '../hooks/useResponsive';
 
 export const MyPageScreen = () => {
   const router = useRouter();
   const { user, logout, setUser } = useAuthStore();
   const insets = useSafeAreaInsets();
   const { fontSizeLevel } = useFontSizeStore();
+  const { scale } = useResponsive();
   const [isUploading, setIsUploading] = useState(false);
   const [isNotificationExpanded, setIsNotificationExpanded] = useState(false);
   const slideAnim = useRef(new Animated.Value(0)).current;
@@ -103,7 +105,7 @@ export const MyPageScreen = () => {
       {
         id: 'push_notification_enabled',
         title: '푸시 알림 전체',
-        description: '모든 푸시 알림을 켜거나 끕니다',
+        description: '모든 알림을 켜거나 끕니다',
         value: notificationSettings.push_notification_enabled,
         roles: [UserRole.ELDERLY, UserRole.CAREGIVER],
       },
@@ -473,7 +475,7 @@ export const MyPageScreen = () => {
       description: '이름, 전화번호 등 수정',
       iconName: 'account-edit' as const,
       iconLibrary: 'MaterialCommunityIcons' as const,
-      color: '#007AFF',
+      color: '#4bbcfb', // 파스텔 블루
       onPress: () => router.push('/profile-edit'),
     },
     {
@@ -482,17 +484,8 @@ export const MyPageScreen = () => {
       description: '계정 보안을 위한 비밀번호 변경',
       iconName: 'lock-reset' as const,
       iconLibrary: 'MaterialCommunityIcons' as const,
-      color: '#FF9500',
+      color: '#fb9a4b', // 파스텔 오렌지
       onPress: () => router.push('/change-password'),
-    },
-    {
-      id: 'account-delete',
-      title: '계정 삭제',
-      description: '계정을 완전히 삭제하기',
-      iconName: 'delete-forever' as const,
-      iconLibrary: 'MaterialIcons' as const,
-      color: '#FF3B30',
-      onPress: handleDeleteAccount,
     },
   ];
 
@@ -504,7 +497,7 @@ export const MyPageScreen = () => {
       description: '개인정보 수집 및 이용 방침',
       iconName: 'shield-checkmark' as const,
       iconLibrary: 'Ionicons' as const,
-      color: '#34C759',
+      color: '#83fb4b', // 파스텔 그린
       onPress: () => Alert.alert('개인정보 처리방침', '개인정보 처리방침을 확인할 수 있습니다.'),
     },
     {
@@ -513,10 +506,29 @@ export const MyPageScreen = () => {
       description: '서비스 이용약관',
       iconName: 'document-text' as const,
       iconLibrary: 'Ionicons' as const,
-      color: '#5856D6',
+      color: '#ce4bfb', // 파스텔 퍼플
       onPress: () => Alert.alert('이용약관', '서비스 이용약관을 확인할 수 있습니다.'),
     }
   ];
+
+  // 반응형 크기 계산
+  const sectionIconSize = getResponsiveSize(44, scale);
+  const sectionIconFontSize = getResponsiveFontSize(20, scale);
+  const sectionTitleFontSize = getResponsiveFontSize(18, scale);
+  const sectionHeaderMarginBottom = getResponsivePadding(12, scale);
+  const sectionPadding = getResponsivePadding(16, scale);
+  const sectionMarginBottom = getResponsivePadding(24, scale);
+  const sectionIconMarginRight = getResponsivePadding(12, scale);
+  
+  // 설정 아이템 반응형 크기
+  const settingIconSize = getResponsiveSize(44, scale);
+  const settingIconInnerSize = getResponsiveFontSize(20, scale);
+  const settingIconMarginRight = getResponsivePadding(16, scale);
+  const settingItemPadding = getResponsivePadding(20, scale);
+  const settingTitleFontSize = getResponsiveFontSize(16, scale);
+  const settingDescriptionFontSize = getResponsiveFontSize(14, scale);
+  const expandHintFontSize = getResponsiveFontSize(12, scale);
+  const nestedPaddingLeft = getResponsivePadding(40, scale);
 
   return (
     <View style={styles.container}>
@@ -578,7 +590,12 @@ export const MyPageScreen = () => {
           {/* 사용자 정보 리스트 */}
           <View style={styles.userInfoList}>
             {userInfoItems.map((item, index) => (
-              <View key={item.id} style={styles.userInfoItem}>
+              <TouchableOpacity
+                key={item.id}
+                style={styles.userInfoItem}
+                onPress={() => router.push('/profile-edit')}
+                activeOpacity={0.7}
+              >
                 <View style={styles.userInfoLeft}>
                   <View style={styles.userInfoIconContainer}>
                     <Ionicons name={item.iconName as any} size={20} color="#34B79F" />
@@ -586,16 +603,26 @@ export const MyPageScreen = () => {
                   <Text style={styles.userInfoLabel}>{item.label}</Text>
                 </View>
                 <Text style={styles.userInfoValue}>{item.value}</Text>
-              </View>
+              </TouchableOpacity>
             ))}
           </View>
         </View>
 
         {/* 개인정보 관리 */}
-        <View style={styles.settingsSection}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionIcon}>⚙️</Text>
-            <Text style={styles.sectionTitle}>개인정보 관리</Text>
+        <View style={[styles.settingsSection, { marginBottom: sectionMarginBottom }]}>
+          <View style={[styles.sectionHeader, { marginBottom: sectionHeaderMarginBottom }]}>
+            <View style={[
+              styles.sectionIconContainer,
+              { 
+                width: sectionIconSize,
+                height: sectionIconSize,
+                borderRadius: sectionIconSize / 2,
+                marginRight: sectionIconMarginRight,
+              }
+            ]}>
+              <Ionicons name="settings-outline" size={sectionIconFontSize} color="#34B79F" />
+            </View>
+            <Text style={[styles.sectionTitle, { fontSize: sectionTitleFontSize }]}>개인정보 관리</Text>
           </View>
           <View style={styles.settingsList}>
             {personalItems.map((item) => {
@@ -603,20 +630,29 @@ export const MyPageScreen = () => {
               return (
                 <TouchableOpacity
                   key={item.id}
-                  style={styles.settingItem}
+                  style={[styles.settingItem, { padding: settingItemPadding }]}
                   onPress={item.onPress}
                   activeOpacity={0.7}
                 >
                   <View style={styles.settingLeft}>
-                    <View style={[styles.settingIconContainer, { backgroundColor: item.color }]}>
-                      <IconComponent name={item.iconName as any} size={20} color="#FFFFFF" />
+                    <View style={[
+                      styles.settingIconContainer, 
+                      { 
+                        backgroundColor: item.color,
+                        width: settingIconSize,
+                        height: settingIconSize,
+                        borderRadius: settingIconSize / 2,
+                        marginRight: settingIconMarginRight,
+                      }
+                    ]}>
+                      <IconComponent name={item.iconName as any} size={settingIconInnerSize} color="#FFFFFF" />
                     </View>
                     <View style={styles.settingTextContainer}>
-                      <Text style={styles.settingTitle}>{item.title}</Text>
-                      <Text style={styles.settingDescription}>{item.description}</Text>
+                      <Text style={[styles.settingTitle, { fontSize: settingTitleFontSize }]}>{item.title}</Text>
+                      <Text style={[styles.settingDescription, { fontSize: settingDescriptionFontSize }]}>{item.description}</Text>
                     </View>
                   </View>
-                  <Ionicons name="chevron-forward" size={24} color="#C7C7CC" />
+                  <Ionicons name="chevron-forward" size={getResponsiveFontSize(24, scale)} color="#C7C7CC" />
                 </TouchableOpacity>
               );
             })}
@@ -624,32 +660,57 @@ export const MyPageScreen = () => {
         </View>
 
         {/* 알림 설정 */}
-        <View style={styles.settingsSection}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionIcon}>🔔</Text>
-            <Text style={styles.sectionTitle}>알림 설정</Text>
+        <View style={[styles.settingsSection, { marginBottom: sectionMarginBottom }]}>
+          <View style={[styles.sectionHeader, { marginBottom: sectionHeaderMarginBottom }]}>
+            <View style={[
+              styles.sectionIconContainer,
+              { 
+                width: sectionIconSize,
+                height: sectionIconSize,
+                borderRadius: sectionIconSize / 2,
+                marginRight: sectionIconMarginRight,
+              }
+            ]}>
+              <Ionicons name="notifications-outline" size={sectionIconFontSize} color="#34B79F" />
+            </View>
+            <Text style={[styles.sectionTitle, { fontSize: sectionTitleFontSize }]}>알림 설정</Text>
           </View>
           <View style={styles.settingsList}>
             {/* 푸시 알림 전체 토글 */}
             {notificationSettingsList.filter(setting => setting.id === 'push_notification_enabled').map((setting) => (
-              <View key={setting.id} style={styles.settingItem}>
-                <TouchableOpacity
-                  style={styles.settingLeft}
-                  onPress={toggleNotificationExpanded}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.settingTitle}>
-                    {setting.title}
-                  </Text>
-                  {setting.description && (
-                    <Text style={styles.settingDescription}>
-                      {setting.description}
+              <TouchableOpacity
+                key={setting.id}
+                style={[styles.settingItem, { padding: settingItemPadding }]}
+                onPress={toggleNotificationExpanded}
+                activeOpacity={0.7}
+              >
+                <View style={styles.settingLeft}>
+                  <View style={[
+                    styles.settingIconContainer,
+                    {
+                      backgroundColor: '#fbd54b', // 파스텔 민트
+                      width: settingIconSize,
+                      height: settingIconSize,
+                      borderRadius: settingIconSize / 2,
+                      marginRight: settingIconMarginRight,
+                    }
+                  ]}>
+                    <Ionicons name="notifications" size={settingIconInnerSize} color="#ffffff" />
+                  </View>
+                  <View style={styles.settingTextContainer}>
+                    <Text style={[styles.settingTitle, { fontSize: settingTitleFontSize }]} numberOfLines={1}>
+                      {setting.title}
                     </Text>
-                  )}
-                  <Text style={styles.expandHint}>
-                    {isNotificationExpanded ? '상세 설정 접기' : '상세 설정 보기'}
-                  </Text>
-                </TouchableOpacity>
+                    {setting.description && (
+                      <Text style={[styles.settingDescription, { fontSize: settingDescriptionFontSize }]} numberOfLines={1}>
+                        {setting.description}
+                      </Text>
+                    )}
+                    <Text style={[styles.expandHint, { fontSize: expandHintFontSize }]}>
+                      {isNotificationExpanded ? '상세 설정 접기' : '상세 설정 보기'}
+                    </Text>
+                  </View>
+                </View>
                 <View style={styles.settingRight}>
                   <Switch
                     value={setting.value}
@@ -660,27 +721,16 @@ export const MyPageScreen = () => {
                   <TouchableOpacity
                     onPress={toggleNotificationExpanded}
                     activeOpacity={0.7}
-                    style={{ marginLeft: 8, padding: 4 }}
+                    style={{ marginLeft: getResponsivePadding(8, scale), padding: getResponsivePadding(4, scale) }}
                   >
-                    <Animated.View
-                      style={{
-                        transform: [{
-                          rotate: slideAnim.interpolate({
-                            inputRange: [0, 1],
-                            outputRange: ['0deg', '180deg'],
-                          }),
-                        }],
-                      }}
-                    >
-                      <Ionicons 
-                        name="chevron-down" 
-                        size={20} 
-                        color="#C7C7CC"
-                      />
-                    </Animated.View>
+                    <Ionicons 
+                      name={isNotificationExpanded ? "chevron-down" : "chevron-forward"} 
+                      size={getResponsiveFontSize(20, scale)} 
+                      color="#C7C7CC"
+                    />
                   </TouchableOpacity>
                 </View>
-              </View>
+              </TouchableOpacity>
             ))}
             
             {/* 상세 알림 설정들 (접힘/펼침) */}
@@ -702,22 +752,33 @@ export const MyPageScreen = () => {
                 {notificationSettingsList
                   .filter(setting => setting.id !== 'push_notification_enabled')
                   .map((setting) => (
-                    <View key={setting.id} style={[styles.settingItem, styles.nestedSettingItem]}>
+                    <View key={setting.id} style={[
+                      styles.settingItem, 
+                      styles.nestedSettingItem,
+                      { 
+                        padding: settingItemPadding,
+                        paddingLeft: nestedPaddingLeft,
+                      }
+                    ]}>
                       <View style={styles.settingLeft}>
-                        <Text style={[
-                          styles.settingTitle,
-                          setting.disabled && styles.disabledText
-                        ]}>
-                          {setting.title}
-                        </Text>
-                        {setting.description && (
+                        <View style={styles.settingTextContainer}>
                           <Text style={[
-                            styles.settingDescription,
+                            styles.settingTitle,
+                            { fontSize: settingTitleFontSize },
                             setting.disabled && styles.disabledText
-                          ]}>
-                            {setting.description}
+                          ]} numberOfLines={1}>
+                            {setting.title}
                           </Text>
-                        )}
+                          {setting.description && (
+                            <Text style={[
+                              styles.settingDescription,
+                              { fontSize: settingDescriptionFontSize },
+                              setting.disabled && styles.disabledText
+                            ]} numberOfLines={2}>
+                              {setting.description}
+                            </Text>
+                          )}
+                        </View>
                       </View>
                       <Switch
                         value={setting.value}
@@ -728,41 +789,54 @@ export const MyPageScreen = () => {
                       />
                     </View>
                   ))}
-                <View style={styles.nestedInfoBox}>
-                  <Ionicons name="information-circle-outline" size={16} color="#34B79F" />
-                  <Text style={styles.nestedInfoText}>
-                    각 알림을 개별적으로 켜거나 끌 수 있습니다
-                  </Text>
-                </View>
               </Animated.View>
             )}
           </View>
         </View>
 
         {/* 개인정보 보호 및 약관 */}
-        <View style={styles.settingsSection}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionIcon}>🛡️</Text>
-            <Text style={styles.sectionTitle}>개인정보 보호 및 약관</Text>
+        <View style={[styles.settingsSection, { marginBottom: sectionMarginBottom }]}>
+          <View style={[styles.sectionHeader, { marginBottom: sectionHeaderMarginBottom }]}>
+            <View style={[
+              styles.sectionIconContainer,
+              { 
+                width: sectionIconSize,
+                height: sectionIconSize,
+                borderRadius: sectionIconSize / 2,
+                marginRight: sectionIconMarginRight,
+              }
+            ]}>
+              <Ionicons name="shield-checkmark-outline" size={sectionIconFontSize} color="#34B79F" />
+            </View>
+            <Text style={[styles.sectionTitle, { fontSize: sectionTitleFontSize }]}>개인정보 보호 및 약관</Text>
           </View>
           <View style={styles.settingsList}>
             {privacyItems.map((item) => (
               <TouchableOpacity
                 key={item.id}
-                style={styles.settingItem}
+                style={[styles.settingItem, { padding: settingItemPadding }]}
                 onPress={item.onPress}
                 activeOpacity={0.7}
               >
                 <View style={styles.settingLeft}>
-                  <View style={[styles.settingIconContainer, { backgroundColor: item.color }]}>
-                    <Ionicons name={item.iconName as any} size={20} color="#FFFFFF" />
+                  <View style={[
+                    styles.settingIconContainer, 
+                    { 
+                      backgroundColor: item.color,
+                      width: settingIconSize,
+                      height: settingIconSize,
+                      borderRadius: settingIconSize / 2,
+                      marginRight: settingIconMarginRight,
+                    }
+                  ]}>
+                    <Ionicons name={item.iconName as any} size={settingIconInnerSize} color="#FFFFFF" />
                   </View>
                   <View style={styles.settingTextContainer}>
-                    <Text style={styles.settingTitle}>{item.title}</Text>
-                    <Text style={styles.settingDescription}>{item.description}</Text>
+                    <Text style={[styles.settingTitle, { fontSize: settingTitleFontSize }]}>{item.title}</Text>
+                    <Text style={[styles.settingDescription, { fontSize: settingDescriptionFontSize }]}>{item.description}</Text>
                   </View>
                 </View>
-                <Ionicons name="chevron-forward" size={24} color="#C7C7CC" />
+                <Ionicons name="chevron-forward" size={getResponsiveFontSize(24, scale)} color="#C7C7CC" />
               </TouchableOpacity>
             ))}
           </View>
@@ -776,6 +850,15 @@ export const MyPageScreen = () => {
             activeOpacity={0.8}
           >
             <Text style={styles.logoutButtonText}>로그아웃</Text>
+          </TouchableOpacity>
+          
+          {/* 계정 삭제 버튼 */}
+          <TouchableOpacity
+            style={styles.deleteAccountButton}
+            onPress={handleDeleteAccount}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.deleteAccountButtonText}>계정 삭제</Text>
           </TouchableOpacity>
         </View>
 
@@ -929,22 +1012,24 @@ const styles = StyleSheet.create({
 
   // 설정 섹션
   settingsSection: {
-    marginBottom: 24,
+    // marginBottom은 동적으로 적용
   },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
     paddingHorizontal: 4,
+    // marginBottom은 동적으로 적용
   },
-  sectionIcon: {
-    fontSize: 20,
-    marginRight: 8,
+  sectionIconContainer: {
+    backgroundColor: '#F0F9F7',
+    alignItems: 'center',
+    justifyContent: 'center',
+    // width, height, borderRadius, marginRight는 동적으로 적용
   },
   sectionTitle: {
-    fontSize: 18,
     fontWeight: 'bold',
     color: '#333333',
+    // fontSize는 동적으로 적용
   },
   settingsList: {
     backgroundColor: '#FFFFFF',
@@ -959,68 +1044,51 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 20,
+    // padding은 동적으로 적용
     borderBottomWidth: 1,
     borderBottomColor: '#F0F0F0',
     minHeight: 60, // 터치 영역 확보
   },
   settingLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
     flex: 1,
+    minWidth: 0, // 텍스트 오버플로우 방지
   },
   settingRight: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   nestedSettingItem: {
-    paddingLeft: 40, // 들여쓰기로 상세 설정임을 표시
+    // paddingLeft은 동적으로 적용
     backgroundColor: '#FAFAFA',
   },
   expandHint: {
-    fontSize: 12,
     color: '#34B79F',
     marginTop: 6,
     fontWeight: '500',
-  },
-  nestedInfoBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    paddingLeft: 40,
-    backgroundColor: '#F0F9F7',
-    borderLeftWidth: 3,
-    borderLeftColor: '#34B79F',
-    marginTop: 4,
-    marginHorizontal: 0,
-  },
-  nestedInfoText: {
-    fontSize: 13,
-    color: '#34B79F',
-    marginLeft: 8,
-    flex: 1,
-    lineHeight: 18,
+    // fontSize는 동적으로 적용
   },
   settingIconContainer: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 16,
+    // width, height, borderRadius, marginRight는 동적으로 적용
   },
   settingTextContainer: {
     flex: 1,
+    minWidth: 0, // 텍스트 오버플로우 방지
   },
   settingTitle: {
-    fontSize: 16,
     fontWeight: '600',
     color: '#333333',
     marginBottom: 4,
+    // fontSize는 동적으로 적용
   },
   settingDescription: {
-    fontSize: 14,
     color: '#666666',
     marginTop: 4,
     lineHeight: 18,
+    // fontSize는 동적으로 적용
   },
   disabledText: {
     color: '#999999',
@@ -1043,11 +1111,22 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 4,
     elevation: 2,
+    marginBottom: 12,
   },
   logoutButtonText: {
     fontSize: 18,
     color: '#FF3B30',
     fontWeight: '700',
+  },
+  deleteAccountButton: {
+    backgroundColor: 'transparent',
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  deleteAccountButtonText: {
+    fontSize: 14,
+    color: '#999999',
+    fontWeight: '500',
   },
   bottomSpacer: {
     height: 20,
