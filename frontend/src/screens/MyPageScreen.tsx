@@ -40,7 +40,9 @@ export const MyPageScreen = () => {
   const [isNotificationExpanded, setIsNotificationExpanded] = useState(false);
   const slideAnim = useRef(new Animated.Value(0)).current;
   const [connectedCaregivers, setConnectedCaregivers] = useState<ConnectionWithUserInfo[]>([]);
+  const [connectedElderly, setConnectedElderly] = useState<ConnectionWithUserInfo[]>([]);
   const [isLoadingCaregivers, setIsLoadingCaregivers] = useState(false);
+  const [isLoadingElderly, setIsLoadingElderly] = useState(false);
   const [showPrivacyPolicy, setShowPrivacyPolicy] = useState(false);
   const [showTerms, setShowTerms] = useState(false);
 
@@ -65,10 +67,12 @@ export const MyPageScreen = () => {
     loadNotificationSettings();
   }, []);
 
-  // 연결된 보호자 목록 로드 (어르신만)
+  // 연결된 목록 로드
   useEffect(() => {
     if (user?.role === UserRole.ELDERLY) {
       loadConnectedCaregivers();
+    } else if (user?.role === UserRole.CAREGIVER) {
+      loadConnectedElderly();
     }
   }, [user]);
 
@@ -179,7 +183,7 @@ export const MyPageScreen = () => {
 
   const notificationSettingsList = getNotificationSettingsList();
 
-  // 연결된 보호자 목록 로드
+  // 연결된 보호자 목록 로드 (어르신용)
   const loadConnectedCaregivers = async () => {
     try {
       setIsLoadingCaregivers(true);
@@ -194,7 +198,22 @@ export const MyPageScreen = () => {
     }
   };
 
-  // 연결 해제 처리
+  // 연결된 어르신 목록 로드 (보호자용)
+  const loadConnectedElderly = async () => {
+    try {
+      setIsLoadingElderly(true);
+      const response = await getConnections();
+      setConnectedElderly(response.active || []);
+      console.log('✅ 연결된 어르신 목록 로드 성공:', response.active?.length || 0);
+    } catch (error: any) {
+      console.error('연결된 어르신 목록 로드 실패:', error);
+      setConnectedElderly([]);
+    } finally {
+      setIsLoadingElderly(false);
+    }
+  };
+
+  // 연결 해제 처리 (어르신용 - 보호자 해제)
   const handleDisconnectCaregiver = (caregiver: ConnectionWithUserInfo) => {
     Alert.alert(
       '연결 해제',
@@ -224,10 +243,40 @@ export const MyPageScreen = () => {
     );
   };
 
+  // 연결 해제 처리 (보호자용 - 어르신 해제)
+  const handleDisconnectElderly = (elderly: ConnectionWithUserInfo) => {
+    Alert.alert(
+      '연결 해제',
+      `${elderly.name} 어르신과의 연결을 해제하시겠습니까?\n\n연결 해제 후:\n• 해당 어르신의 할 일을 관리할 수 없습니다\n• 해당 어르신의 일기장을 볼 수 없습니다\n• 연결을 다시 설정하려면 다시 연결 요청을 해야 합니다`,
+      [
+        { text: '취소', style: 'cancel' },
+        {
+          text: '해제',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setIsLoadingElderly(true);
+              await deleteConnection(elderly.connection_id);
+              Alert.alert('완료', '연결이 해제되었습니다.');
+              // 목록 새로고침
+              await loadConnectedElderly();
+            } catch (error: any) {
+              console.error('연결 해제 실패:', error);
+              const errorMessage = error.response?.data?.detail || '연결 해제 중 오류가 발생했습니다.';
+              Alert.alert('오류', errorMessage);
+            } finally {
+              setIsLoadingElderly(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   // 개인정보 처리방침 텍스트
   const getPrivacyPolicyText = () => {
     return `제1조 (개인정보의 처리 목적)
-그랜드바이(이하 "회사")는 다음의 목적을 위하여 개인정보를 처리합니다. 처리하고 있는 개인정보는 다음의 목적 이외의 용도로는 이용되지 않으며, 이용 목적이 변경되는 경우에는 개인정보 보호법 제18조에 따라 별도의 동의를 받는 등 필요한 조치를 이행할 예정입니다.
+그랜비(이하 "회사")는 다음의 목적을 위하여 개인정보를 처리합니다. 처리하고 있는 개인정보는 다음의 목적 이외의 용도로는 이용되지 않으며, 이용 목적이 변경되는 경우에는 개인정보 보호법 제18조에 따라 별도의 동의를 받는 등 필요한 조치를 이행할 예정입니다.
 
 1. 회원 관리
 - 회원 가입의사 확인, 회원제 서비스 제공에 따른 본인 식별·인증, 회원자격 유지·관리
@@ -295,7 +344,7 @@ export const MyPageScreen = () => {
   // 이용약관 텍스트
   const getTermsText = () => {
     return `제1조 (목적)
-이 약관은 그랜드바이(이하 "회사")가 제공하는 어르신 돌봄 서비스(이하 "서비스")의 이용과 관련하여 회사와 회원 간의 권리, 의무 및 책임사항, 기타 필요한 사항을 규정함을 목적으로 합니다.
+이 약관은 그랜비(이하 "회사")가 제공하는 어르신 돌봄 서비스(이하 "서비스")의 이용과 관련하여 회사와 회원 간의 권리, 의무 및 책임사항, 기타 필요한 사항을 규정함을 목적으로 합니다.
 
 제2조 (정의)
 1. "서비스"란 회사가 제공하는 어르신 일상 관리 및 보호자 연계 서비스를 말합니다.
@@ -811,7 +860,7 @@ export const MyPageScreen = () => {
           </View>
         </View>
 
-        {/* 연결된 보호자 관리 (어르신만) */}
+        {/* 연결된 보호자 관리 (어르신용) */}
         {user?.role === UserRole.ELDERLY && (
           <View style={[styles.settingsSection, { marginBottom: sectionMarginBottom }]}>
             <View style={[styles.sectionHeader, { marginBottom: sectionHeaderMarginBottom }]}>
@@ -875,6 +924,84 @@ export const MyPageScreen = () => {
                     </View>
                     <TouchableOpacity
                       onPress={() => handleDisconnectCaregiver(caregiver)}
+                      activeOpacity={0.7}
+                      style={styles.disconnectButton}
+                    >
+                      <Text style={[styles.disconnectButtonText, { fontSize: getResponsiveFontSize(14, scale) }]}>
+                        해제
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                ))
+              )}
+            </View>
+          </View>
+        )}
+
+        {/* 연결된 어르신 관리 (보호자용) */}
+        {user?.role === UserRole.CAREGIVER && (
+          <View style={[styles.settingsSection, { marginBottom: sectionMarginBottom }]}>
+            <View style={[styles.sectionHeader, { marginBottom: sectionHeaderMarginBottom }]}>
+              <View style={[
+                styles.sectionIconContainer,
+                { 
+                  width: sectionIconSize,
+                  height: sectionIconSize,
+                  borderRadius: sectionIconSize / 2,
+                  marginRight: sectionIconMarginRight,
+                }
+              ]}>
+                <Ionicons name="people-outline" size={sectionIconFontSize} color="#34B79F" />
+              </View>
+              <Text style={[styles.sectionTitle, { fontSize: sectionTitleFontSize }]}>연결된 어르신</Text>
+            </View>
+            <View style={styles.settingsList}>
+              {isLoadingElderly ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="small" color="#34B79F" />
+                  <Text style={styles.loadingText}>로딩 중...</Text>
+                </View>
+              ) : connectedElderly.length === 0 ? (
+                <View style={styles.emptyContainer}>
+                  <Ionicons name="people-outline" size={getResponsiveFontSize(48, scale)} color="#C7C7CC" />
+                  <Text style={[styles.emptyText, { fontSize: getResponsiveFontSize(14, scale) }]}>
+                    연결된 어르신이 없습니다
+                  </Text>
+                </View>
+              ) : (
+                connectedElderly.map((elderly) => (
+                  <View key={elderly.connection_id} style={[styles.settingItem, { padding: settingItemPadding }]}>
+                    <View style={styles.settingLeft}>
+                      <View style={[
+                        styles.settingIconContainer,
+                        {
+                          backgroundColor: '#E8F5E9',
+                          width: settingIconSize,
+                          height: settingIconSize,
+                          borderRadius: settingIconSize / 2,
+                          marginRight: settingIconMarginRight,
+                        }
+                      ]}>
+                        <Ionicons name="person" size={settingIconInnerSize} color="#4CAF50" />
+                      </View>
+                      <View style={styles.settingTextContainer}>
+                        <Text style={[styles.settingTitle, { fontSize: settingTitleFontSize }]} numberOfLines={1}>
+                          {elderly.name}
+                        </Text>
+                        {elderly.email && (
+                          <Text style={[styles.settingDescription, { fontSize: settingDescriptionFontSize }]} numberOfLines={1}>
+                            {elderly.email}
+                          </Text>
+                        )}
+                        {elderly.phone_number && (
+                          <Text style={[styles.settingDescription, { fontSize: settingDescriptionFontSize }]} numberOfLines={1}>
+                            {elderly.phone_number}
+                          </Text>
+                        )}
+                      </View>
+                    </View>
+                    <TouchableOpacity
+                      onPress={() => handleDisconnectElderly(elderly)}
                       activeOpacity={0.7}
                       style={styles.disconnectButton}
                     >
@@ -1109,7 +1236,7 @@ export const MyPageScreen = () => {
         transparent={false}
         onRequestClose={() => setShowPrivacyPolicy(false)}
       >
-        <View style={styles.modalContainer}>
+        <View style={[styles.modalContainer, { paddingTop: insets.top }]}>
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>개인정보 처리방침</Text>
             <TouchableOpacity
@@ -1119,7 +1246,11 @@ export const MyPageScreen = () => {
               <Ionicons name="close" size={24} color="#333333" />
             </TouchableOpacity>
           </View>
-          <ScrollView style={styles.modalContent}>
+          <ScrollView 
+            style={styles.modalContent}
+            contentContainerStyle={[styles.modalScrollContent, { paddingBottom: Math.max(insets.bottom, 40) }]}
+            showsVerticalScrollIndicator={true}
+          >
             <Text style={styles.modalText}>
               {getPrivacyPolicyText()}
             </Text>
@@ -1134,7 +1265,7 @@ export const MyPageScreen = () => {
         transparent={false}
         onRequestClose={() => setShowTerms(false)}
       >
-        <View style={styles.modalContainer}>
+        <View style={[styles.modalContainer, { paddingTop: insets.top }]}>
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>이용약관</Text>
             <TouchableOpacity
@@ -1144,7 +1275,11 @@ export const MyPageScreen = () => {
               <Ionicons name="close" size={24} color="#333333" />
             </TouchableOpacity>
           </View>
-          <ScrollView style={styles.modalContent}>
+          <ScrollView 
+            style={styles.modalContent}
+            contentContainerStyle={[styles.modalScrollContent, { paddingBottom: Math.max(insets.bottom, 40) }]}
+            showsVerticalScrollIndicator={true}
+          >
             <Text style={styles.modalText}>
               {getTermsText()}
             </Text>
@@ -1245,15 +1380,19 @@ const styles = StyleSheet.create({
   },
   editButton: {
     backgroundColor: '#F0F9F7',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingHorizontal: getResponsivePadding(20, 1),
+    paddingVertical: getResponsivePadding(10, 1),
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#34B79F',
+    minWidth: getResponsiveSize(70, 1),
+    minHeight: getResponsiveSize(36, 1),
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   editButtonText: {
     color: '#34B79F',
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '600',
   },
   userName: {
@@ -1446,15 +1585,15 @@ const styles = StyleSheet.create({
     // fontSize는 동적으로 적용
   },
   disconnectButton: {
-    backgroundColor: '#FFEBEE',
+    backgroundColor: '#FFF5F5',
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#FFCDD2',
+    borderColor: '#FFE0E0',
   },
   disconnectButtonText: {
-    color: '#E53935',
+    color: '#FF9999',
     fontWeight: '600',
     // fontSize는 동적으로 적용
   },
@@ -1485,6 +1624,8 @@ const styles = StyleSheet.create({
   },
   modalContent: {
     flex: 1,
+  },
+  modalScrollContent: {
     padding: 20,
   },
   modalText: {
