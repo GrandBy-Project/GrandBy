@@ -19,6 +19,7 @@ export interface Diary {
   status: 'draft' | 'published';
   created_at: string;
   updated_at: string;
+  comment_count?: number; // 댓글 개수
 }
 
 export interface DiaryCreate {

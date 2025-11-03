@@ -14,6 +14,8 @@ import {
   Alert,
   ActivityIndicator,
   Switch,
+  Modal,
+  Pressable,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -23,6 +25,7 @@ import { getCallLog, getExtractedTodos, ExtractedTodo } from '../api/call';
 import { createTodo } from '../api/todo';
 import { useAuthStore } from '../store/authStore';
 import { BottomNavigationBar, Header } from '../components';
+import { Colors } from '../constants/Colors';
 
 // 기분 옵션
 const MOOD_OPTIONS = [
@@ -65,6 +68,23 @@ export const DiaryWriteScreen = () => {
     isShared: boolean;
   } | null>(null);
 
+  // 확인 모달 상태
+  const [confirmModal, setConfirmModal] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    confirmText?: string;
+    cancelText?: string;
+    onConfirm?: () => void;
+    onCancel?: () => void;
+  }>({
+    visible: false,
+    title: '',
+    message: '',
+    confirmText: '확인',
+    cancelText: '취소',
+  });
+
   /**
    * 날짜 포맷팅
    */
@@ -97,11 +117,16 @@ export const DiaryWriteScreen = () => {
           
         } catch (error) {
           console.error('다이어리 로드 실패:', error);
-          Alert.alert(
-            '오류',
-            '일기를 불러올 수 없습니다.',
-            [{ text: '확인', onPress: () => router.back() }]
-          );
+          setConfirmModal({
+            visible: true,
+            title: '오류',
+            message: '일기를 불러올 수 없습니다.',
+            confirmText: '확인',
+            onConfirm: () => {
+              setConfirmModal(prev => ({ ...prev, visible: false }));
+              router.back();
+            },
+          });
         } finally {
           setIsLoadingSummary(false);
         }
@@ -165,27 +190,39 @@ export const DiaryWriteScreen = () => {
               setSuggestedTodos(extractedTodos);
               
               // 사용자에게 피드백
-              Alert.alert(
-                '💡 일정 발견!',
-                `대화에서 ${extractedTodos.length}개의 일정을 발견했습니다.\n아래에서 등록할 일정을 선택해주세요!`,
-                [{ text: '확인' }]
-              );
+              setConfirmModal({
+                visible: true,
+                title: '💡 일정 발견!',
+                message: `대화에서 ${extractedTodos.length}개의 일정을 발견했습니다.\n아래에서 등록할 일정을 선택해주세요!`,
+                confirmText: '확인',
+                onConfirm: () => {
+                  setConfirmModal(prev => ({ ...prev, visible: false }));
+                },
+              });
             } else if (callLog.conversation_summary) {
               // TODO는 없지만 일기는 있는 경우
-              Alert.alert(
-                '자동 완성',
-                'AI와의 대화 내용이 자동으로 입력되었습니다.\n수정 후 저장해주세요!',
-                [{ text: '확인' }]
-              );
+              setConfirmModal({
+                visible: true,
+                title: '자동 완성',
+                message: 'AI와의 대화 내용이 자동으로 입력되었습니다.\n수정 후 저장해주세요!',
+                confirmText: '확인',
+                onConfirm: () => {
+                  setConfirmModal(prev => ({ ...prev, visible: false }));
+                },
+              });
             }
           }
         } catch (error) {
           console.error('❌ 통화 데이터 로딩 실패:', error);
-          Alert.alert(
-            '오류',
-            '통화 데이터를 불러올 수 없습니다.',
-            [{ text: '확인' }]
-          );
+          setConfirmModal({
+            visible: true,
+            title: '오류',
+            message: '통화 데이터를 불러올 수 없습니다.',
+            confirmText: '확인',
+            onConfirm: () => {
+              setConfirmModal(prev => ({ ...prev, visible: false }));
+            },
+          });
         } finally {
           setIsLoadingSummary(false);
         }
@@ -262,7 +299,15 @@ export const DiaryWriteScreen = () => {
       });
       
       // 성공 피드백
-      Alert.alert('✅ 등록 완료', '일정이 등록되었습니다!');
+      setConfirmModal({
+        visible: true,
+        title: '✅ 등록 완료',
+        message: '일정이 등록되었습니다!',
+        confirmText: '확인',
+        onConfirm: () => {
+          setConfirmModal(prev => ({ ...prev, visible: false }));
+        },
+      });
       
       // 등록된 TODO 제거
       setSuggestedTodos(prev => prev.filter((_, i) => i !== index));
@@ -271,7 +316,15 @@ export const DiaryWriteScreen = () => {
       
     } catch (error) {
       console.error('TODO 등록 실패:', error);
-      Alert.alert('오류', '일정 등록에 실패했습니다.');
+      setConfirmModal({
+        visible: true,
+        title: '오류',
+        message: '일정 등록에 실패했습니다.',
+        confirmText: '확인',
+        onConfirm: () => {
+          setConfirmModal(prev => ({ ...prev, visible: false }));
+        },
+      });
     }
   };
 
@@ -281,17 +334,41 @@ export const DiaryWriteScreen = () => {
   const handleSubmit = async () => {
     // 유효성 검사
     if (!title.trim()) {
-      Alert.alert('알림', '제목을 입력해주세요.');
+      setConfirmModal({
+        visible: true,
+        title: '알림',
+        message: '제목을 입력해주세요.',
+        confirmText: '확인',
+        onConfirm: () => {
+          setConfirmModal(prev => ({ ...prev, visible: false }));
+        },
+      });
       return;
     }
 
     if (!selectedMood) {
-      Alert.alert('알림', '오늘의 기분을 선택해주세요.');
+      setConfirmModal({
+        visible: true,
+        title: '알림',
+        message: '오늘의 기분을 선택해주세요.',
+        confirmText: '확인',
+        onConfirm: () => {
+          setConfirmModal(prev => ({ ...prev, visible: false }));
+        },
+      });
       return;
     }
 
     if (!content.trim()) {
-      Alert.alert('알림', '일기 내용을 입력해주세요.');
+      setConfirmModal({
+        visible: true,
+        title: '알림',
+        message: '일기 내용을 입력해주세요.',
+        confirmText: '확인',
+        onConfirm: () => {
+          setConfirmModal(prev => ({ ...prev, visible: false }));
+        },
+      });
       return;
     }
 
@@ -307,18 +384,16 @@ export const DiaryWriteScreen = () => {
           status: 'published',
         });
 
-        Alert.alert(
-          '완료',
-          '일기가 수정되었습니다!',
-          [
-            {
-              text: '확인',
-              onPress: () => {
-                router.back();
-              },
-            },
-          ]
-        );
+        setConfirmModal({
+          visible: true,
+          title: '완료',
+          message: '일기가 수정되었습니다!',
+          confirmText: '확인',
+          onConfirm: () => {
+            setConfirmModal(prev => ({ ...prev, visible: false }));
+            router.back();
+          },
+        });
       } else {
         // 작성 모드
         await createDiary({
@@ -329,31 +404,34 @@ export const DiaryWriteScreen = () => {
           status: 'published',
         });
 
-        Alert.alert(
-          '완료',
-          '일기가 저장되었습니다!',
-          [
-            {
-              text: '확인',
-              onPress: () => {
-                // 통화에서 온 경우 메인 페이지로, 아니면 뒤로가기
-                if (fromCall) {
-                  router.replace('/home');
-                } else {
-                  router.back();
-                }
-              },
-            },
-          ]
-        );
+        setConfirmModal({
+          visible: true,
+          title: '완료',
+          message: '일기가 저장되었습니다!',
+          confirmText: '확인',
+          onConfirm: () => {
+            setConfirmModal(prev => ({ ...prev, visible: false }));
+            // 통화에서 온 경우 메인 페이지로, 아니면 뒤로가기
+            if (fromCall) {
+              router.replace('/home');
+            } else {
+              router.back();
+            }
+          },
+        });
       }
 
     } catch (error: any) {
       console.error('일기 저장 실패:', error);
-      Alert.alert(
-        '오류',
-        error.response?.data?.detail || '일기 저장에 실패했습니다.'
-      );
+      setConfirmModal({
+        visible: true,
+        title: '오류',
+        message: error.response?.data?.detail || '일기 저장에 실패했습니다.',
+        confirmText: '확인',
+        onConfirm: () => {
+          setConfirmModal(prev => ({ ...prev, visible: false }));
+        },
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -597,6 +675,50 @@ export const DiaryWriteScreen = () => {
           )}
         </TouchableOpacity>
       </ScrollView>
+
+      {/* 확인 모달 */}
+      <Modal
+        visible={confirmModal.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setConfirmModal(prev => ({ ...prev, visible: false }))}
+      >
+        <Pressable 
+          style={styles.commonModalBackdrop} 
+          onPress={() => setConfirmModal(prev => ({ ...prev, visible: false }))}
+        >
+          <Pressable style={styles.commonModalContainer} onPress={() => {}}>
+            <Text style={styles.commonModalTitle}>
+              {confirmModal.title}
+            </Text>
+            <Text style={styles.commonModalText}>
+              {confirmModal.message}
+            </Text>
+            <View style={styles.confirmModalActions}>
+              {confirmModal.onCancel && (
+                <TouchableOpacity
+                  style={[styles.confirmModalButton, styles.confirmModalCancelButton]}
+                  onPress={confirmModal.onCancel}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.confirmModalCancelButtonText}>
+                    {confirmModal.cancelText || '취소'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity
+                style={[styles.confirmModalButton, styles.confirmModalConfirmButton]}
+                onPress={confirmModal.onConfirm}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.confirmModalConfirmButtonText}>
+                  {confirmModal.confirmText || '확인'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {/* 하단 네비게이션 바 */}
       <BottomNavigationBar />
@@ -883,6 +1005,64 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     color: '#FFFFFF',
+  },
+  // 공통 모달 스타일 (GlobalAlertProvider 디자인 참고)
+  commonModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  commonModalContainer: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 12,
+  },
+  commonModalTitle: {
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 8,
+    fontSize: 18,
+  },
+  commonModalText: {
+    color: '#374151',
+    lineHeight: 22,
+    marginBottom: 16,
+    fontSize: 15,
+  },
+  confirmModalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 4,
+    gap: 8,
+  },
+  confirmModalButton: {
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    minWidth: 70,
+    alignItems: 'center',
+  },
+  confirmModalCancelButton: {
+    backgroundColor: '#F3F4F6',
+  },
+  confirmModalConfirmButton: {
+    backgroundColor: Colors.primary,
+  },
+  confirmModalCancelButtonText: {
+    color: '#374151',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  confirmModalConfirmButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
   },
 });
 

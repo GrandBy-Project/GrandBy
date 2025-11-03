@@ -15,6 +15,7 @@ import {
   RefreshControl,
   ScrollView,
   Modal,
+  Pressable,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
@@ -25,6 +26,7 @@ import { getDiaries, Diary } from '../api/diary';
 import { useAuthStore } from '../store/authStore';
 import * as connectionsApi from '../api/connections';
 import { BottomNavigationBar, Header } from '../components';
+import { Colors } from '../constants/Colors';
 
 export const DiaryListScreen = () => {
   const router = useRouter();
@@ -42,6 +44,23 @@ export const DiaryListScreen = () => {
   const [selectedElderlyId, setSelectedElderlyId] = useState<string | null>(null);
   const [selectedElderlyName, setSelectedElderlyName] = useState<string>('');
   const [showElderlySelector, setShowElderlySelector] = useState(false);
+
+  // 확인 모달 상태
+  const [confirmModal, setConfirmModal] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    confirmText?: string;
+    cancelText?: string;
+    onConfirm?: () => void;
+    onCancel?: () => void;
+  }>({
+    visible: false,
+    title: '',
+    message: '',
+    confirmText: '확인',
+    cancelText: '취소',
+  });
 
   /**
    * 연결된 어르신 목록 로드
@@ -78,11 +97,15 @@ export const DiaryListScreen = () => {
       setDiaries(data);
     } catch (error: any) {
       console.error('다이어리 로드 실패:', error);
-      Alert.alert(
-        '오류',
-        error.response?.data?.detail || '일기를 불러오는데 실패했습니다.',
-        [{ text: '확인' }]
-      );
+      setConfirmModal({
+        visible: true,
+        title: '오류',
+        message: error.response?.data?.detail || '일기를 불러오는데 실패했습니다.',
+        confirmText: '확인',
+        onConfirm: () => {
+          setConfirmModal(prev => ({ ...prev, visible: false }));
+        },
+      });
     } finally {
       setIsLoading(false);
     }
@@ -295,15 +318,23 @@ export const DiaryListScreen = () => {
         {/* 내용 미리보기 */}
         <Text style={styles.contentPreview}>{contentPreview}</Text>
 
-        {/* 작성 시간 */}
-        <Text style={styles.timestamp}>
-          {new Date(item.created_at).toLocaleString('ko-KR', {
-            month: 'long',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-          })}
-        </Text>
+        {/* 작성 시간 및 댓글 개수 */}
+        <View style={styles.footerRow}>
+          <Text style={styles.timestamp}>
+            {new Date(item.created_at).toLocaleString('ko-KR', {
+              month: 'long',
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+            })}
+          </Text>
+          {item.comment_count !== undefined && (
+            <View style={styles.commentCountBadge}>
+              <Ionicons name="chatbubble-outline" size={14} color={Colors.primary} />
+              <Text style={styles.commentCountText}>{item.comment_count}</Text>
+            </View>
+          )}
+        </View>
       </TouchableOpacity>
     );
   };
@@ -619,6 +650,50 @@ export const DiaryListScreen = () => {
       >
         <Ionicons name="create" size={28} color="#FFFFFF" />
       </TouchableOpacity>
+
+      {/* 확인 모달 */}
+      <Modal
+        visible={confirmModal.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setConfirmModal(prev => ({ ...prev, visible: false }))}
+      >
+        <Pressable 
+          style={styles.commonModalBackdrop} 
+          onPress={() => setConfirmModal(prev => ({ ...prev, visible: false }))}
+        >
+          <Pressable style={styles.commonModalContainer} onPress={() => {}}>
+            <Text style={styles.commonModalTitle}>
+              {confirmModal.title}
+            </Text>
+            <Text style={styles.commonModalText}>
+              {confirmModal.message}
+            </Text>
+            <View style={styles.confirmModalActions}>
+              {confirmModal.onCancel && (
+                <TouchableOpacity
+                  style={[styles.confirmModalButton, styles.confirmModalCancelButton]}
+                  onPress={confirmModal.onCancel}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.confirmModalCancelButtonText}>
+                    {confirmModal.cancelText || '취소'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity
+                style={[styles.confirmModalButton, styles.confirmModalConfirmButton]}
+                onPress={confirmModal.onConfirm}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.confirmModalConfirmButtonText}>
+                  {confirmModal.confirmText || '확인'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 };
@@ -888,6 +963,25 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#999999',
   },
+  footerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  commentCountBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: '#F0F8FF',
+    borderRadius: 12,
+  },
+  commentCountText: {
+    fontSize: 13,
+    color: Colors.primary,
+    fontWeight: '600',
+  },
   emptyContainer: {
     flex: 1,
     alignItems: 'center',
@@ -931,6 +1025,64 @@ const styles = StyleSheet.create({
     color: '#999999',
     textAlign: 'center',
     lineHeight: 24,
+  },
+  // 공통 모달 스타일 (GlobalAlertProvider 디자인 참고)
+  commonModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  commonModalContainer: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 12,
+  },
+  commonModalTitle: {
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 8,
+    fontSize: 18,
+  },
+  commonModalText: {
+    color: '#374151',
+    lineHeight: 22,
+    marginBottom: 16,
+    fontSize: 15,
+  },
+  confirmModalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 4,
+    gap: 8,
+  },
+  confirmModalButton: {
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    minWidth: 70,
+    alignItems: 'center',
+  },
+  confirmModalCancelButton: {
+    backgroundColor: '#F3F4F6',
+  },
+  confirmModalConfirmButton: {
+    backgroundColor: Colors.primary,
+  },
+  confirmModalCancelButtonText: {
+    color: '#374151',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  confirmModalConfirmButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
   },
 });
 
