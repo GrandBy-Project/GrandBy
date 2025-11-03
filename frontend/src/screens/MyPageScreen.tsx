@@ -775,6 +775,51 @@ export const MyPageScreen = () => {
   const expandHintFontSize = getResponsiveFontSize(12, scale);
   const nestedPaddingLeft = getResponsivePadding(40, scale);
 
+  // 프로필 섹션 반응형 크기
+  const profileImageSize = getResponsiveSize(80, scale);
+  const profileImageRadius = profileImageSize / 2;
+  const profileImageMarginRight = getResponsivePadding(20, scale);
+  const profileSectionMarginBottom = getResponsivePadding(24, scale);
+  const profileIconSize = getResponsiveFontSize(40, scale);
+  const editIconContainerSize = getResponsiveSize(28, scale);
+  const editIconSize = getResponsiveFontSize(14, scale);
+  const roleIconSize = getResponsiveFontSize(16, scale);
+  const userNameFontSize = getResponsiveFontSize(24, scale);
+  const userNameMarginBottom = getResponsivePadding(8, scale);
+  const userRoleFontSize = getResponsiveFontSize(14, scale);
+  const userRoleMarginLeft = getResponsivePadding(6, scale);
+
+  // 사용자 정보 리스트 반응형 크기
+  const userInfoIconSize = getResponsiveSize(32, scale);
+  const userInfoIconRadius = userInfoIconSize / 2;
+  const userInfoIconMarginRight = getResponsivePadding(12, scale);
+  const userInfoIconInnerSize = getResponsiveFontSize(20, scale);
+  const userInfoLabelFontSize = getResponsiveFontSize(16, scale);
+  const userInfoValueFontSize = getResponsiveFontSize(16, scale);
+  const userInfoItemPaddingVertical = getResponsivePadding(12, scale);
+  const userInfoItemPaddingHorizontal = getResponsivePadding(16, scale);
+
+  // 로그아웃/계정삭제 버튼 반응형 크기
+  const logoutButtonPadding = getResponsivePadding(20, scale);
+  const deleteAccountButtonPadding = getResponsivePadding(20, scale);
+  const deleteAccountTextFontSize = getResponsiveFontSize(14, scale);
+  const logoutButtonTextFontSize = getResponsiveFontSize(16, scale);
+
+  // 모달 반응형 크기
+  const modalHeaderPaddingHorizontal = getResponsivePadding(20, scale);
+  const modalHeaderPaddingVertical = getResponsivePadding(16, scale);
+  const modalTitleFontSize = getResponsiveFontSize(20, scale);
+  const modalCloseIconSize = getResponsiveFontSize(24, scale);
+  const modalTextFontSize = getResponsiveFontSize(14, scale);
+  const modalScrollContentPadding = getResponsivePadding(20, scale);
+
+  // 컨텐츠 패딩/마진 반응형 크기
+  const contentPadding = getResponsivePadding(16, scale);
+  const userCardPadding = getResponsivePadding(24, scale);
+  const userCardMarginBottom = getResponsivePadding(20, scale);
+  const roleContainerPaddingHorizontal = getResponsivePadding(12, scale);
+  const roleContainerPaddingVertical = getResponsivePadding(6, scale);
+
   return (
     <View style={styles.container}>
       {/* 공통 헤더 */}
@@ -783,12 +828,24 @@ export const MyPageScreen = () => {
         showMenuButton={true}
       />
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.content} 
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 20, padding: contentPadding }}
+      >
         {/* 사용자 정보 카드 */}
-        <View style={styles.userCard}>
-          <View style={styles.profileSection}>
+        <View style={[styles.userCard, { padding: userCardPadding, marginBottom: userCardMarginBottom }]}>
+          <View style={[styles.profileSection, { marginBottom: profileSectionMarginBottom }]}>
             <TouchableOpacity 
-              style={styles.profileImageContainer}
+              style={[
+                styles.profileImageContainer,
+                {
+                  width: profileImageSize,
+                  height: profileImageSize,
+                  borderRadius: profileImageRadius,
+                  marginRight: profileImageMarginRight,
+                }
+              ]}
               onPress={showImageOptions}
               disabled={isUploading}
               activeOpacity={0.7}
@@ -803,7 +860,7 @@ export const MyPageScreen = () => {
                 <View style={styles.profileImagePlaceholder}>
                   <Ionicons 
                     name={user?.role === UserRole.ELDERLY ? 'person' : 'people'} 
-                    size={40} 
+                    size={profileIconSize} 
                     color="#FFFFFF" 
                   />
                 </View>
@@ -813,19 +870,34 @@ export const MyPageScreen = () => {
                   <ActivityIndicator size="large" color="#FFFFFF" />
                 </View>
               )}
-              <View style={styles.editIconContainer}>
-                <MaterialCommunityIcons name="camera" size={14} color="#34B79F" />
+              <View style={[
+                styles.editIconContainer,
+                {
+                  width: editIconContainerSize,
+                  height: editIconContainerSize,
+                  borderRadius: editIconContainerSize / 2,
+                }
+              ]}>
+                <MaterialCommunityIcons name="camera" size={editIconSize} color="#34B79F" />
               </View>
             </TouchableOpacity>
             <View style={styles.profileInfo}>
-              <Text style={styles.userName}>{user?.name || '사용자'}</Text>
-              <View style={styles.roleContainer}>
+              <Text style={[styles.userName, { fontSize: userNameFontSize, marginBottom: userNameMarginBottom }]}>
+                {user?.name || '사용자'}
+              </Text>
+              <View style={[
+                styles.roleContainer,
+                {
+                  paddingHorizontal: roleContainerPaddingHorizontal,
+                  paddingVertical: roleContainerPaddingVertical,
+                }
+              ]}>
                 <Ionicons 
                   name={user?.role === UserRole.ELDERLY ? 'person-circle' : 'people-circle'} 
-                  size={16} 
+                  size={roleIconSize} 
                   color="#34B79F" 
                 />
-                <Text style={styles.userRole}>
+                <Text style={[styles.userRole, { fontSize: userRoleFontSize, marginLeft: userRoleMarginLeft }]}>
                   {user?.role === UserRole.ELDERLY ? '어르신 계정' : '보호자 계정'}
                 </Text>
               </View>
@@ -835,7 +907,7 @@ export const MyPageScreen = () => {
               onPress={() => router.push('/profile-edit')}
               activeOpacity={0.7}
             >
-              <Text style={styles.editButtonText}>수정</Text>
+              <Text style={[styles.editButtonText, { fontSize: getResponsiveFontSize(15, scale) }]}>수정</Text>
             </TouchableOpacity>
           </View>
 
@@ -844,17 +916,35 @@ export const MyPageScreen = () => {
             {userInfoItems.map((item, index) => (
               <TouchableOpacity
                 key={item.id}
-                style={styles.userInfoItem}
+                style={[
+                  styles.userInfoItem,
+                  {
+                    paddingVertical: userInfoItemPaddingVertical,
+                    paddingHorizontal: userInfoItemPaddingHorizontal,
+                  }
+                ]}
                 onPress={() => router.push('/profile-edit')}
                 activeOpacity={0.7}
               >
                 <View style={styles.userInfoLeft}>
-                  <View style={styles.userInfoIconContainer}>
-                    <Ionicons name={item.iconName as any} size={20} color="#34B79F" />
+                  <View style={[
+                    styles.userInfoIconContainer,
+                    {
+                      width: userInfoIconSize,
+                      height: userInfoIconSize,
+                      borderRadius: userInfoIconRadius,
+                      marginRight: userInfoIconMarginRight,
+                    }
+                  ]}>
+                    <Ionicons name={item.iconName as any} size={userInfoIconInnerSize} color="#34B79F" />
                   </View>
-                  <Text style={styles.userInfoLabel}>{item.label}</Text>
+                  <Text style={[styles.userInfoLabel, { fontSize: userInfoLabelFontSize }]}>
+                    {item.label}
+                  </Text>
                 </View>
-                <Text style={styles.userInfoValue}>{item.value}</Text>
+                <Text style={[styles.userInfoValue, { fontSize: userInfoValueFontSize }]}>
+                  {item.value}
+                </Text>
               </TouchableOpacity>
             ))}
           </View>
@@ -1205,20 +1295,20 @@ export const MyPageScreen = () => {
         {/* 로그아웃 버튼 */}
         <View style={styles.logoutSection}>
           <TouchableOpacity
-            style={styles.logoutButton}
+            style={[styles.logoutButton, { padding: logoutButtonPadding }]}
             onPress={handleLogout}
             activeOpacity={0.8}
           >
-            <Text style={styles.logoutButtonText}>로그아웃</Text>
+            <Text style={[styles.logoutButtonText, { fontSize: logoutButtonTextFontSize }]}>로그아웃</Text>
           </TouchableOpacity>
           
           {/* 계정 삭제 버튼 */}
           <TouchableOpacity
-            style={styles.deleteAccountButton}
+            style={[styles.deleteAccountButton, { paddingVertical: getResponsivePadding(12, scale) }]}
             onPress={handleDeleteAccount}
             activeOpacity={0.8}
           >
-            <Text style={styles.deleteAccountButtonText}>계정 삭제</Text>
+            <Text style={[styles.deleteAccountButtonText, { fontSize: deleteAccountTextFontSize }]}>계정 삭제</Text>
           </TouchableOpacity>
         </View>
 
@@ -1237,21 +1327,33 @@ export const MyPageScreen = () => {
         onRequestClose={() => setShowPrivacyPolicy(false)}
       >
         <View style={[styles.modalContainer, { paddingTop: insets.top }]}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>개인정보 처리방침</Text>
+          <View style={[
+            styles.modalHeader,
+            {
+              paddingHorizontal: modalHeaderPaddingHorizontal,
+              paddingVertical: modalHeaderPaddingVertical,
+            }
+          ]}>
+            <Text style={[styles.modalTitle, { fontSize: modalTitleFontSize }]}>개인정보 처리방침</Text>
             <TouchableOpacity
               style={styles.modalCloseButton}
               onPress={() => setShowPrivacyPolicy(false)}
             >
-              <Ionicons name="close" size={24} color="#333333" />
+              <Ionicons name="close" size={modalCloseIconSize} color="#333333" />
             </TouchableOpacity>
           </View>
           <ScrollView 
             style={styles.modalContent}
-            contentContainerStyle={[styles.modalScrollContent, { paddingBottom: Math.max(insets.bottom, 40) }]}
+            contentContainerStyle={[
+              styles.modalScrollContent,
+              {
+                padding: modalScrollContentPadding,
+                paddingBottom: Math.max(insets.bottom, 40) + modalScrollContentPadding,
+              }
+            ]}
             showsVerticalScrollIndicator={true}
           >
-            <Text style={styles.modalText}>
+            <Text style={[styles.modalText, { fontSize: modalTextFontSize }]}>
               {getPrivacyPolicyText()}
             </Text>
           </ScrollView>
@@ -1266,21 +1368,33 @@ export const MyPageScreen = () => {
         onRequestClose={() => setShowTerms(false)}
       >
         <View style={[styles.modalContainer, { paddingTop: insets.top }]}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>이용약관</Text>
+          <View style={[
+            styles.modalHeader,
+            {
+              paddingHorizontal: modalHeaderPaddingHorizontal,
+              paddingVertical: modalHeaderPaddingVertical,
+            }
+          ]}>
+            <Text style={[styles.modalTitle, { fontSize: modalTitleFontSize }]}>이용약관</Text>
             <TouchableOpacity
               style={styles.modalCloseButton}
               onPress={() => setShowTerms(false)}
             >
-              <Ionicons name="close" size={24} color="#333333" />
+              <Ionicons name="close" size={modalCloseIconSize} color="#333333" />
             </TouchableOpacity>
           </View>
           <ScrollView 
             style={styles.modalContent}
-            contentContainerStyle={[styles.modalScrollContent, { paddingBottom: Math.max(insets.bottom, 40) }]}
+            contentContainerStyle={[
+              styles.modalScrollContent,
+              {
+                padding: modalScrollContentPadding,
+                paddingBottom: Math.max(insets.bottom, 40) + modalScrollContentPadding,
+              }
+            ]}
             showsVerticalScrollIndicator={true}
           >
-            <Text style={styles.modalText}>
+            <Text style={[styles.modalText, { fontSize: modalTextFontSize }]}>
               {getTermsText()}
             </Text>
           </ScrollView>
@@ -1297,15 +1411,14 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    padding: 16,
+    // padding은 동적으로 적용
   },
 
   // 사용자 정보 카드
   userCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 20,
-    padding: 24,
-    marginBottom: 20,
+    // padding, marginBottom은 동적으로 적용
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -1315,18 +1428,15 @@ const styles = StyleSheet.create({
   profileSection: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 24,
+    // marginBottom은 동적으로 적용
   },
   profileImageContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
     backgroundColor: '#34B79F',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 20,
     overflow: 'hidden',
     position: 'relative',
+    // width, height, borderRadius, marginRight은 동적으로 적용
   },
   profileImagePlaceholder: {
     width: '100%',
@@ -1342,10 +1452,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#F0F0F0',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
     borderRadius: 12,
     alignSelf: 'flex-start',
+    // paddingHorizontal, paddingVertical은 동적으로 적용
   },
   uploadingOverlay: {
     position: 'absolute',
@@ -1362,9 +1471,6 @@ const styles = StyleSheet.create({
     bottom: 0,
     right: 0,
     backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    width: 28,
-    height: 28,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000',
@@ -1374,6 +1480,7 @@ const styles = StyleSheet.create({
     elevation: 2,
     borderWidth: 2,
     borderColor: '#F0F9F7',
+    // width, height, borderRadius은 동적으로 적용
   },
   profileInfo: {
     flex: 1,
@@ -1392,20 +1499,18 @@ const styles = StyleSheet.create({
   },
   editButtonText: {
     color: '#34B79F',
-    fontSize: 15,
     fontWeight: '600',
+    // fontSize는 동적으로 적용
   },
   userName: {
-    fontSize: 24,
     fontWeight: 'bold',
     color: '#333333',
-    marginBottom: 8,
+    // fontSize, marginBottom은 동적으로 적용
   },
   userRole: {
-    fontSize: 14,
     color: '#666666',
-    marginLeft: 6,
     fontWeight: '500',
+    // fontSize, marginLeft은 동적으로 적용
   },
 
   // 사용자 정보 리스트
@@ -1416,33 +1521,29 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
     backgroundColor: '#F8F9FA',
     borderRadius: 12,
+    // paddingVertical, paddingHorizontal은 동적으로 적용
   },
   userInfoLeft: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   userInfoIconContainer: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
     backgroundColor: '#F0F9F7',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
+    // width, height, borderRadius, marginRight은 동적으로 적용
   },
   userInfoLabel: {
-    fontSize: 16,
     color: '#666666',
     fontWeight: '500',
+    // fontSize는 동적으로 적용
   },
   userInfoValue: {
-    fontSize: 16,
     color: '#333333',
     fontWeight: '600',
+    // fontSize는 동적으로 적용
   },
 
   // 설정 섹션
@@ -1537,7 +1638,6 @@ const styles = StyleSheet.create({
   logoutButton: {
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
-    padding: 20,
     alignItems: 'center',
     borderWidth: 2,
     borderColor: '#FF3B30',
@@ -1547,21 +1647,22 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 2,
     marginBottom: 12,
+    // padding은 동적으로 적용
   },
   logoutButtonText: {
-    fontSize: 18,
     color: '#FF3B30',
     fontWeight: '700',
+    // fontSize는 동적으로 적용
   },
   deleteAccountButton: {
     backgroundColor: 'transparent',
-    paddingVertical: 12,
     alignItems: 'center',
+    // paddingVertical은 동적으로 적용
   },
   deleteAccountButtonText: {
-    fontSize: 14,
     color: '#999999',
     fontWeight: '500',
+    // fontSize는 동적으로 적용
   },
   loadingContainer: {
     padding: 20,
@@ -1608,16 +1709,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#E5E5E7',
     paddingTop: Platform.OS === 'ios' ? 60 : 20,
+    // paddingHorizontal, paddingVertical은 동적으로 적용
   },
   modalTitle: {
-    fontSize: 20,
     fontWeight: 'bold',
     color: '#333333',
+    // fontSize는 동적으로 적용
   },
   modalCloseButton: {
     padding: 4,
@@ -1626,11 +1726,11 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   modalScrollContent: {
-    padding: 20,
+    // padding은 동적으로 적용
   },
   modalText: {
-    fontSize: 14,
     lineHeight: 22,
     color: '#333333',
+    // fontSize는 동적으로 적용
   },
 });

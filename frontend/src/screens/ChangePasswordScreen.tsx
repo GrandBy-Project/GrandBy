@@ -174,8 +174,6 @@ const styles = StyleSheet.create({
     marginBottom: 24,
     flexDirection: 'row',
     alignItems: 'center',
-    borderLeftWidth: 4,
-    borderLeftColor: '#1976D2',
   },
   infoText: {
     flex: 1,
