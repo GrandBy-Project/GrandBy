@@ -17,6 +17,7 @@ import {
   Platform,
   UIManager,
   Modal,
+  Pressable,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -29,6 +30,7 @@ import apiClient, { API_BASE_URL } from '../api/client';
 import { useFontSizeStore } from '../store/fontSizeStore';
 import { useResponsive, getResponsiveFontSize, getResponsivePadding, getResponsiveSize } from '../hooks/useResponsive';
 import { getConnections, deleteConnection, ConnectionWithUserInfo } from '../api/connections';
+import { Colors } from '../constants/Colors';
 
 export const MyPageScreen = () => {
   const router = useRouter();
@@ -45,6 +47,23 @@ export const MyPageScreen = () => {
   const [isLoadingElderly, setIsLoadingElderly] = useState(false);
   const [showPrivacyPolicy, setShowPrivacyPolicy] = useState(false);
   const [showTerms, setShowTerms] = useState(false);
+  
+  // 확인 모달 상태
+  const [confirmModal, setConfirmModal] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    confirmText?: string;
+    cancelText?: string;
+    onConfirm?: () => void;
+    onCancel?: () => void;
+  }>({
+    visible: false,
+    title: '',
+    message: '',
+    confirmText: '확인',
+    cancelText: '취소',
+  });
 
   // Android에서 LayoutAnimation 활성화
   if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -215,62 +234,92 @@ export const MyPageScreen = () => {
 
   // 연결 해제 처리 (어르신용 - 보호자 해제)
   const handleDisconnectCaregiver = (caregiver: ConnectionWithUserInfo) => {
-    Alert.alert(
-      '연결 해제',
-      `${caregiver.name} 보호자와의 연결을 해제하시겠습니까?\n\n연결 해제 후:\n• 해당 보호자는 할 일을 추가할 수 없습니다\n• 해당 보호자는 일기장을 볼 수 없습니다\n• 연결을 다시 설정하려면 보호자가 다시 요청해야 합니다`,
-      [
-        { text: '취소', style: 'cancel' },
-        {
-          text: '해제',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              setIsLoadingCaregivers(true);
-              await deleteConnection(caregiver.connection_id);
-              Alert.alert('완료', '연결이 해제되었습니다.');
-              // 목록 새로고침
-              await loadConnectedCaregivers();
-            } catch (error: any) {
-              console.error('연결 해제 실패:', error);
-              const errorMessage = error.response?.data?.detail || '연결 해제 중 오류가 발생했습니다.';
-              Alert.alert('오류', errorMessage);
-            } finally {
-              setIsLoadingCaregivers(false);
-            }
-          },
-        },
-      ]
-    );
+    setConfirmModal({
+      visible: true,
+      title: '연결 해제',
+      message: `${caregiver.name} 보호자와의 연결을 해제하시겠습니까?\n\n연결 해제 후:\n• 해당 보호자는 할 일을 추가할 수 없습니다\n• 해당 보호자는 일기장을 볼 수 없습니다\n• 연결을 다시 설정하려면 보호자가 다시 요청해야 합니다`,
+      confirmText: '해제',
+      cancelText: '취소',
+      onConfirm: async () => {
+        setConfirmModal(prev => ({ ...prev, visible: false }));
+        try {
+          setIsLoadingCaregivers(true);
+          await deleteConnection(caregiver.connection_id);
+          setConfirmModal({
+            visible: true,
+            title: '완료',
+            message: '연결이 해제되었습니다.',
+            confirmText: '확인',
+            onConfirm: () => {
+              setConfirmModal(prev => ({ ...prev, visible: false }));
+            },
+          });
+          await loadConnectedCaregivers();
+        } catch (error: any) {
+          console.error('연결 해제 실패:', error);
+          const errorMessage = error.response?.data?.detail || '연결 해제 중 오류가 발생했습니다.';
+          setConfirmModal({
+            visible: true,
+            title: '오류',
+            message: errorMessage,
+            confirmText: '확인',
+            onConfirm: () => {
+              setConfirmModal(prev => ({ ...prev, visible: false }));
+            },
+          });
+        } finally {
+          setIsLoadingCaregivers(false);
+        }
+      },
+      onCancel: () => {
+        setConfirmModal(prev => ({ ...prev, visible: false }));
+      },
+    });
   };
 
   // 연결 해제 처리 (보호자용 - 어르신 해제)
   const handleDisconnectElderly = (elderly: ConnectionWithUserInfo) => {
-    Alert.alert(
-      '연결 해제',
-      `${elderly.name} 어르신과의 연결을 해제하시겠습니까?\n\n연결 해제 후:\n• 해당 어르신의 할 일을 관리할 수 없습니다\n• 해당 어르신의 일기장을 볼 수 없습니다\n• 연결을 다시 설정하려면 다시 연결 요청을 해야 합니다`,
-      [
-        { text: '취소', style: 'cancel' },
-        {
-          text: '해제',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              setIsLoadingElderly(true);
-              await deleteConnection(elderly.connection_id);
-              Alert.alert('완료', '연결이 해제되었습니다.');
-              // 목록 새로고침
-              await loadConnectedElderly();
-            } catch (error: any) {
-              console.error('연결 해제 실패:', error);
-              const errorMessage = error.response?.data?.detail || '연결 해제 중 오류가 발생했습니다.';
-              Alert.alert('오류', errorMessage);
-            } finally {
-              setIsLoadingElderly(false);
-            }
-          },
-        },
-      ]
-    );
+    setConfirmModal({
+      visible: true,
+      title: '연결 해제',
+      message: `${elderly.name} 어르신과의 연결을 해제하시겠습니까?\n\n연결 해제 후:\n• 해당 어르신의 할 일을 관리할 수 없습니다\n• 해당 어르신의 일기장을 볼 수 없습니다\n• 연결을 다시 설정하려면 다시 연결 요청을 해야 합니다`,
+      confirmText: '해제',
+      cancelText: '취소',
+      onConfirm: async () => {
+        setConfirmModal(prev => ({ ...prev, visible: false }));
+        try {
+          setIsLoadingElderly(true);
+          await deleteConnection(elderly.connection_id);
+          setConfirmModal({
+            visible: true,
+            title: '완료',
+            message: '연결이 해제되었습니다.',
+            confirmText: '확인',
+            onConfirm: () => {
+              setConfirmModal(prev => ({ ...prev, visible: false }));
+            },
+          });
+          await loadConnectedElderly();
+        } catch (error: any) {
+          console.error('연결 해제 실패:', error);
+          const errorMessage = error.response?.data?.detail || '연결 해제 중 오류가 발생했습니다.';
+          setConfirmModal({
+            visible: true,
+            title: '오류',
+            message: errorMessage,
+            confirmText: '확인',
+            onConfirm: () => {
+              setConfirmModal(prev => ({ ...prev, visible: false }));
+            },
+          });
+        } finally {
+          setIsLoadingElderly(false);
+        }
+      },
+      onCancel: () => {
+        setConfirmModal(prev => ({ ...prev, visible: false }));
+      },
+    });
   };
 
   // 개인정보 처리방침 텍스트
@@ -591,55 +640,65 @@ export const MyPageScreen = () => {
   };
 
   const handleDeleteAccount = async () => {
-    Alert.alert(
-      '계정 삭제',
-      '계정을 삭제하시겠습니까?\n\n⚠️ 중요:\n• 30일 이내에는 복구 가능합니다\n• 30일 후에는 모든 데이터가 영구 삭제됩니다\n• 관련된 할일, 일기 등이 익명화됩니다',
-      [
-        { text: '취소', style: 'cancel' },
-        {
-          text: '삭제',
-          style: 'destructive',
-          onPress: () => {
-            // 비밀번호 확인 (소셜 로그인이 아닌 경우)
-            if (user?.auth_provider === 'email') {
-              Alert.prompt(
-                '본인 확인',
-                '계정 삭제를 위해 비밀번호를 입력해주세요.',
-                [
-                  { text: '취소', style: 'cancel' },
-                  {
-                    text: '삭제',
-                    style: 'destructive',
-                    onPress: async (password?: string) => {
-                      if (!password) {
-                        Alert.alert('오류', '비밀번호를 입력해주세요.');
-                        return;
-                      }
-                      await deleteAccount(password);
-                    },
-                  },
-                ],
-                'secure-text'
-              );
-            } else {
-              // 소셜 로그인 사용자
-              Alert.alert(
-                '계정 삭제 확인',
-                '정말로 계정을 삭제하시겠습니까?',
-                [
-                  { text: '취소', style: 'cancel' },
-                  {
-                    text: '삭제',
-                    style: 'destructive',
-                    onPress: async () => await deleteAccount(''),
-                  },
-                ]
-              );
-            }
-          },
-        },
-      ]
-    );
+    setConfirmModal({
+      visible: true,
+      title: '계정 삭제',
+      message: '계정을 삭제하시겠습니까?\n\n⚠️ 중요:\n• 30일 이내에는 복구 가능합니다\n• 30일 후에는 모든 데이터가 영구 삭제됩니다\n• 관련된 할일, 일기 등이 익명화됩니다',
+      confirmText: '삭제',
+      cancelText: '취소',
+      onConfirm: () => {
+        setConfirmModal(prev => ({ ...prev, visible: false }));
+        // 비밀번호 확인 (소셜 로그인이 아닌 경우)
+        if (user?.auth_provider === 'email') {
+          Alert.prompt(
+            '본인 확인',
+            '계정 삭제를 위해 비밀번호를 입력해주세요.',
+            [
+              { text: '취소', style: 'cancel' },
+              {
+                text: '삭제',
+                style: 'destructive',
+                onPress: async (password?: string) => {
+                  if (!password) {
+                    setConfirmModal({
+                      visible: true,
+                      title: '오류',
+                      message: '비밀번호를 입력해주세요.',
+                      confirmText: '확인',
+                      onConfirm: () => {
+                        setConfirmModal(prev => ({ ...prev, visible: false }));
+                      },
+                    });
+                    return;
+                  }
+                  await deleteAccount(password);
+                },
+              },
+            ],
+            'secure-text'
+          );
+        } else {
+          // 소셜 로그인 사용자
+          setConfirmModal({
+            visible: true,
+            title: '계정 삭제 확인',
+            message: '정말로 계정을 삭제하시겠습니까?',
+            confirmText: '삭제',
+            cancelText: '취소',
+            onConfirm: async () => {
+              setConfirmModal(prev => ({ ...prev, visible: false }));
+              await deleteAccount('');
+            },
+            onCancel: () => {
+              setConfirmModal(prev => ({ ...prev, visible: false }));
+            },
+          });
+        }
+      },
+      onCancel: () => {
+        setConfirmModal(prev => ({ ...prev, visible: false }));
+      },
+    });
   };
 
   const deleteAccount = async (password: string) => {
@@ -653,44 +712,50 @@ export const MyPageScreen = () => {
         },
       });
 
-      Alert.alert(
-        '계정 삭제 완료',
-        '계정이 삭제되었습니다.\n30일 이내에 다시 로그인하시면 계정을 복구할 수 있습니다.',
-        [
-          {
-            text: '확인',
-            onPress: async () => {
-              await logout();
-              router.replace('/');
-            },
-          },
-        ]
-      );
+      setConfirmModal({
+        visible: true,
+        title: '계정 삭제 완료',
+        message: '계정이 삭제되었습니다.\n30일 이내에 다시 로그인하시면 계정을 복구할 수 있습니다.',
+        confirmText: '확인',
+        onConfirm: async () => {
+          setConfirmModal(prev => ({ ...prev, visible: false }));
+          await logout();
+          router.replace('/');
+        },
+      });
     } catch (error: any) {
       console.error('계정 삭제 오류:', error);
       const errorMessage = error.response?.data?.detail || '계정 삭제에 실패했습니다.';
-      Alert.alert('오류', errorMessage);
+      setConfirmModal({
+        visible: true,
+        title: '오류',
+        message: errorMessage,
+        confirmText: '확인',
+        onConfirm: () => {
+          setConfirmModal(prev => ({ ...prev, visible: false }));
+        },
+      });
     } finally {
       setIsUploading(false);
     }
   };
 
   const handleLogout = async () => {
-    Alert.alert(
-      '로그아웃',
-      '로그아웃 하시겠습니까?',
-      [
-        { text: '취소', style: 'cancel' },
-        {
-          text: '로그아웃',
-          style: 'destructive',
-          onPress: async () => {
-            await logout();
-            router.replace('/');
-          },
-        },
-      ]
-    );
+    setConfirmModal({
+      visible: true,
+      title: '로그아웃',
+      message: '로그아웃 하시겠습니까?',
+      confirmText: '로그아웃',
+      cancelText: '취소',
+      onConfirm: async () => {
+        setConfirmModal(prev => ({ ...prev, visible: false }));
+        await logout();
+        router.replace('/');
+      },
+      onCancel: () => {
+        setConfirmModal(prev => ({ ...prev, visible: false }));
+      },
+    });
   };
 
   // 사용자 정보 섹션
@@ -806,12 +871,8 @@ export const MyPageScreen = () => {
   const logoutButtonTextFontSize = getResponsiveFontSize(16, scale);
 
   // 모달 반응형 크기
-  const modalHeaderPaddingHorizontal = getResponsivePadding(20, scale);
-  const modalHeaderPaddingVertical = getResponsivePadding(16, scale);
-  const modalTitleFontSize = getResponsiveFontSize(20, scale);
-  const modalCloseIconSize = getResponsiveFontSize(24, scale);
-  const modalTextFontSize = getResponsiveFontSize(14, scale);
-  const modalScrollContentPadding = getResponsivePadding(20, scale);
+  const modalTitleFontSize = getResponsiveFontSize(18, scale);
+  const modalTextFontSize = getResponsiveFontSize(15, scale);
 
   // 컨텐츠 패딩/마진 반응형 크기
   const contentPadding = getResponsivePadding(16, scale);
@@ -1326,34 +1387,37 @@ export const MyPageScreen = () => {
         transparent={false}
         onRequestClose={() => setShowPrivacyPolicy(false)}
       >
-        <View style={[styles.modalContainer, { paddingTop: insets.top }]}>
+        <View style={[styles.fullScreenModalContainer, { paddingTop: insets.top }]}>
           <View style={[
-            styles.modalHeader,
+            styles.fullScreenModalHeader,
             {
-              paddingHorizontal: modalHeaderPaddingHorizontal,
-              paddingVertical: modalHeaderPaddingVertical,
+              paddingHorizontal: getResponsivePadding(20, scale),
+              paddingVertical: getResponsivePadding(16, scale),
             }
           ]}>
-            <Text style={[styles.modalTitle, { fontSize: modalTitleFontSize }]}>개인정보 처리방침</Text>
+            <Text style={[styles.fullScreenModalTitle, { fontSize: modalTitleFontSize }]}>
+              개인정보 처리방침
+            </Text>
             <TouchableOpacity
-              style={styles.modalCloseButton}
+              style={styles.fullScreenModalCloseButton}
               onPress={() => setShowPrivacyPolicy(false)}
+              activeOpacity={0.7}
             >
-              <Ionicons name="close" size={modalCloseIconSize} color="#333333" />
+              <Ionicons name="close" size={getResponsiveFontSize(24, scale)} color="#333333" />
             </TouchableOpacity>
           </View>
           <ScrollView 
-            style={styles.modalContent}
+            style={styles.fullScreenModalContent}
             contentContainerStyle={[
-              styles.modalScrollContent,
+              styles.fullScreenModalScrollContent,
               {
-                padding: modalScrollContentPadding,
-                paddingBottom: Math.max(insets.bottom, 40) + modalScrollContentPadding,
+                padding: getResponsivePadding(20, scale),
+                paddingBottom: Math.max(insets.bottom, 40) + getResponsivePadding(20, scale),
               }
             ]}
             showsVerticalScrollIndicator={true}
           >
-            <Text style={[styles.modalText, { fontSize: modalTextFontSize }]}>
+            <Text style={[styles.fullScreenModalText, { fontSize: modalTextFontSize }]}>
               {getPrivacyPolicyText()}
             </Text>
           </ScrollView>
@@ -1367,38 +1431,85 @@ export const MyPageScreen = () => {
         transparent={false}
         onRequestClose={() => setShowTerms(false)}
       >
-        <View style={[styles.modalContainer, { paddingTop: insets.top }]}>
+        <View style={[styles.fullScreenModalContainer, { paddingTop: insets.top }]}>
           <View style={[
-            styles.modalHeader,
+            styles.fullScreenModalHeader,
             {
-              paddingHorizontal: modalHeaderPaddingHorizontal,
-              paddingVertical: modalHeaderPaddingVertical,
+              paddingHorizontal: getResponsivePadding(20, scale),
+              paddingVertical: getResponsivePadding(16, scale),
             }
           ]}>
-            <Text style={[styles.modalTitle, { fontSize: modalTitleFontSize }]}>이용약관</Text>
+            <Text style={[styles.fullScreenModalTitle, { fontSize: modalTitleFontSize }]}>
+              이용약관
+            </Text>
             <TouchableOpacity
-              style={styles.modalCloseButton}
+              style={styles.fullScreenModalCloseButton}
               onPress={() => setShowTerms(false)}
+              activeOpacity={0.7}
             >
-              <Ionicons name="close" size={modalCloseIconSize} color="#333333" />
+              <Ionicons name="close" size={getResponsiveFontSize(24, scale)} color="#333333" />
             </TouchableOpacity>
           </View>
           <ScrollView 
-            style={styles.modalContent}
+            style={styles.fullScreenModalContent}
             contentContainerStyle={[
-              styles.modalScrollContent,
+              styles.fullScreenModalScrollContent,
               {
-                padding: modalScrollContentPadding,
-                paddingBottom: Math.max(insets.bottom, 40) + modalScrollContentPadding,
+                padding: getResponsivePadding(20, scale),
+                paddingBottom: Math.max(insets.bottom, 40) + getResponsivePadding(20, scale),
               }
             ]}
             showsVerticalScrollIndicator={true}
           >
-            <Text style={[styles.modalText, { fontSize: modalTextFontSize }]}>
+            <Text style={[styles.fullScreenModalText, { fontSize: modalTextFontSize }]}>
               {getTermsText()}
             </Text>
           </ScrollView>
         </View>
+      </Modal>
+
+      {/* 확인 모달 (로그아웃, 계정 삭제, 연결 해제 등) */}
+      <Modal
+        visible={confirmModal.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setConfirmModal(prev => ({ ...prev, visible: false }))}
+      >
+        <Pressable 
+          style={styles.modalBackdrop} 
+          onPress={() => setConfirmModal(prev => ({ ...prev, visible: false }))}
+        >
+          <Pressable style={styles.commonModalContainer} onPress={() => {}}>
+            <Text style={[styles.commonModalTitle, { fontSize: modalTitleFontSize }]}>
+              {confirmModal.title}
+            </Text>
+            <Text style={[styles.commonModalText, { fontSize: modalTextFontSize, marginBottom: 16 }]}>
+              {confirmModal.message}
+            </Text>
+            <View style={styles.confirmModalActions}>
+              {confirmModal.onCancel && (
+                <TouchableOpacity
+                  style={[styles.confirmModalButton, styles.confirmModalCancelButton]}
+                  onPress={confirmModal.onCancel}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.confirmModalCancelButtonText}>
+                    {confirmModal.cancelText || '취소'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity
+                style={[styles.confirmModalButton, styles.confirmModalConfirmButton]}
+                onPress={confirmModal.onConfirm}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.confirmModalConfirmButtonText}>
+                  {confirmModal.confirmText || '확인'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
       </Modal>
     </View>
   );
@@ -1701,36 +1812,116 @@ const styles = StyleSheet.create({
   bottomSpacer: {
     height: 20,
   },
-  modalContainer: {
+  // 공통 모달 스타일 (GlobalAlertProvider 디자인 참고)
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  commonModalContainer: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 12,
+    maxHeight: '90%',
+  },
+  commonModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  commonModalTitle: {
+    fontWeight: '700',
+    color: '#111827',
+    flex: 1,
+    // fontSize는 동적으로 적용
+  },
+  commonModalCloseButton: {
+    padding: 4,
+    marginLeft: 12,
+  },
+  commonModalContent: {
+    flex: 1,
+    maxHeight: 600,
+  },
+  commonModalScrollContent: {
+    paddingBottom: 20,
+    // paddingBottom은 동적으로 적용
+  },
+  commonModalText: {
+    color: '#374151',
+    lineHeight: 22,
+    // fontSize는 동적으로 적용
+  },
+  // 전체 화면 모달 스타일 (개인정보 처리방침, 이용약관용)
+  fullScreenModalContainer: {
     flex: 1,
     backgroundColor: '#FFFFFF',
   },
-  modalHeader: {
+  fullScreenModalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     borderBottomWidth: 1,
     borderBottomColor: '#E5E5E7',
-    paddingTop: Platform.OS === 'ios' ? 60 : 20,
+    backgroundColor: '#FFFFFF',
     // paddingHorizontal, paddingVertical은 동적으로 적용
   },
-  modalTitle: {
+  fullScreenModalTitle: {
     fontWeight: 'bold',
     color: '#333333',
+    flex: 1,
     // fontSize는 동적으로 적용
   },
-  modalCloseButton: {
+  fullScreenModalCloseButton: {
     padding: 4,
+    marginLeft: 12,
+    // padding은 동적으로 적용 가능
   },
-  modalContent: {
+  fullScreenModalContent: {
     flex: 1,
   },
-  modalScrollContent: {
+  fullScreenModalScrollContent: {
     // padding은 동적으로 적용
   },
-  modalText: {
-    lineHeight: 22,
+  fullScreenModalText: {
     color: '#333333',
+    lineHeight: 22,
     // fontSize는 동적으로 적용
+  },
+  confirmModalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
+    marginTop: 4,
+  },
+  confirmModalButton: {
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    minWidth: 70,
+    alignItems: 'center',
+  },
+  confirmModalCancelButton: {
+    backgroundColor: '#F3F4F6',
+  },
+  confirmModalConfirmButton: {
+    backgroundColor: Colors.primary,
+  },
+  confirmModalCancelButtonText: {
+    color: '#374151',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  confirmModalConfirmButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
   },
 });
