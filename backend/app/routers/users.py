@@ -555,9 +555,52 @@ async def delete_connection(
             detail="활성 연결만 해제할 수 있습니다."
         )
     
+    # 상대방 정보 저장 (알림 전송용)
+    other_user_id = connection.caregiver_id if current_user.user_id == connection.elderly_id else connection.elderly_id
+    other_user = db.query(User).filter(User.user_id == other_user_id).first()
+    current_user_name = current_user.name
+    
     # 연결 해제
     db.delete(connection)
+    
+    # 관련 알림 삭제
+    db.query(Notification).filter(
+        Notification.related_id == connection_id
+    ).delete()
+    
     db.commit()
+    
+    # 🔔 연결 해제 알림 생성 및 전송 (비동기)
+    if other_user:
+        try:
+            notification = Notification(
+                notification_id=str(uuid.uuid4()),
+                user_id=other_user_id,
+                type=NotificationType.CONNECTION_ACCEPTED,  # 임시로 사용 (CONNECTION_DISCONNECTED 타입이 없음)
+                title="연결 해제",
+                message=f"{current_user_name}님이 연결을 해제했습니다.",
+                related_id=connection_id,
+                is_pushed=False
+            )
+            db.add(notification)
+            db.commit()
+            
+            # 푸시 알림 전송 (비동기)
+            try:
+                from app.services.notification_service import NotificationService
+                await NotificationService.create_and_send_notification(
+                    db=db,
+                    user_id=other_user_id,
+                    notification_type=NotificationType.CONNECTION_ACCEPTED,
+                    title="연결 해제",
+                    message=f"{current_user_name}님이 연결을 해제했습니다.",
+                    related_id=connection_id,
+                    notification_type_key='connection_enabled'  # 임시로 사용
+                )
+            except Exception as notify_error:
+                logger.error(f"⚠️ 연결 해제 알림 전송 실패 (연결은 해제됨): {str(notify_error)}")
+        except Exception as notification_error:
+            logger.error(f"⚠️ 연결 해제 알림 생성 실패: {str(notification_error)}")
     
     return {"message": "연결이 해제되었습니다."}
 

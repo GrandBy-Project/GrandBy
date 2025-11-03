@@ -27,6 +27,7 @@ import { UserRole } from '../types';
 import apiClient, { API_BASE_URL } from '../api/client';
 import { useFontSizeStore } from '../store/fontSizeStore';
 import { useResponsive, getResponsiveFontSize, getResponsivePadding, getResponsiveSize } from '../hooks/useResponsive';
+import { getConnections, deleteConnection, ConnectionWithUserInfo } from '../api/connections';
 
 export const MyPageScreen = () => {
   const router = useRouter();
@@ -37,6 +38,8 @@ export const MyPageScreen = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [isNotificationExpanded, setIsNotificationExpanded] = useState(false);
   const slideAnim = useRef(new Animated.Value(0)).current;
+  const [connectedCaregivers, setConnectedCaregivers] = useState<ConnectionWithUserInfo[]>([]);
+  const [isLoadingCaregivers, setIsLoadingCaregivers] = useState(false);
 
   // Android에서 LayoutAnimation 활성화
   if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -58,6 +61,13 @@ export const MyPageScreen = () => {
   useEffect(() => {
     loadNotificationSettings();
   }, []);
+
+  // 연결된 보호자 목록 로드 (어르신만)
+  useEffect(() => {
+    if (user?.role === UserRole.ELDERLY) {
+      loadConnectedCaregivers();
+    }
+  }, [user]);
 
   const loadNotificationSettings = async () => {
     try {
@@ -165,6 +175,51 @@ export const MyPageScreen = () => {
   };
 
   const notificationSettingsList = getNotificationSettingsList();
+
+  // 연결된 보호자 목록 로드
+  const loadConnectedCaregivers = async () => {
+    try {
+      setIsLoadingCaregivers(true);
+      const response = await getConnections();
+      setConnectedCaregivers(response.active || []);
+      console.log('✅ 연결된 보호자 목록 로드 성공:', response.active?.length || 0);
+    } catch (error: any) {
+      console.error('연결된 보호자 목록 로드 실패:', error);
+      setConnectedCaregivers([]);
+    } finally {
+      setIsLoadingCaregivers(false);
+    }
+  };
+
+  // 연결 해제 처리
+  const handleDisconnectCaregiver = (caregiver: ConnectionWithUserInfo) => {
+    Alert.alert(
+      '연결 해제',
+      `${caregiver.name} 보호자와의 연결을 해제하시겠습니까?\n\n연결 해제 후:\n• 해당 보호자는 할 일을 추가할 수 없습니다\n• 해당 보호자는 일기장을 볼 수 없습니다\n• 연결을 다시 설정하려면 보호자가 다시 요청해야 합니다`,
+      [
+        { text: '취소', style: 'cancel' },
+        {
+          text: '해제',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setIsLoadingCaregivers(true);
+              await deleteConnection(caregiver.connection_id);
+              Alert.alert('완료', '연결이 해제되었습니다.');
+              // 목록 새로고침
+              await loadConnectedCaregivers();
+            } catch (error: any) {
+              console.error('연결 해제 실패:', error);
+              const errorMessage = error.response?.data?.detail || '연결 해제 중 오류가 발생했습니다.';
+              Alert.alert('오류', errorMessage);
+            } finally {
+              setIsLoadingCaregivers(false);
+            }
+          },
+        },
+      ]
+    );
+  };
 
   // 알림 설정 펼침/접힘 토글
   const toggleNotificationExpanded = () => {
@@ -607,6 +662,84 @@ export const MyPageScreen = () => {
             ))}
           </View>
         </View>
+
+        {/* 연결된 보호자 관리 (어르신만) */}
+        {user?.role === UserRole.ELDERLY && (
+          <View style={[styles.settingsSection, { marginBottom: sectionMarginBottom }]}>
+            <View style={[styles.sectionHeader, { marginBottom: sectionHeaderMarginBottom }]}>
+              <View style={[
+                styles.sectionIconContainer,
+                { 
+                  width: sectionIconSize,
+                  height: sectionIconSize,
+                  borderRadius: sectionIconSize / 2,
+                  marginRight: sectionIconMarginRight,
+                }
+              ]}>
+                <Ionicons name="people-outline" size={sectionIconFontSize} color="#34B79F" />
+              </View>
+              <Text style={[styles.sectionTitle, { fontSize: sectionTitleFontSize }]}>연결된 보호자</Text>
+            </View>
+            <View style={styles.settingsList}>
+              {isLoadingCaregivers ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="small" color="#34B79F" />
+                  <Text style={styles.loadingText}>로딩 중...</Text>
+                </View>
+              ) : connectedCaregivers.length === 0 ? (
+                <View style={styles.emptyContainer}>
+                  <Ionicons name="people-outline" size={getResponsiveFontSize(48, scale)} color="#C7C7CC" />
+                  <Text style={[styles.emptyText, { fontSize: getResponsiveFontSize(14, scale) }]}>
+                    연결된 보호자가 없습니다
+                  </Text>
+                </View>
+              ) : (
+                connectedCaregivers.map((caregiver) => (
+                  <View key={caregiver.connection_id} style={[styles.settingItem, { padding: settingItemPadding }]}>
+                    <View style={styles.settingLeft}>
+                      <View style={[
+                        styles.settingIconContainer,
+                        {
+                          backgroundColor: '#E8F5E9',
+                          width: settingIconSize,
+                          height: settingIconSize,
+                          borderRadius: settingIconSize / 2,
+                          marginRight: settingIconMarginRight,
+                        }
+                      ]}>
+                        <Ionicons name="person" size={settingIconInnerSize} color="#4CAF50" />
+                      </View>
+                      <View style={styles.settingTextContainer}>
+                        <Text style={[styles.settingTitle, { fontSize: settingTitleFontSize }]} numberOfLines={1}>
+                          {caregiver.name}
+                        </Text>
+                        {caregiver.email && (
+                          <Text style={[styles.settingDescription, { fontSize: settingDescriptionFontSize }]} numberOfLines={1}>
+                            {caregiver.email}
+                          </Text>
+                        )}
+                        {caregiver.phone_number && (
+                          <Text style={[styles.settingDescription, { fontSize: settingDescriptionFontSize }]} numberOfLines={1}>
+                            {caregiver.phone_number}
+                          </Text>
+                        )}
+                      </View>
+                    </View>
+                    <TouchableOpacity
+                      onPress={() => handleDisconnectCaregiver(caregiver)}
+                      activeOpacity={0.7}
+                      style={styles.disconnectButton}
+                    >
+                      <Text style={[styles.disconnectButtonText, { fontSize: getResponsiveFontSize(14, scale) }]}>
+                        해제
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                ))
+              )}
+            </View>
+          </View>
+        )}
 
         {/* 개인정보 관리 */}
         <View style={[styles.settingsSection, { marginBottom: sectionMarginBottom }]}>
@@ -1127,6 +1260,40 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#999999',
     fontWeight: '500',
+  },
+  loadingContainer: {
+    padding: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingText: {
+    marginTop: 8,
+    fontSize: 14,
+    color: '#666666',
+  },
+  emptyContainer: {
+    padding: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyText: {
+    marginTop: 12,
+    color: '#999999',
+    textAlign: 'center',
+    // fontSize는 동적으로 적용
+  },
+  disconnectButton: {
+    backgroundColor: '#FFEBEE',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#FFCDD2',
+  },
+  disconnectButtonText: {
+    color: '#E53935',
+    fontWeight: '600',
+    // fontSize는 동적으로 적용
   },
   bottomSpacer: {
     height: 20,
