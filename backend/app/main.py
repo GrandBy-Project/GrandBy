@@ -353,69 +353,69 @@ async def process_streaming_response(
             audio_processor.stop_bot_speaking()
 
 
-async def _evaluate_end_after_first_audio(rtzr_stt, call_sid: str, user_text: str):
-    """
-    마지막 TTS 재생 후 백그라운드에서 LLM 종료 판단 수행
+# async def _evaluate_end_after_first_audio(rtzr_stt, call_sid: str, user_text: str):
+#     """
+#     마지막 TTS 재생 후 백그라운드에서 LLM 종료 판단 수행
     
-    Args:
-        rtzr_stt: RTZR STT 인스턴스
-        call_sid: 통화 SID
-        user_text: 사용자 발화 텍스트
-    """
-    try:
-        from app.services.ai_call.end_decision import EndDecisionSignals
+#     Args:
+#         rtzr_stt: RTZR STT 인스턴스
+#         call_sid: 통화 SID
+#         user_text: 사용자 발화 텍스트
+#     """
+#     try:
+#         from app.services.ai_call.end_decision import EndDecisionSignals
         
-        # 🤖 LLM 기반 종료 판단 수행
-        score, breakdown = rtzr_stt._end_engine.score_with_llm(
-            rtzr_stt._signals, 
-            rtzr_stt._conversation_history
-        )
+#         # 🤖 LLM 기반 종료 판단 수행
+#         score, breakdown = rtzr_stt._end_engine.score_with_llm(
+#             rtzr_stt._signals, 
+#             rtzr_stt._conversation_history
+#         )
 
-        # 종료 판단 결과 처리 (first_audio_evaluated 플래그로 중복 방지)
-        if score == -1:
-            # ⚠️ 최대 통화 시간 임박 경고
-            decision = 'max_time_warning'
-            if rtzr_stt.results_queue:
-                await rtzr_stt.results_queue.put({
-                    'event': 'max_time_warning',
-                    'text': user_text,
-                    'is_final': True,
-                    'breakdown': breakdown
-                })
-                logger.info("⚠️ 최대 통화 시간 경고 이벤트 전달 완료")
-        elif score >= 100:
-            decision = 'hard_end'
-            # 하드 종료 이벤트를 results_queue에 전달
-            if rtzr_stt.results_queue and not (hasattr(rtzr_stt, '_first_audio_evaluated') and rtzr_stt._first_audio_evaluated):
-                rtzr_stt._first_audio_evaluated = True  # 중복 방지 플래그
-                await rtzr_stt.results_queue.put({
-                    'event': 'hard_end',
-                    'text': user_text,
-                    'is_final': True
-                })
-                logger.info("✅ 하드 종료 이벤트 전달 완료")
+#         # 종료 판단 결과 처리 (first_audio_evaluated 플래그로 중복 방지)
+#         if score == -1:
+#             # ⚠️ 최대 통화 시간 임박 경고
+#             decision = 'max_time_warning'
+#             if rtzr_stt.results_queue:
+#                 await rtzr_stt.results_queue.put({
+#                     'event': 'max_time_warning',
+#                     'text': user_text,
+#                     'is_final': True,
+#                     'breakdown': breakdown
+#                 })
+#                 logger.info("⚠️ 최대 통화 시간 경고 이벤트 전달 완료")
+#         elif score >= 100:
+#             decision = 'hard_end'
+#             # 하드 종료 이벤트를 results_queue에 전달
+#             if rtzr_stt.results_queue and not (hasattr(rtzr_stt, '_first_audio_evaluated') and rtzr_stt._first_audio_evaluated):
+#                 rtzr_stt._first_audio_evaluated = True  # 중복 방지 플래그
+#                 await rtzr_stt.results_queue.put({
+#                     'event': 'hard_end',
+#                     'text': user_text,
+#                     'is_final': True
+#                 })
+#                 logger.info("✅ 하드 종료 이벤트 전달 완료")
                 
-        # elif score >= 70:
-        #     decision = 'soft_close'
-        #     # 소프트 클로징 이벤트를 results_queue에 전달
-        #     if rtzr_stt.results_queue and not (hasattr(rtzr_stt, '_first_audio_evaluated') and rtzr_stt._first_audio_evaluated):
-        #         rtzr_stt._first_audio_evaluated = True  # 중복 방지 플래그
-        #         await rtzr_stt.results_queue.put({
-        #             'event': 'soft_close_prompt',
-        #             'text': user_text,
-        #             'is_final': True
-        #         })
-        #         logger.info("✅ 소프트 클로징 이벤트 전달 완료")
-        else:
-            decision = 'none'
+#         # elif score >= 70:
+#         #     decision = 'soft_close'
+#         #     # 소프트 클로징 이벤트를 results_queue에 전달
+#         #     if rtzr_stt.results_queue and not (hasattr(rtzr_stt, '_first_audio_evaluated') and rtzr_stt._first_audio_evaluated):
+#         #         rtzr_stt._first_audio_evaluated = True  # 중복 방지 플래그
+#         #         await rtzr_stt.results_queue.put({
+#         #             'event': 'soft_close_prompt',
+#         #             'text': user_text,
+#         #             'is_final': True
+#         #         })
+#         #         logger.info("✅ 소프트 클로징 이벤트 전달 완료")
+#         else:
+#             decision = 'none'
 
-        logger.info(f"🚨 [종료 판단] 첫 TTS 재생 후 판단: {decision} (점수: {score})")
-        logger.info(f"📊 상세 내역: {breakdown}")
+#         logger.info(f"🚨 [종료 판단] 첫 TTS 재생 후 판단: {decision} (점수: {score})")
+#         logger.info(f"📊 상세 내역: {breakdown}")
                 
-    except Exception as e:
-        logger.error(f"❌ 종료 판단 오류: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
+#     except Exception as e:
+#         logger.error(f"❌ 종료 판단 오류: {e}")
+#         import traceback
+#         logger.error(traceback.format_exc())
 
 
 async def llm_to_clova_tts_pipeline(
@@ -534,12 +534,12 @@ async def llm_to_clova_tts_pipeline(
             active_tts_completions[call_sid] = (completion_time, total_playback_duration)
             logger.info(f"📝 [TTS 추적] {call_sid}: 완료 시점={completion_time:.2f}, 재생 시간={total_playback_duration:.2f}초")
                         
-        # 🚀 [마지막 TTS 재생 후] LLM 종료 판단 (백그라운드, 사용자 경험 영향 없음)
-        if rtzr_stt and call_sid:
-            # 백그라운드 태스크로 실행하여 TTS 스트리밍에 영향 없음
-            asyncio.create_task(_evaluate_end_after_first_audio(
-                rtzr_stt, call_sid, user_text
-            ))
+        # # 🚀 [마지막 TTS 재생 후] LLM 종료 판단 (백그라운드, 사용자 경험 영향 없음)
+        # if rtzr_stt and call_sid:
+        #     # 백그라운드 태스크로 실행하여 TTS 스트리밍에 영향 없음
+        #     asyncio.create_task(_evaluate_end_after_first_audio(
+        #         rtzr_stt, call_sid, user_text
+        #     ))
                 
         return total_playback_duration  
         
@@ -1305,9 +1305,9 @@ async def media_stream_handler(
                 # RTZR 실시간 STT 초기화
                 rtzr_stt = RTZRRealtimeSTT()
                 
-                # 🤖 LLM 서비스를 종료 판단 엔진에 주입
-                rtzr_stt._end_engine.set_llm_service(llm_service)
-                logger.info("✅ LLM 기반 종료 판단 엔진 설정 완료")
+                # # 🤖 LLM 서비스를 종료 판단 엔진에 주입
+                # rtzr_stt._end_engine.set_llm_service(llm_service)
+                # logger.info("✅ LLM 기반 종료 판단 엔진 설정 완료")
                 
                 # LLM 부분 결과 수집기 초기화 (백그라운드 전송)
                 async def llm_partial_callback(partial_text: str):
@@ -1410,19 +1410,25 @@ async def media_stream_handler(
                             event_name = result.get('event')
                             logger.debug(f"🔍 [결과 수신] event={event_name}, keys={list(result.keys())}")
                             
-                            if event_name == 'soft_close_prompt':
-                                logger.info("🟡 소프트 클로징 트리거 수신")
                             
                             if event_name == 'max_time_warning':
                                 logger.info("⚠️ [MAX TIME WARNING] 최대 통화 시간 임박 감지")
                                 
-                                # 사용자나 AI가 말하는 중이면 대기
+                                # 1. AI TTS 출력 중인지 체크
                                 if rtzr_stt.is_bot_speaking:
                                     logger.info("⏳ [MAX TIME WARNING] AI 응답 중 - 완료까지 대기")
                                     while rtzr_stt.is_bot_speaking:
                                         await asyncio.sleep(0.1)
                                     # AI 응답 완료 후 추가 대기 (사용자가 응답할 시간)
                                     await asyncio.sleep(2.0)
+                                
+                                # 2. 사용자 발화 중인지 체크
+                                if rtzr_stt.is_user_speaking():
+                                    logger.info("⏳ [MAX TIME WARNING] 사용자 발화 중 - 완료까지 대기")
+                                    while rtzr_stt.is_user_speaking():
+                                        await asyncio.sleep(0.1)
+                                    # 사용자 발화 완료 후 추가 대기
+                                    await asyncio.sleep(0.5)
                                 
                                 # 종료 안내 멘트
                                 warning_message = "오늘 대화 시간이 다 되었어요. 잠시 후 통화가 마무리됩니다."
@@ -1433,8 +1439,8 @@ async def media_stream_handler(
                                         "role": "assistant",
                                         "content": warning_message
                                     })
-                                    # 🤖 LLM 종료 판단을 위한 대화 기록 업데이트
-                                    rtzr_stt.update_conversation_history(conversation_sessions[call_sid])
+                                    # # 🤖 LLM 종료 판단을 위한 대화 기록 업데이트
+                                    # rtzr_stt.update_conversation_history(conversation_sessions[call_sid])
                                 
                                 logger.info(f"🔊 [TTS] 종료 안내 메시지 전송: {warning_message}")
                                 
@@ -1474,33 +1480,33 @@ async def media_stream_handler(
                                     logger.error(f"❌ [MAX TIME WARNING] 통화 종료 오류: {e}")
                                 break
 
-                            if event_name == 'hard_end':
-                                logger.info("🔴 [AUTO END] 종료 트리거 수신")
+                            # if event_name == 'hard_end':
+                            #     logger.info("🔴 [AUTO END] 종료 트리거 수신")
                                 
-                                # ✅ 실제 TTS 재생 완료까지 대기
-                                if call_sid in active_tts_completions:
-                                    completion_time, playback_duration = active_tts_completions[call_sid]
-                                    elapsed = time.time() - completion_time
-                                    remaining_time = playback_duration - elapsed
+                            #     # ✅ 실제 TTS 재생 완료까지 대기
+                            #     if call_sid in active_tts_completions:
+                            #         completion_time, playback_duration = active_tts_completions[call_sid]
+                            #         elapsed = time.time() - completion_time
+                            #         remaining_time = playback_duration - elapsed
                                     
-                                    if remaining_time > 0:
-                                        # 20% 여유 추가, 최대 10초 제한
-                                        wait_time = min(remaining_time * 1.2, 10.0)
-                                        logger.info(f"⏳ [AUTO END] 종료 메시지 재생 완료 대기: {wait_time:.2f}초 (남은 시간: {remaining_time:.2f}초)")
-                                        await asyncio.sleep(wait_time)
-                                        logger.info("✅ [AUTO END] 종료 메시지 재생 완료, 통화 종료")
-                                    else:
-                                        logger.info("✅ [AUTO END] 종료 메시지 이미 재생 완료, 즉시 통화 종료")
+                            #         if remaining_time > 0:
+                            #             # 20% 여유 추가, 최대 10초 제한
+                            #             wait_time = min(remaining_time * 1.2, 10.0)
+                            #             logger.info(f"⏳ [AUTO END] 종료 메시지 재생 완료 대기: {wait_time:.2f}초 (남은 시간: {remaining_time:.2f}초)")
+                            #             await asyncio.sleep(wait_time)
+                            #             logger.info("✅ [AUTO END] 종료 메시지 재생 완료, 통화 종료")
+                            #         else:
+                            #             logger.info("✅ [AUTO END] 종료 메시지 이미 재생 완료, 즉시 통화 종료")
                                     
-                                    # 추적 정보 삭제
-                                    del active_tts_completions[call_sid]
-                                state = 'ending'
-                                # WebSocket 종료
-                                try:
-                                    await websocket.close()
-                                except Exception:
-                                    pass
-                                break
+                            #         # 추적 정보 삭제
+                            #         del active_tts_completions[call_sid]
+                            #     state = 'ending'
+                            #     # WebSocket 종료
+                            #     try:
+                            #         await websocket.close()
+                            #     except Exception:
+                            #         pass
+                            #     break
                             
                             # ====== 일반 STT 처리 ======
                             if 'text' not in result:
@@ -1545,13 +1551,13 @@ async def media_stream_handler(
                                     if call_sid not in conversation_sessions:
                                         conversation_sessions[call_sid] = []
                                     conversation_sessions[call_sid].append({"role": "user", "content": text})
-                                    # 🤖 LLM 종료 판단을 위한 대화 기록 업데이트
-                                    rtzr_stt.update_conversation_history(conversation_sessions[call_sid])
+                                    # # 🤖 LLM 종료 판단을 위한 대화 기록 업데이트
+                                    # rtzr_stt.update_conversation_history(conversation_sessions[call_sid])
                                     
                                     goodbye_text = "그랜비 통화를 종료합니다. 감사합니다. 좋은 하루 보내세요!"
                                     conversation_sessions[call_sid].append({"role": "assistant", "content": goodbye_text})
-                                    # 🤖 LLM 종료 판단을 위한 대화 기록 업데이트
-                                    rtzr_stt.update_conversation_history(conversation_sessions[call_sid])
+                                    # # 🤖 LLM 종료 판단을 위한 대화 기록 업데이트
+                                    # rtzr_stt.update_conversation_history(conversation_sessions[call_sid])
                                     
                                     logger.info("🔊 [TTS] 종료 메시지 전송")
                                     # await send_audio_to_twilio_with_tts(websocket, stream_sid, goodbye_text, None)
@@ -1565,16 +1571,16 @@ async def media_stream_handler(
                                 logger.info(f"🎯 발화 완료 → 즉시 응답 생성")
                                 logger.info(f"{'='*60}")
                                 
-                                # 🔄 다음 사이클을 위한 종료 판단 플래그 리셋
-                                if hasattr(rtzr_stt, '_first_audio_evaluated'):
-                                    rtzr_stt._first_audio_evaluated = False
+                                # # 🔄 다음 사이클을 위한 종료 판단 플래그 리셋
+                                # if hasattr(rtzr_stt, '_first_audio_evaluated'):
+                                #     rtzr_stt._first_audio_evaluated = False
                                 
                                 # 대화 세션에 사용자 메시지 추가
                                 if call_sid not in conversation_sessions:
                                     conversation_sessions[call_sid] = []
                                 conversation_sessions[call_sid].append({"role": "user", "content": text})
-                                # 🤖 LLM 종료 판단을 위한 대화 기록 업데이트
-                                rtzr_stt.update_conversation_history(conversation_sessions[call_sid])
+                                # # 🤖 LLM 종료 판단을 위한 대화 기록 업데이트
+                                # rtzr_stt.update_conversation_history(conversation_sessions[call_sid])
                                 
                                 conversation_history = conversation_sessions[call_sid]
                                 
@@ -1618,8 +1624,8 @@ async def media_stream_handler(
                                         # conversation_sessions에 여전히 존재하는지 확인
                                         if call_sid in conversation_sessions:
                                             conversation_sessions[call_sid].append({"role": "assistant", "content": ai_response})
-                                            # 🤖 LLM 종료 판단을 위한 대화 기록 업데이트
-                                            rtzr_stt.update_conversation_history(conversation_sessions[call_sid])
+                                            # # 🤖 LLM 종료 판단을 위한 대화 기록 업데이트
+                                            # rtzr_stt.update_conversation_history(conversation_sessions[call_sid])
                                         
                                         # 대화 히스토리 관리
                                         if call_sid in conversation_sessions and len(conversation_sessions[call_sid]) > 20:
