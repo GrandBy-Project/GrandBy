@@ -2,7 +2,7 @@
  * AI 통화 화면
  * REST API를 통한 전화 발신 + 자동 통화 스케줄 설정
  */
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -17,7 +17,7 @@ import {
   Animated,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import { makeRealtimeAICall, getCallSchedule, updateCallSchedule, CallSchedule, getCallStatus } from '../api/call';
 import { useAuthStore } from '../store/authStore';
 import { BottomNavigationBar, TimePicker, Header } from '../components';
@@ -32,7 +32,7 @@ export const AICallScreen = () => {
   
   // 상태 관리
   const [callStatus, setCallStatus] = useState<CallStatus>('idle');
-  const [phoneNumber, setPhoneNumber] = useState(user?.phone_number || '');
+  const phoneNumber = user?.phone_number || '';
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [callSid, setCallSid] = useState<string>('');
@@ -49,47 +49,66 @@ export const AICallScreen = () => {
   const [timePickerContainerHeight, setTimePickerContainerHeight] = useState(0);
   
   /**
+   * 자동 통화 스케줄 설정 로드
+   */
+  const loadCallSchedule = useCallback(async () => {
+    try {
+      const schedule = await getCallSchedule();
+      setAutoCallEnabled(schedule.is_active);
+      
+      let timeString: string | null = null;
+      if (schedule.call_time) {
+        if (typeof schedule.call_time === 'string') {
+          timeString = schedule.call_time;
+        } else if (typeof schedule.call_time === 'object') {
+          timeString = String(schedule.call_time).substring(0, 5);
+        }
+      }
+      
+      if (timeString) {
+        setScheduledTime(timeString);
+      }
+    } catch (error: any) {
+      if (__DEV__) {
+        console.error('자동 통화 스케줄 로드 실패:', error);
+      }
+    }
+  }, []);
+  
+  /**
    * 초기 설정 로드
    */
   useEffect(() => {
     loadCallSchedule();
-  }, []);
+  }, [loadCallSchedule]);
   
   /**
-   * 통화 상태 폴링 (통화 완료 감지)
+   * 통화 상태 폴링 훅
    */
-  useEffect(() => {
-    if (callStatus === 'in_progress' && callSid) {
-      let checkCount = 0;
-      const maxChecks = 60; // 최대 5분 (5초 * 60)
+  const useCallStatusPolling = (callStatus: CallStatus, callSid: string, router: any) => {
+    useEffect(() => {
+      if (callStatus !== 'in_progress' || !callSid) return;
       
-      // 5초마다 통화 상태 확인
+      let checkCount = 0;
+      const maxChecks = 60;
+      
       const intervalId = setInterval(async () => {
         try {
           checkCount++;
           
-          // 최대 체크 횟수 초과 시 중단
           if (checkCount > maxChecks) {
             clearInterval(intervalId);
-            console.warn('통화 상태 폴링 타임아웃');
+            if (__DEV__) {
+              console.warn('통화 상태 폴링 타임아웃');
+            }
             return;
           }
           
-          // 백엔드에서 통화 상태 확인
           const statusData = await getCallStatus(callSid);
-          console.log(`통화 상태 확인 (${checkCount}회):`, statusData);
-          console.log(`call_status 값: "${statusData.call_status}" (타입: ${typeof statusData.call_status})`);
-          
-          // 통화가 완료되었으면 바로 다이어리 작성 페이지로 이동
-          // 소문자와 대문자 모두 체크
           const status = String(statusData.call_status).toLowerCase();
-          console.log(`변환된 status: "${status}"`);
           
           if (status === 'completed') {
             clearInterval(intervalId);
-            console.log('✅ 통화 완료 감지 - 다이어리 작성 페이지로 이동');
-            
-            // 다이어리 작성 페이지로 바로 이동
             router.push({
               pathname: '/diary-write',
               params: {
@@ -98,73 +117,54 @@ export const AICallScreen = () => {
               },
             });
           }
-          
         } catch (error) {
-          console.error('통화 상태 확인 실패:', error);
-          // 에러가 발생해도 계속 시도
+          if (__DEV__) {
+            console.error('통화 상태 확인 실패:', error);
+          }
         }
-      }, 5000); // 5초마다 체크
+      }, 5000);
       
       return () => clearInterval(intervalId);
-    }
-  }, [callStatus, callSid, router]);
-  /**
-   * 자동 통화 스케줄 설정 로드
-   */
-  const loadCallSchedule = async () => {
-    try {
-      const schedule = await getCallSchedule();
-      setAutoCallEnabled(schedule.is_active);
-      
-      // call_time이 문자열 또는 객체일 수 있으므로 처리
-      let timeString: string | null = null;
-      if (schedule.call_time) {
-        if (typeof schedule.call_time === 'string') {
-          timeString = schedule.call_time;
-        } else if (typeof schedule.call_time === 'object') {
-          // Time 객체인 경우 (예: "14:30:00" 형식일 수 있음)
-          timeString = String(schedule.call_time).substring(0, 5); // HH:MM만 추출
-        }
-      }
-      
-      if (timeString) {
-        setScheduledTime(timeString);
-      }
-
-    } catch (error: any) {
-      console.error('자동 통화 스케줄 로드 실패:', error);
-      // 로드 실패는 조용히 무시
-    }
+    }, [callStatus, callSid, router]);
   };
   
-
+  // 통화 상태 폴링 사용
+  useCallStatusPolling(callStatus, callSid, router);
+  
+  /**
+   * 애니메이션 초기화 (높이 측정 후)
+   */
   useEffect(() => {
-
-    if (timePickerContainerHeight === 0) {
-      return;
-    }
+    if (timePickerContainerHeight === 0) return;
     
     if (autoCallEnabled) {
-      // 펼치기 애니메이션
       Animated.timing(animatedHeight, {
         toValue: 1,
         duration: 300,
         useNativeDriver: false,
       }).start();
     } else {
-      // 접기 애니메이션
       Animated.timing(animatedHeight, {
         toValue: 0,
         duration: 300,
         useNativeDriver: false,
       }).start();
     }
-  }, [autoCallEnabled, timePickerContainerHeight]);
+  }, [autoCallEnabled, timePickerContainerHeight, animatedHeight]);
+  
+  /**
+   * 초기 높이 측정 후 애니메이션 값 설정
+   */
+  useEffect(() => {
+    if (timePickerContainerHeight > 0 && autoCallEnabled) {
+      animatedHeight.setValue(1);
+    }
+  }, [timePickerContainerHeight, autoCallEnabled, animatedHeight]);
   
   /**
    * 자동 통화 스케줄 설정 업데이트
    */
-  const updateSchedule = async (enabled: boolean, time: string) => {
+  const updateSchedule = useCallback(async (enabled: boolean, time: string) => {
     try {
       setScheduleLoading(true);
       
@@ -175,7 +175,9 @@ export const AICallScreen = () => {
       
       await updateCallSchedule(schedule);
     } catch (error: any) {
-      console.error('자동 통화 스케줄 업데이트 실패:', error);
+      if (__DEV__) {
+        console.error('자동 통화 스케줄 업데이트 실패:', error);
+      }
       Alert.alert(
         '오류',
         error.response?.data?.detail || '설정 저장에 실패했습니다.',
@@ -185,56 +187,56 @@ export const AICallScreen = () => {
     } finally {
       setScheduleLoading(false);
     }
-  };
+  }, [loadCallSchedule]);
   
   /**
    * 자동 통화 토글 변경
    */
-  const handleToggleAutoCall = async (value: boolean) => {
+  const handleToggleAutoCall = useCallback(async (value: boolean) => {
     setAutoCallEnabled(value);
     await updateSchedule(value, scheduledTime);
-  };
+  }, [scheduledTime, updateSchedule]);
   
   /**
    * 시간 변경
    */
-  const handleTimeChange = async (newTime: string) => {
+  const handleTimeChange = useCallback(async (newTime: string) => {
     setScheduledTime(newTime);
     if (autoCallEnabled) {
       await updateSchedule(true, newTime);
     }
-  };
+  }, [autoCallEnabled, updateSchedule]);
   
   /**
    * 시간 수정 시작
    */
-  const startEditingTime = () => {
-    setOriginalTime(scheduledTime); // 원래 시간 저장
+  const startEditingTime = useCallback(() => {
+    setOriginalTime(scheduledTime);
     setIsEditingTime(true);
-  };
+  }, [scheduledTime]);
 
   /**
    * TimePicker에서 시간 변경 핸들러
    */
-  const handleTimePickerChange = (time: string) => {
+  const handleTimePickerChange = useCallback((time: string) => {
     setScheduledTime(time);
-  };
+  }, []);
   
   /**
    * 시간 수정 저장
    */
-  const saveTimeChange = async () => {
+  const saveTimeChange = useCallback(async () => {
     setIsEditingTime(false);
     await handleTimeChange(scheduledTime);
-  };
+  }, [scheduledTime, handleTimeChange]);
   
   /**
    * 시간 수정 취소
    */
-  const cancelTimeEdit = () => {
-    setScheduledTime(originalTime); // 원래 시간으로 복원
+  const cancelTimeEdit = useCallback(() => {
+    setScheduledTime(originalTime);
     setIsEditingTime(false);
-  };
+  }, [originalTime]);
   
   /**
    * 전화번호 포맷팅 (000-0000-0000 형식)
@@ -256,14 +258,12 @@ export const AICallScreen = () => {
   /**
    * AI 통화 시작
    */
-  const startAICall = async () => {
-    // 전화번호 검증
+  const startAICall = useCallback(async () => {
     if (!phoneNumber || phoneNumber.trim() === '') {
       Alert.alert('알림', '전화번호를 입력해주세요.');
       return;
     }
     
-    // 한국 전화번호 형식으로 변환 (+82로 시작)
     let formattedNumber = phoneNumber.trim();
     if (formattedNumber.startsWith('010')) {
       formattedNumber = '+82' + formattedNumber.substring(1);
@@ -275,40 +275,32 @@ export const AICallScreen = () => {
       setIsLoading(true);
       setCallStatus('calling');
       setErrorMessage('');
-      // 백엔드 API 호출 (실시간 AI 대화)
+      
       const userId = user?.user_id?.toString() || 'anonymous';
       const response = await makeRealtimeAICall(formattedNumber, userId);
   
       setCallSid(response.call_sid);
-      
-      // ✅ 통화 진행중 상태로 변경
       setCallStatus('in_progress');
-      
-      // ✅ 통화 진행중 화면으로 자동 전환 (Alert 제거)
-      
     } catch (error: any) {
-      console.error('❌ 전화 발신 실패:', error);
-      setCallStatus('error');
-      setErrorMessage(
-        error.response?.data?.detail ||
+      if (__DEV__) {
+        console.error('전화 발신 실패:', error);
+      }
+      const errorMsg = error.response?.data?.detail ||
         error.message ||
-        '전화 연결에 실패했습니다. 다시 시도해주세요.'
-      );
+        '전화 연결에 실패했습니다. 다시 시도해주세요.';
+      setCallStatus('error');
+      setErrorMessage(errorMsg);
       
-      Alert.alert(
-        '오류',
-        `전화 연결에 실패했습니다.\n\n${errorMessage}`,
-        [{ text: '확인' }]
-      );
+      Alert.alert('오류', `전화 연결에 실패했습니다.\n\n${errorMsg}`, [{ text: '확인' }]);
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [phoneNumber, user]);
   
   /**
    * 상태에 따른 메시지 표시
    */
-  const getStatusMessage = () => {
+  const statusMessage = useMemo(() => {
     switch (callStatus) {
       case 'idle':
         return '하루와 대화하기';
@@ -323,25 +315,7 @@ export const AICallScreen = () => {
       default:
         return '';
     }
-  };
-  
-  /**
-   * 상태에 따른 아이콘 정보 반환
-   */
-  const getStatusIconInfo = (): { name: string; family: 'Ionicons' | 'MaterialCommunityIcons'; color: string } => {
-    switch (callStatus) {
-      case 'calling':
-        return { name: 'call', family: 'Ionicons', color: '#34B79F' };
-      case 'in_progress':
-        return { name: 'mic', family: 'Ionicons', color: '#FF6B6B' };
-      case 'completed':
-        return { name: 'checkmark-circle', family: 'Ionicons', color: '#4CAF50' };
-      case 'error':
-        return { name: 'close-circle', family: 'Ionicons', color: '#F44336' };
-      default:
-        return { name: 'robot', family: 'MaterialCommunityIcons', color: '#34B79F' };
-    }
-  };
+  }, [callStatus]);
   
   return (
     <View style={styles.container}>
@@ -368,7 +342,7 @@ export const AICallScreen = () => {
         </View>
         
         {/* 상태 메시지 */}
-        <Text style={styles.statusMessage}>{getStatusMessage()}</Text>
+        <Text style={styles.statusMessage}>{statusMessage}</Text>
         
          {callStatus === 'idle' && (
            <Text style={styles.description}>
@@ -527,23 +501,7 @@ export const AICallScreen = () => {
                 const { height } = event.nativeEvent.layout;
                 const measuredHeight = height + 20;
                 if (measuredHeight > 0 && (timePickerContainerHeight === 0 || Math.abs(timePickerContainerHeight - measuredHeight) > 10)) {
-                  const wasFirstMeasure = timePickerContainerHeight === 0;
                   setTimePickerContainerHeight(measuredHeight);
-                  
-                  // 높이 측정 후 자동으로 애니메이션 시작
-                  if (wasFirstMeasure) {
-                    if (autoCallEnabled) {
-                      // 펼치기 애니메이션
-                      Animated.timing(animatedHeight, {
-                        toValue: 1,
-                        duration: 100,
-                        useNativeDriver: false,
-                      }).start();
-                    } else {
-                      // 접히기 애니메이션 (초기 상태)
-                      animatedHeight.setValue(0);
-                    }
-                  }
                 }
               }}
             >
@@ -741,11 +699,6 @@ const styles = StyleSheet.create({
     color: '#D32F2F',
     textAlign: 'center',
   },
-  debugText: {
-    fontSize: 12,
-    color: '#999999',
-    marginTop: 8,
-  },
   scrollView: {
     flex: 1,
   },
@@ -839,12 +792,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#FFFFFF',
-  },
-  timePickerHint: {
-    fontSize: 13,
-    color: '#999999',
-    textAlign: 'center',
-    marginTop: 4,
   },
   timeEditContainer: {
     backgroundColor: '#FFFFFF',
