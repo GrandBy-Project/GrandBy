@@ -31,6 +31,7 @@ import { useFontSizeStore } from '../store/fontSizeStore';
 import { useWeatherStore } from '../store/weatherStore';
 import { elderlyHomeStyles } from './ElderlyHomeScreen.styles';
 import { useAlert } from '../components/GlobalAlertProvider';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export const ElderlyHomeScreen = () => {
   const router = useRouter();
@@ -176,6 +177,16 @@ export const ElderlyHomeScreen = () => {
   // ✅ 최근 통화 기록 확인 함수 (백엔드에서 처리)
   const checkRecentCalls = async () => {
     try {
+      // AsyncStorage에서 오늘 배너를 닫았는지 확인
+      const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD 형식
+      const dismissedDate = await AsyncStorage.getItem('diaryBannerDismissed');
+      
+      if (dismissedDate === today) {
+        console.log(`📞 다이어리 안내 배너: 오늘 이미 닫았음 - 표시 안함`);
+        setHasRecentCall(false);
+        return false;
+      }
+      
       const { checkDiaryReminder } = await import('../api/call');
       const { should_show_banner } = await checkDiaryReminder();
       setHasRecentCall(should_show_banner);
@@ -186,6 +197,18 @@ export const ElderlyHomeScreen = () => {
       console.error('다이어리 안내 배너 확인 실패:', error);
       setHasRecentCall(false);
       return false;
+    }
+  };
+
+  // ✅ 배너 닫기 핸들러
+  const handleDismissBanner = async () => {
+    try {
+      const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD 형식
+      await AsyncStorage.setItem('diaryBannerDismissed', today);
+      setHasRecentCall(false);
+      console.log(`📞 다이어리 안내 배너 닫음 - 오늘(${today}) 더 이상 표시 안함`);
+    } catch (error) {
+      console.error('배너 닫기 실패:', error);
     }
   };
 
@@ -448,40 +471,51 @@ export const ElderlyHomeScreen = () => {
 
       {/* 자동 전화 통화기록이 있으면 일기 작성 알림 배너 */}
       {hasRecentCall && (
-        <TouchableOpacity
-          style={styles.draftNotificationBanner}
-          onPress={() => {
-            router.push({
-              pathname: '/diary-write',
-              params: {
-                fromCall: 'true',
-                fromBanner: 'true', 
-              },
-            });
-          }}
-          activeOpacity={0.8}
-        >
-          <View style={styles.bannerContent}>
-            <Ionicons name="call" size={24} color="#F57C00" style={styles.bannerIcon} />
-            <View style={styles.bannerText}>
-              <Text 
-                style={[styles.bannerTitle, fontSizeLevel >= 1 && { fontSize: 18 }, fontSizeLevel >= 2 && { fontSize: 22 }]}
-                numberOfLines={1}
-                ellipsizeMode="tail"
-              >
-                AI 통화 완료! 일기를 작성해보세요
-              </Text>
-              <Text 
-                style={[styles.bannerSubtitle, fontSizeLevel >= 1 && { fontSize: 16 }, fontSizeLevel >= 2 && { fontSize: 18 }]}
-                numberOfLines={1}
-                ellipsizeMode="tail"
-              >
-                대화를 바탕으로 일기를 작성할 수 있어요
-              </Text>
+        <View style={styles.draftNotificationBanner}>
+          <TouchableOpacity
+            style={styles.draftNotificationBannerContent}
+            onPress={() => {
+              router.push({
+                pathname: '/diary-write',
+                params: {
+                  fromCall: 'true',
+                  fromBanner: 'true', 
+                },
+              });
+            }}
+            activeOpacity={0.8}
+          >
+            <View style={styles.bannerContent}>
+              <Ionicons name="call" size={24} color="#F57C00" style={styles.bannerIcon} />
+              <View style={styles.bannerText}>
+                <Text 
+                  style={[styles.bannerTitle, fontSizeLevel >= 1 && { fontSize: 18 }, fontSizeLevel >= 2 && { fontSize: 22 }]}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                >
+                  AI 통화 완료! 일기를 작성해보세요
+                </Text>
+                <Text 
+                  style={[styles.bannerSubtitle, fontSizeLevel >= 1 && { fontSize: 16 }, fontSizeLevel >= 2 && { fontSize: 18 }]}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                >
+                  대화를 바탕으로 일기를 작성할 수 있어요
+                </Text>
+              </View>
+              <Text style={styles.bannerArrow}>›</Text>
             </View>
-            <Text style={styles.bannerArrow}>›</Text>
-          </View>
-        </TouchableOpacity>
+          </TouchableOpacity>
+          {/* X 버튼 추가 */}
+          <TouchableOpacity
+            style={styles.bannerCloseButton}
+            onPress={handleDismissBanner}
+            activeOpacity={0.6}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Ionicons name="close" size={20} color="#555" />
+          </TouchableOpacity>
+        </View>
       )}
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>

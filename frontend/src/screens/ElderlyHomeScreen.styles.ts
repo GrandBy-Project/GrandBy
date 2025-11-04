@@ -403,6 +403,23 @@ export const elderlyHomeStyles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 4,
     elevation: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  draftNotificationBannerContent: {
+    flex: 1,
+  },
+  bannerCloseButton: {
+    width: 32,
+    height: 32,
+    minWidth: 32,
+    minHeight: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
+    backgroundColor: 'rgba(0, 0, 0, 0.08)',
+    borderRadius: 16,
   },
   bannerContent: {
     flexDirection: 'row',
