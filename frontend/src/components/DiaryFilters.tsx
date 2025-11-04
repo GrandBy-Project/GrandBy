@@ -223,10 +223,7 @@ export const DiaryFilters: React.FC<DiaryFiltersProps> = ({
 const styles = StyleSheet.create({
   container: {
     backgroundColor: Colors.background,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.borderLight,
     paddingHorizontal: 16,
-    paddingBottom: 6,
   },
   expandedContainer: {
     paddingTop: 8,

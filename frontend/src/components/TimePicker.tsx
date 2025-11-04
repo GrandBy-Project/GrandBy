@@ -16,7 +16,8 @@ interface TimePickerProps {
 }
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, '0'));
-const MINUTES = Array.from({ length: 60 }, (_, i) => i.toString().padStart(2, '0'));
+// 5분 단위로 분 선택 
+const MINUTES = Array.from({ length: 12 }, (_, i) => (i * 5).toString().padStart(2, '0'));
 
 const CONTAINER_HEIGHT = 180;
 const ITEM_HEIGHT = 50;
@@ -32,33 +33,26 @@ export const TimePicker: React.FC<TimePickerProps> = ({ value, onChange }) => {
 
   // 초기값 설정 및 value 변경 시 업데이트
   useEffect(() => {
-      if (value && value.includes(':')) {
+    if (value && value.includes(':')) {
       const [h, m] = value.split(':');
-      setSelectedHour(h || '00');
-      setSelectedMinute(m || '00');
-      setCenterHour(h || '00');
-      setCenterMinute(m || '00');
-    } else {
-      // value가 없으면 현재 시간으로 설정
-      const now = new Date();
-      const hour = now.getHours().toString().padStart(2, '0');
-      const minute = now.getMinutes().toString().padStart(2, '0');
+      const hour = h || '00';
+      const minute = m || '00';
       setSelectedHour(hour);
       setSelectedMinute(minute);
       setCenterHour(hour);
       setCenterMinute(minute);
-      onChange(`${hour}:${minute}`);
     }
   }, [value]);
 
   // 초기 스크롤 위치 설정
   useEffect(() => {
     const hourIndex = parseInt(selectedHour);
-    const minuteIndex = parseInt(selectedMinute);
+    // MINUTES 배열에서 해당 분의 인덱스 찾기
+    const minuteIndex = MINUTES.findIndex(m => m === selectedMinute);
     
     // ITEM_HEIGHT를 사용하여 일관성 유지
     const hourScrollY = calculateScrollPosition(hourIndex, ITEM_HEIGHT);
-    const minuteScrollY = calculateScrollPosition(minuteIndex, ITEM_HEIGHT);
+    const minuteScrollY = calculateScrollPosition(minuteIndex >= 0 ? minuteIndex : 0, ITEM_HEIGHT);
     
     // 약간의 지연 후 스크롤 (레이아웃 완료 대기)
     setTimeout(() => {

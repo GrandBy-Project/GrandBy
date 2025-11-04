@@ -13,9 +13,10 @@ import {
   TextInput,
   Switch,
   ScrollView,
+  Image,
+  Animated,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { makeRealtimeAICall, getCallSchedule, updateCallSchedule, CallSchedule, getCallStatus } from '../api/call';
 import { useAuthStore } from '../store/authStore';
@@ -27,7 +28,6 @@ type CallStatus = 'idle' | 'calling' | 'in_progress' | 'completed' | 'error';
 
 export const AICallScreen = () => {
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
   
   // 상태 관리
@@ -42,6 +42,11 @@ export const AICallScreen = () => {
   const [scheduledTime, setScheduledTime] = useState('14:00');
   const [scheduleLoading, setScheduleLoading] = useState(false);
   const [isEditingTime, setIsEditingTime] = useState(false);
+  const [originalTime, setOriginalTime] = useState('14:00');
+  
+  // 애니메이션 관련
+  const animatedHeight = useRef(new Animated.Value(0)).current;
+  const [timePickerContainerHeight, setTimePickerContainerHeight] = useState(0);
   
   /**
    * 초기 설정 로드
@@ -125,11 +130,36 @@ export const AICallScreen = () => {
       if (timeString) {
         setScheduledTime(timeString);
       }
+
     } catch (error: any) {
       console.error('자동 통화 스케줄 로드 실패:', error);
       // 로드 실패는 조용히 무시
     }
   };
+  
+
+  useEffect(() => {
+
+    if (timePickerContainerHeight === 0) {
+      return;
+    }
+    
+    if (autoCallEnabled) {
+      // 펼치기 애니메이션
+      Animated.timing(animatedHeight, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: false,
+      }).start();
+    } else {
+      // 접기 애니메이션
+      Animated.timing(animatedHeight, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: false,
+      }).start();
+    }
+  }, [autoCallEnabled, timePickerContainerHeight]);
   
   /**
    * 자동 통화 스케줄 설정 업데이트
@@ -179,6 +209,7 @@ export const AICallScreen = () => {
    * 시간 수정 시작
    */
   const startEditingTime = () => {
+    setOriginalTime(scheduledTime); // 원래 시간 저장
     setIsEditingTime(true);
   };
 
@@ -201,7 +232,25 @@ export const AICallScreen = () => {
    * 시간 수정 취소
    */
   const cancelTimeEdit = () => {
+    setScheduledTime(originalTime); // 원래 시간으로 복원
     setIsEditingTime(false);
+  };
+  
+  /**
+   * 전화번호 포맷팅 (000-0000-0000 형식)
+   */
+  const formatPhoneNumber = (phone: string): string => {
+    if (!phone) return '';
+    
+    // 숫자만 추출
+    const numbers = phone.replace(/[^\d]/g, '');
+    
+    // 11자리 번호 (010-1234-5678)
+    if (numbers.length === 11) {
+      return `${numbers.slice(0, 3)}-${numbers.slice(3, 7)}-${numbers.slice(7)}`;
+    }
+    
+    return numbers;
   };
   
   /**
@@ -262,13 +311,13 @@ export const AICallScreen = () => {
   const getStatusMessage = () => {
     switch (callStatus) {
       case 'idle':
-        return 'AI 비서와 통화하기';
+        return '하루와 대화하기';
       case 'calling':
-        return '전화 연결 중...';
+        return '하루와 연결 중...';
       case 'in_progress':
-        return '전화가 걸려갑니다!\n전화를 받아주세요';
+        return '하루가 전화를 겁니다!\n전화를 받아주세요';
       case 'completed':
-        return '통화가 완료되었습니다';
+        return '하루와의 대화가 끝났습니다';
       case 'error':
         return '오류 발생';
       default:
@@ -298,7 +347,7 @@ export const AICallScreen = () => {
     <View style={styles.container}>
       {/* 헤더 */}
       <Header 
-        title="AI 통화"
+        title="하루와 대화"
         showMenuButton={true}
       />
       
@@ -311,19 +360,11 @@ export const AICallScreen = () => {
         <View style={styles.content}>
         {/* 상태 아이콘 */}
         <View style={styles.iconContainer}>
-          {getStatusIconInfo().family === 'MaterialCommunityIcons' ? (
-            <MaterialCommunityIcons 
-              name={getStatusIconInfo().name as any} 
-              size={64} 
-              color={getStatusIconInfo().color} 
-            />
-          ) : (
-            <Ionicons 
-              name={getStatusIconInfo().name as any} 
-              size={64} 
-              color={getStatusIconInfo().color} 
-            />
-          )}
+          <Image 
+            source={require('../../assets/haru-character.png')}
+            style={styles.haruImage}
+            resizeMode="contain"
+          />
         </View>
         
         {/* 상태 메시지 */}
@@ -331,16 +372,16 @@ export const AICallScreen = () => {
         
          {callStatus === 'idle' && (
            <Text style={styles.description}>
-             버튼을 누르면 AI 비서가 전화를 걸어드립니다.{'\n'}
-             전화를 받으시면 실시간으로 AI와 자유롭게 대화하실 수 있습니다.
+             버튼을 누르면 하루가 전화를 걸어드립니다.{'\n'}
+             전화를 받으면 하루와 자유롭게 대화할 수 있습니다.
            </Text>
          )}
         
         {callStatus === 'in_progress' && (
           <View style={styles.inProgressContainer}>
             <Text style={styles.description}>
-              지금 그랜비와 대화 중입니다.{'\n'}
-              통화가 끝나면 자동으로 다이어리 작성 화면으로 이동합니다.
+              지금 하루와 대화 중입니다.{'\n'}
+              대화가 끝나면 자동으로 다이어리 작성 화면으로 이동합니다.
             </Text>
             <ActivityIndicator size="large" color="#34B79F" style={{ marginTop: 20 }} />
           </View>
@@ -358,12 +399,12 @@ export const AICallScreen = () => {
           <View style={styles.inputContainer}>
             <Text style={styles.inputLabel}>전화번호</Text>
             <TextInput
-              style={styles.input}
-              value={phoneNumber}
-              onChangeText={setPhoneNumber}
+              style={[styles.input, styles.inputReadonly]}
+              value={formatPhoneNumber(phoneNumber)}
               placeholder="010-1234-5678"
               keyboardType="phone-pad"
-              editable={!isLoading}
+              editable={false}
+              textAlign="center"
             />
             <Text style={styles.inputHint}>
               ※ 등록된 전화번호로 자동 입력됩니다
@@ -374,27 +415,6 @@ export const AICallScreen = () => {
         {/* Call SID 표시 (디버깅용) */}
         {callSid && __DEV__ && (
           <Text style={styles.debugText}>Call SID: {callSid}</Text>
-        )}
-        
-        {/* 통화 버튼 */}
-        {callStatus === 'idle' && (
-          <TouchableOpacity
-            style={[
-              styles.callButton,
-              isLoading && styles.callButtonDisabled,
-            ]}
-            onPress={startAICall}
-            disabled={isLoading}
-          >
-            {isLoading ? (
-              <ActivityIndicator color="#FFFFFF" size="large" />
-            ) : (
-              <>
-                <Ionicons name="call" size={28} color="#FFFFFF" style={{ marginRight: 12 }} />
-                <Text style={styles.callButtonText}>AI 비서 호출하기</Text>
-              </>
-            )}
-          </TouchableOpacity>
         )}
         
         {/* 재시도 버튼 */}
@@ -439,7 +459,7 @@ export const AICallScreen = () => {
           <View style={styles.scheduleSectionHeader}>
             <View style={styles.scheduleTitleContainer}>
               <Ionicons name="alarm" size={20} color="#333333" style={{ marginRight: 8 }} />
-              <Text style={styles.scheduleSectionTitle}>자동 통화 예약</Text>
+              <Text style={styles.scheduleSectionTitle}>자동 전화 예약</Text>
             </View>
             <View style={styles.switchContainer}>
               {scheduleLoading && (
@@ -455,9 +475,51 @@ export const AICallScreen = () => {
             </View>
           </View>
           
-          {autoCallEnabled && (
-            <View style={styles.timePickerContainer}>
-              <Text style={styles.timeLabel}>통화 시간</Text>
+          <Text style={styles.scheduleDescription}>
+          매일 설정한 시간에 하루가 전화를 걸어드립니다.
+          </Text>
+          
+          <Animated.View
+            style={{
+              height: timePickerContainerHeight > 0
+                ? animatedHeight.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0, timePickerContainerHeight],
+                  })
+                : 0,
+              overflow: 'hidden',
+            }}
+          >
+            <View
+              style={styles.timePickerContainer}
+              onLayout={(event) => {
+                const { height } = event.nativeEvent.layout;
+                const measuredHeight = height + 20;
+                if (measuredHeight > 0 && (timePickerContainerHeight === 0 || Math.abs(timePickerContainerHeight - measuredHeight) > 10)) {
+                  const wasFirstMeasure = timePickerContainerHeight === 0;
+                  setTimePickerContainerHeight(measuredHeight);
+                  
+                  // 높이 측정 후 자동으로 애니메이션 시작
+                  if (wasFirstMeasure) {
+                    if (autoCallEnabled) {
+                      // 펼치기 애니메이션
+                      Animated.timing(animatedHeight, {
+                        toValue: 1,
+                        duration: 100,
+                        useNativeDriver: false,
+                      }).start();
+                    } else {
+                      // 접히기 애니메이션 (초기 상태)
+                      animatedHeight.setValue(0);
+                    }
+                  }
+                }
+              }}
+            >
+              <View style={styles.timeLabelContainer}>
+                <Ionicons name="time" size={20} color="#666666" style={{ marginRight: 8 }} />
+                <Text style={styles.timeLabel}>전화 시간</Text>
+              </View>
               
               {isEditingTime ? (
                 <View style={styles.timeEditContainer}>
@@ -484,42 +546,49 @@ export const AICallScreen = () => {
                   </View>
                 </View>
               ) : (
-                <TouchableOpacity
-                  style={styles.timePicker}
-                  onPress={startEditingTime}
-                >
-                  <View style={styles.timePickerContent}>
-                    <Ionicons name="time" size={24} color="#34B79F" style={{ marginRight: 8 }} />
-                    <Text style={styles.timePickerText}>{scheduledTime}</Text>
+                <View style={styles.timeDisplayContainer}>
+                  <View style={styles.timeDisplayBox}>
+                    <Ionicons name="time-outline" size={24} color="#34B79F" style={{ marginRight: 12 }} />
+                    <Text style={styles.timeDisplayText}>{scheduledTime}</Text>
                   </View>
-                  <Text style={styles.timePickerHint}>매일 이 시간에 전화가 걸립니다</Text>
-                </TouchableOpacity>
+                  
+                  <TouchableOpacity
+                    style={styles.changeTimeButton}
+                    onPress={startEditingTime}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="create-outline" size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
+                    <Text style={styles.changeTimeButtonText}>시간 변경</Text>
+                  </TouchableOpacity>
+                </View>
               )}
             </View>
-          )}
+          </Animated.View>
         </View>
       )}
       
-         {/* 하단 안내 */}
-         {callStatus === 'idle' && (
-           <View style={[
-             styles.footer,
-             { paddingBottom: Math.max(insets.bottom + 16, 24) }  // ← 안드로이드 네비게이션 바 고려
-           ]}>
-             <View style={styles.footerItem}>
-               <MaterialCommunityIcons name="robot" size={18} color="#666666" style={{ marginRight: 8 }} />
-               <Text style={styles.footerText}>실시간 AI 대화 기능</Text>
-             </View>
-             <View style={styles.footerItem}>
-               <Ionicons name="bulb" size={18} color="#666666" style={{ marginRight: 8 }} />
-               <Text style={styles.footerText}>AI 비서는 한국어로 대화합니다</Text>
-             </View>
-             <View style={styles.footerItem}>
-               <Ionicons name="call" size={18} color="#666666" style={{ marginRight: 8 }} />
-               <Text style={styles.footerText}>전화를 받으면 자유롭게 대화하세요!</Text>
-             </View>
-           </View>
-         )}
+      {/* 통화 버튼 */}
+      {callStatus === 'idle' && (
+        <View style={styles.callButtonContainer}>
+          <TouchableOpacity
+            style={[
+              styles.callButton,
+              isLoading && styles.callButtonDisabled,
+            ]}
+            onPress={startAICall}
+            disabled={isLoading}
+          >
+            {isLoading ? (
+              <ActivityIndicator color="#FFFFFF" size="large" />
+            ) : (
+              <>
+                <Ionicons name="call" size={28} color="#FFFFFF" style={{ marginRight: 12 }} />
+                <Text style={styles.callButtonText}>하루와 대화하기</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
+      )}
       </ScrollView>
       
       {/* 하단 네비게이션 바 */}
@@ -540,13 +609,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
   },
   iconContainer: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: '#F0F9F7',
+    paddingTop: 24,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 24,
+  },
+  haruImage: {
+    width: 120,
+    height: 120,
   },
   statusMessage: {
     fontSize: 24,
@@ -582,10 +652,21 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: '#333333',
   },
+  inputReadonly: {
+    backgroundColor: '#F5F5F5',
+    borderColor: '#E0E0E0',
+    color: '#666666',
+  },
   inputHint: {
     fontSize: 14,
     color: '#999999',
     marginTop: 8,
+  },
+  callButtonContainer: {
+    width: '100%',
+    paddingHorizontal: 24,
+    marginTop: 24,
+    marginBottom: 24,
   },
   callButton: {
     width: '100%',
@@ -656,20 +737,6 @@ const styles = StyleSheet.create({
     color: '#999999',
     marginTop: 8,
   },
-  footer: {
-    padding: 24,
-    backgroundColor: '#F8F8F8',
-  },
-  footerItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginVertical: 4,
-  },
-  footerText: {
-    fontSize: 14,
-    color: '#666666',
-  },
   scrollView: {
     flex: 1,
   },
@@ -680,6 +747,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#F8F9FA',
     marginHorizontal: 24,
     marginTop: 24,
+    marginBottom: 24,
     padding: 20,
     borderRadius: 16,
     borderWidth: 1,
@@ -689,7 +757,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 12,
   },
   scheduleTitleContainer: {
     flexDirection: 'row',
@@ -700,55 +768,91 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#333333',
   },
+  scheduleDescription: {
+    fontSize: 14,
+    color: '#666666',
+    lineHeight: 20,
+    marginBottom: 16,
+  },
   switchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   timePickerContainer: {
-    marginTop: 8,
+    marginTop: 16,
   },
-  timeLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#666666',
-    marginBottom: 8,
-  },
-  timePicker: {
-    backgroundColor: '#FFFFFF',
-    padding: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#34B79F',
-  },
-  timePickerContent: {
+  timeLabelContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 4,
+    marginBottom: 12,
   },
-  timePickerText: {
-    fontSize: 24,
+  timeLabel: {
+    fontSize: 16,
     fontWeight: '600',
+    color: '#333333',
+  },
+  timeDisplayContainer: {
+    width: '100%',
+    paddingBottom: 8,
+  },
+  timeDisplayBox: {
+    backgroundColor: '#F0F9F7',
+    padding: 20,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E0F0ED',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  timeDisplayText: {
+    fontSize: 32,
+    fontWeight: '700',
     color: '#34B79F',
+    letterSpacing: 2,
+  },
+  changeTimeButton: {
+    backgroundColor: '#34B79F',
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  changeTimeButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
   timePickerHint: {
     fontSize: 13,
     color: '#999999',
+    textAlign: 'center',
+    marginTop: 4,
   },
   timeEditContainer: {
     backgroundColor: '#FFFFFF',
     padding: 20,
-    borderRadius: 12,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: '#34B79F',
   },
   timeEditButtons: {
     flexDirection: 'row',
     gap: 12,
+    marginTop: 16,
   },
   timeEditButton: {
     flex: 1,
     height: 48,
-    borderRadius: 8,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
