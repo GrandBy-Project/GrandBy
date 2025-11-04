@@ -18,6 +18,7 @@ import {
   Keyboard,
   Dimensions,
   Pressable,
+  Image,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -26,6 +27,7 @@ import { getDiary, deleteDiary, Diary, getComments, createComment, deleteComment
 import { useAuthStore } from '../store/authStore';
 import { Colors } from '../constants/Colors';
 import { BottomNavigationBar, Header } from '../components';
+import { API_BASE_URL } from '../api/client';
 
 export const DiaryDetailScreen = () => {
   const inputRef = useRef<TextInput>(null);
@@ -44,6 +46,13 @@ export const DiaryDetailScreen = () => {
   const commentScrollViewRef = useRef<ScrollView>(null);
   const [footerHeight, setFooterHeight] = useState(0);
   const [kbHeight, setKbHeight] = useState(0);
+
+  // 이미지 확대 모달 상태
+  const [showImageModal, setShowImageModal] = useState(false);
+  const [selectedImageIndex, setSelectedImageIndex] = useState(0);
+  const imageScrollViewRef = useRef<ScrollView>(null);
+  const windowWidth = Dimensions.get('window').width;
+  const windowHeight = Dimensions.get('window').height;
 
   // 확인 모달 상태
   const [confirmModal, setConfirmModal] = useState<{
@@ -102,20 +111,6 @@ export const DiaryDetailScreen = () => {
     try {
       setIsLoading(true);
       const data = await getDiary(diaryId);
-      
-      // 임시저장 상태면 바로 작성 페이지로 이동
-      if (data.status === 'draft') {
-        router.replace({
-          pathname: '/diary-write',
-          params: { 
-            diaryId: data.diary_id,
-            callSid: data.call_id || '',
-            fromCall: 'true'
-          },
-        });
-        return;
-      }
-      
       setDiary(data);
     } catch (error: any) {
       console.error('다이어리 로드 실패:', error);
@@ -456,11 +451,7 @@ export const DiaryDetailScreen = () => {
               {getAuthorTypeText(diary.author_type)}
             </Text>
           </View>
-          {diary.status === 'draft' && (
-            <View style={styles.draftBadge}>
-              <Text style={styles.draftText}>임시저장</Text>
-            </View>
-          )}
+
         </View>
 
         {/* 구분선 */}
@@ -468,6 +459,41 @@ export const DiaryDetailScreen = () => {
 
         {/* 일기 내용 */}
         <Text style={styles.contentText}>{diary.content}</Text>
+
+        {/* 사진 갤러리 */}
+        {diary.photos && diary.photos.length > 0 && (
+          <View style={styles.photosSection}>
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.photosContainer}
+            >
+              {diary.photos.map((photo, index) => {
+                const photoUrl = photo.photo_url.startsWith('http') 
+                  ? photo.photo_url 
+                  : `${API_BASE_URL}${photo.photo_url}`;
+                
+                return (
+                  <TouchableOpacity
+                    key={photo.photo_id}
+                    style={styles.photoItem}
+                    activeOpacity={0.9}
+                    onPress={() => {
+                      setSelectedImageIndex(index);
+                      setShowImageModal(true);
+                    }}
+                  >
+                    <Image
+                      source={{ uri: photoUrl }}
+                      style={styles.photoImage}
+                      resizeMode="cover"
+                    />
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        )}
 
         {/* 댓글 버튼 */}
         <TouchableOpacity
@@ -618,6 +644,104 @@ export const DiaryDetailScreen = () => {
   </View>
 </Modal>
 
+      {/* 이미지 확대 모달 */}
+      <Modal
+        visible={showImageModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowImageModal(false)}
+      >
+        <View style={styles.imageModalContainer}>
+          {/* 닫기 버튼 */}
+          <TouchableOpacity
+            style={[styles.imageModalCloseButton, { top: insets.top + 16 }]}
+            onPress={() => setShowImageModal(false)}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="close" size={32} color="#FFFFFF" />
+          </TouchableOpacity>
+
+          {/* 이미지 인덱스 표시 (여러 장일 때만) */}
+          {diary.photos && diary.photos.length > 1 && (
+            <View style={[styles.imageModalCounter, { top: insets.top + 16 }]}>
+              <Text style={styles.imageModalCounterText}>
+                {selectedImageIndex + 1} / {diary.photos.length}
+              </Text>
+            </View>
+          )}
+
+          {/* 이미지 스크롤 뷰 */}
+          <ScrollView
+            ref={imageScrollViewRef}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            onMomentumScrollEnd={(event) => {
+              const offsetX = event.nativeEvent.contentOffset.x;
+              const width = event.nativeEvent.layoutMeasurement.width;
+              const index = Math.round(offsetX / width);
+              setSelectedImageIndex(index);
+            }}
+            contentOffset={{ x: selectedImageIndex * windowWidth, y: 0 }}
+            scrollEnabled={diary.photos && diary.photos.length > 1}
+          >
+            {diary.photos?.map((photo) => {
+              const photoUrl = photo.photo_url.startsWith('http') 
+                ? photo.photo_url 
+                : `${API_BASE_URL}${photo.photo_url}`;
+              
+              return (
+                <View key={photo.photo_id} style={[styles.imageModalImageContainer, { width: windowWidth, height: windowHeight }]}>
+                  <Image
+                    source={{ uri: photoUrl }}
+                    style={[styles.imageModalImage, { width: windowWidth, height: windowHeight }]}
+                    resizeMode="contain"
+                  />
+                </View>
+              );
+            })}
+          </ScrollView>
+
+          {/* 이전/다음 버튼 (여러 장일 때만) */}
+          {diary.photos && diary.photos.length > 1 && (
+            <>
+              {selectedImageIndex > 0 && (
+                <TouchableOpacity
+                  style={[styles.imageModalNavButton, styles.imageModalNavButtonLeft]}
+                  onPress={() => {
+                    const newIndex = selectedImageIndex - 1;
+                    setSelectedImageIndex(newIndex);
+                    imageScrollViewRef.current?.scrollTo({
+                      x: newIndex * windowWidth,
+                      animated: true,
+                    });
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="chevron-back" size={32} color="#FFFFFF" />
+                </TouchableOpacity>
+              )}
+              {selectedImageIndex < diary.photos.length - 1 && (
+                <TouchableOpacity
+                  style={[styles.imageModalNavButton, styles.imageModalNavButtonRight]}
+                  onPress={() => {
+                    const newIndex = selectedImageIndex + 1;
+                    setSelectedImageIndex(newIndex);
+                    imageScrollViewRef.current?.scrollTo({
+                      x: newIndex * windowWidth,
+                      animated: true,
+                    });
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="chevron-forward" size={32} color="#FFFFFF" />
+                </TouchableOpacity>
+              )}
+            </>
+          )}
+        </View>
+      </Modal>
+
       {/* 확인 모달 */}
       <Modal
         visible={confirmModal.visible}
@@ -761,17 +885,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#666666',
   },
-  draftBadge: {
-    backgroundColor: '#FFF3E0',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 12,
-  },
-  draftText: {
-    fontSize: 13,
-    color: '#F57C00',
-    fontWeight: '600',
-  },
+
   divider: {
     height: 1,
     backgroundColor: '#E8E8E8',
@@ -787,6 +901,32 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#999999',
     marginBottom: 4,
+  },
+  // 사진 갤러리 스타일
+  photosSection: {
+    marginBottom: 24,
+  },
+  photosSectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333333',
+    marginBottom: 12,
+  },
+  photosContainer: {
+    paddingRight: 24,
+    gap: 12,
+  },
+  photoItem: {
+    width: 200,
+    height: 200,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: '#F0F0F0',
+    marginRight: 12,
+  },
+  photoImage: {
+    width: '100%',
+    height: '100%',
   },
   // 댓글 버튼 (스크롤뷰 안)
   commentButton: {
@@ -1033,6 +1173,64 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '700',
+  },
+  // 이미지 확대 모달 스타일
+  imageModalContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.95)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imageModalCloseButton: {
+    position: 'absolute',
+    right: 16,
+    zIndex: 10,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imageModalCounter: {
+    position: 'absolute',
+    left: 16,
+    zIndex: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  imageModalCounterText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  imageModalImageContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imageModalImage: {
+    maxWidth: '100%',
+    maxHeight: '100%',
+  },
+  imageModalNavButton: {
+    position: 'absolute',
+    top: '50%',
+    transform: [{ translateY: -22 }],
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  imageModalNavButtonLeft: {
+    left: 16,
+  },
+  imageModalNavButtonRight: {
+    right: 16,
   },
 });
 
