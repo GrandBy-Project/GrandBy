@@ -18,7 +18,7 @@ import {
   TouchableWithoutFeedback,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Header, BottomNavigationBar } from '../components';
+import { Header, BottomNavigationBar, TimePicker } from '../components';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Calendar } from 'react-native-calendars';
@@ -1506,167 +1506,18 @@ export const CalendarScreen = () => {
                 />
               </View>
 
-              {/* 시간 선택 - 시간/분 스크롤 휠 (항상 표시) */}
+              {/* 시간 선택 - AICallScreen과 동일한 TimePicker 사용 */}
               <View style={styles.inputSection}>
                 <Text style={styles.inputLabel}>시간</Text>
-                <Text style={styles.timeDisplayText}>
-                  {formatHHMMToDisplay(newSchedule.time || `${selectedHour.toString().padStart(2, '0')}:${selectedMinute.toString().padStart(2, '0')}`)}
-                </Text>
-                
-                {/* 시간/분 선택 스크롤 휠 */}
-                <View style={styles.timeWheelContainer}>
-                  <View style={styles.timeWheelMask} pointerEvents="none" />
-                  <View style={styles.timeWheelRow}>
-                    {/* 시간 선택 */}
-                    <View style={styles.timeWheelColumn}>
-                      <ScrollView
-                        ref={hourScrollRef}
-                        style={styles.timeWheelScroll}
-                        contentContainerStyle={styles.timeWheelContent}
-                        showsVerticalScrollIndicator={false}
-                        snapToInterval={isSmallScreen ? 40 : isMediumScreen ? 45 : 50}
-                        decelerationRate="fast"
-                        nestedScrollEnabled={true}
-                        scrollEnabled={true}
-                        onLayout={() => {
-                          if (hourScrollRef.current) {
-                            // selectedHour가 설정되어 있으면 사용, 없으면 12시 사용
-                            const hour = (selectedHour !== undefined && !isNaN(selectedHour)) 
-                              ? selectedHour 
-                              : 12;
-                            const itemHeight = isSmallScreen ? 40 : isMediumScreen ? 45 : 50;
-                            setTimeout(() => {
-                              hourScrollRef.current?.scrollTo({
-                                y: hour * itemHeight,
-                                animated: false,
-                              });
-                            }, 300);
-                          }
-                        }}
-                        onMomentumScrollEnd={(event) => {
-                          const itemHeight = isSmallScreen ? 40 : isMediumScreen ? 45 : 50;
-                          const offsetY = event.nativeEvent.contentOffset.y;
-                          const index = Math.round(offsetY / itemHeight);
-                          const clampedIndex = Math.max(0, Math.min(index, 23));
-                          setSelectedHour(clampedIndex);
-                          setNewSchedule({ 
-                            ...newSchedule, 
-                            time: formatTimeToHHMM(clampedIndex, selectedMinute) 
-                          });
-                        }}
-                      >
-                        <View style={{ height: 5 }} />
-                        {hourOptions.map((hour, index) => (
-                          <TouchableOpacity
-                            key={hour}
-                            style={[
-                              styles.timeWheelItem,
-                              selectedHour === hour && styles.timeWheelItemSelected,
-                            ]}
-                            onPress={() => {
-                              setSelectedHour(hour);
-                              setNewSchedule({ 
-                                ...newSchedule, 
-                                time: formatTimeToHHMM(hour, selectedMinute) 
-                              });
-                              const itemHeight = isSmallScreen ? 40 : isMediumScreen ? 45 : 50;
-                              hourScrollRef.current?.scrollTo({
-                                y: index * itemHeight,
-                                animated: true,
-                              });
-                            }}
-                            activeOpacity={0.7}
-                          >
-                            <Text style={[
-                              styles.timeWheelItemText,
-                              selectedHour === hour && styles.timeWheelItemTextSelected,
-                            ]}>
-                              {hour}
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
-                        <View style={{ height: 5 }} />
-                        </ScrollView>
-                      </View>
-
-                    {/* 구분선 */}
-                    <Text style={styles.timeWheelSeparator} pointerEvents="none">:</Text>
-
-                    {/* 분 선택 */}
-                    <View style={styles.timeWheelColumn}>
-                      <ScrollView
-                        ref={minuteScrollRef}
-                        style={styles.timeWheelScroll}
-                        contentContainerStyle={styles.timeWheelContent}
-                        showsVerticalScrollIndicator={false}
-                        snapToInterval={isSmallScreen ? 40 : isMediumScreen ? 45 : 50}
-                        decelerationRate="fast"
-                        nestedScrollEnabled={true}
-                        scrollEnabled={true}
-                        onLayout={() => {
-                          if (minuteScrollRef.current) {
-                            // selectedMinute가 설정되어 있으면 사용, 없으면 0분 사용
-                            const minute = (selectedMinute !== undefined && !isNaN(selectedMinute)) 
-                              ? selectedMinute 
-                              : 0;
-                            const itemHeight = isSmallScreen ? 40 : isMediumScreen ? 45 : 50;
-                            setTimeout(() => {
-                              minuteScrollRef.current?.scrollTo({
-                                y: Math.round(minute / 5) * itemHeight,
-                                animated: false,
-                              });
-                            }, 300);
-                          }
-                        }}
-                        onMomentumScrollEnd={(event) => {
-                          const itemHeight = isSmallScreen ? 40 : isMediumScreen ? 45 : 50;
-                          const offsetY = event.nativeEvent.contentOffset.y;
-                          const index = Math.round(offsetY / itemHeight);
-                          const clampedIndex = Math.max(0, Math.min(index, 11));
-                          const minuteValue = minuteOptions[clampedIndex];
-                          setSelectedMinute(minuteValue);
-                          setNewSchedule({ 
-                            ...newSchedule, 
-                            time: formatTimeToHHMM(selectedHour, minuteValue) 
-                          });
-                        }}
-                      >
-                        <View style={{ height: 5 }} />
-                        {minuteOptions.map((minute, index) => (
-                          <TouchableOpacity
-                            key={minute}
-                            style={[
-                              styles.timeWheelItem,
-                              selectedMinute === minute && styles.timeWheelItemSelected,
-                            ]}
-                            onPress={() => {
-                              setSelectedMinute(minute);
-                              setNewSchedule({ 
-                                ...newSchedule, 
-                                time: formatTimeToHHMM(selectedHour, minute) 
-                              });
-                              const itemHeight = isSmallScreen ? 40 : isMediumScreen ? 45 : 50;
-                              minuteScrollRef.current?.scrollTo({
-                                y: index * itemHeight,
-                                animated: true,
-                              });
-                            }}
-                            activeOpacity={0.7}
-                          >
-                            <Text style={[
-                              styles.timeWheelItemText,
-                              selectedMinute === minute && styles.timeWheelItemTextSelected,
-                            ]}>
-                              {minute.toString().padStart(2, '0')}
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
-                        <View style={{ height: 5 }} />
-                      </ScrollView>
-                    </View>
-
-                  </View>
-                </View>
+                <TimePicker
+                  value={newSchedule.time || '12:00'}
+                  onChange={(time: string) => {
+                    setNewSchedule({
+                      ...newSchedule,
+                      time,
+                    });
+                  }}
+                />
               </View>
             </ScrollView>
 
