@@ -47,6 +47,13 @@ export const DiaryDetailScreen = () => {
   const [footerHeight, setFooterHeight] = useState(0);
   const [kbHeight, setKbHeight] = useState(0);
 
+  // 이미지 확대 모달 상태
+  const [showImageModal, setShowImageModal] = useState(false);
+  const [selectedImageIndex, setSelectedImageIndex] = useState(0);
+  const imageScrollViewRef = useRef<ScrollView>(null);
+  const windowWidth = Dimensions.get('window').width;
+  const windowHeight = Dimensions.get('window').height;
+
   // 확인 모달 상태
   const [confirmModal, setConfirmModal] = useState<{
     visible: boolean;
@@ -461,7 +468,7 @@ export const DiaryDetailScreen = () => {
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.photosContainer}
             >
-              {diary.photos.map((photo) => {
+              {diary.photos.map((photo, index) => {
                 const photoUrl = photo.photo_url.startsWith('http') 
                   ? photo.photo_url 
                   : `${API_BASE_URL}${photo.photo_url}`;
@@ -472,7 +479,8 @@ export const DiaryDetailScreen = () => {
                     style={styles.photoItem}
                     activeOpacity={0.9}
                     onPress={() => {
-                      // TODO: 이미지 확대 보기 모달 (선택 사항)
+                      setSelectedImageIndex(index);
+                      setShowImageModal(true);
                     }}
                   >
                     <Image
@@ -635,6 +643,104 @@ export const DiaryDetailScreen = () => {
     </View>
   </View>
 </Modal>
+
+      {/* 이미지 확대 모달 */}
+      <Modal
+        visible={showImageModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowImageModal(false)}
+      >
+        <View style={styles.imageModalContainer}>
+          {/* 닫기 버튼 */}
+          <TouchableOpacity
+            style={[styles.imageModalCloseButton, { top: insets.top + 16 }]}
+            onPress={() => setShowImageModal(false)}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="close" size={32} color="#FFFFFF" />
+          </TouchableOpacity>
+
+          {/* 이미지 인덱스 표시 (여러 장일 때만) */}
+          {diary.photos && diary.photos.length > 1 && (
+            <View style={[styles.imageModalCounter, { top: insets.top + 16 }]}>
+              <Text style={styles.imageModalCounterText}>
+                {selectedImageIndex + 1} / {diary.photos.length}
+              </Text>
+            </View>
+          )}
+
+          {/* 이미지 스크롤 뷰 */}
+          <ScrollView
+            ref={imageScrollViewRef}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            onMomentumScrollEnd={(event) => {
+              const offsetX = event.nativeEvent.contentOffset.x;
+              const width = event.nativeEvent.layoutMeasurement.width;
+              const index = Math.round(offsetX / width);
+              setSelectedImageIndex(index);
+            }}
+            contentOffset={{ x: selectedImageIndex * windowWidth, y: 0 }}
+            scrollEnabled={diary.photos && diary.photos.length > 1}
+          >
+            {diary.photos?.map((photo) => {
+              const photoUrl = photo.photo_url.startsWith('http') 
+                ? photo.photo_url 
+                : `${API_BASE_URL}${photo.photo_url}`;
+              
+              return (
+                <View key={photo.photo_id} style={[styles.imageModalImageContainer, { width: windowWidth, height: windowHeight }]}>
+                  <Image
+                    source={{ uri: photoUrl }}
+                    style={[styles.imageModalImage, { width: windowWidth, height: windowHeight }]}
+                    resizeMode="contain"
+                  />
+                </View>
+              );
+            })}
+          </ScrollView>
+
+          {/* 이전/다음 버튼 (여러 장일 때만) */}
+          {diary.photos && diary.photos.length > 1 && (
+            <>
+              {selectedImageIndex > 0 && (
+                <TouchableOpacity
+                  style={[styles.imageModalNavButton, styles.imageModalNavButtonLeft]}
+                  onPress={() => {
+                    const newIndex = selectedImageIndex - 1;
+                    setSelectedImageIndex(newIndex);
+                    imageScrollViewRef.current?.scrollTo({
+                      x: newIndex * windowWidth,
+                      animated: true,
+                    });
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="chevron-back" size={32} color="#FFFFFF" />
+                </TouchableOpacity>
+              )}
+              {selectedImageIndex < diary.photos.length - 1 && (
+                <TouchableOpacity
+                  style={[styles.imageModalNavButton, styles.imageModalNavButtonRight]}
+                  onPress={() => {
+                    const newIndex = selectedImageIndex + 1;
+                    setSelectedImageIndex(newIndex);
+                    imageScrollViewRef.current?.scrollTo({
+                      x: newIndex * windowWidth,
+                      animated: true,
+                    });
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="chevron-forward" size={32} color="#FFFFFF" />
+                </TouchableOpacity>
+              )}
+            </>
+          )}
+        </View>
+      </Modal>
 
       {/* 확인 모달 */}
       <Modal
@@ -1067,6 +1173,64 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '700',
+  },
+  // 이미지 확대 모달 스타일
+  imageModalContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.95)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imageModalCloseButton: {
+    position: 'absolute',
+    right: 16,
+    zIndex: 10,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imageModalCounter: {
+    position: 'absolute',
+    left: 16,
+    zIndex: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  imageModalCounterText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  imageModalImageContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imageModalImage: {
+    maxWidth: '100%',
+    maxHeight: '100%',
+  },
+  imageModalNavButton: {
+    position: 'absolute',
+    top: '50%',
+    transform: [{ translateY: -22 }],
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  imageModalNavButtonLeft: {
+    left: 16,
+  },
+  imageModalNavButtonRight: {
+    right: 16,
   },
 });
 
