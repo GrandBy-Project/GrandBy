@@ -31,6 +31,13 @@ from app.schemas.todo import (
 from app.schemas.notification import (
     NotificationResponse,
 )
+from app.schemas.health import (
+    HealthDataCreate,
+    HealthDataUpdate,
+    HealthDataResponse,
+    HealthDataStatsResponse,
+    HealthDataRangeResponse,
+)
 
 __all__ = [
     "UserBase",
@@ -51,5 +58,10 @@ __all__ = [
     "TodoUpdate",
     "TodoResponse",
     "NotificationResponse",
+    "HealthDataCreate",
+    "HealthDataUpdate",
+    "HealthDataResponse",
+    "HealthDataStatsResponse",
+    "HealthDataRangeResponse",
 ]
 

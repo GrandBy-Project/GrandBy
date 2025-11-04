@@ -7,6 +7,7 @@ from app.models.call import CallLog, CallSettings, CallTranscript, EmotionLog
 from app.models.diary import Diary, DiaryPhoto, DiaryComment
 from app.models.todo import Todo
 from app.models.notification import Notification
+from app.models.health import HealthData
 
 __all__ = [
     "User",
@@ -21,5 +22,6 @@ __all__ = [
     "DiaryComment",
     "Todo",
     "Notification",
+    "HealthData",
 ]
 

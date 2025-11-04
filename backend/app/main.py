@@ -22,7 +22,7 @@ from pytz import timezone
 
 from twilio.twiml.voice_response import VoiceResponse, Connect, Stream
 
-from app.routers import auth, users, calls, diaries, todos, notifications, dashboard
+from app.routers import auth, users, calls, diaries, todos, notifications, dashboard, health
 from app.config import settings, is_development
 from app.database import test_db_connection, get_db
 from app.services.ai_call.llm_service import LLMService
@@ -676,6 +676,13 @@ app.include_router(
     dashboard.router,
     prefix="/api/dashboard",
     tags=["Dashboard"]
+)
+
+# 건강 데이터
+app.include_router(
+    health.router,
+    prefix="/api/health",
+    tags=["Health"]
 )
 
 # ==================== Twilio WebSocket Endpoints ====================
