@@ -639,16 +639,16 @@ export const ElderlyHomeScreen = () => {
               일기
             </Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.actionButton, fontSizeLevel >= 1 && styles.actionButtonLarge]} onPress={() => show('준비중', '알림 기능은 개발 중입니다.')}>
+          <TouchableOpacity style={[styles.actionButton, fontSizeLevel >= 1 && styles.actionButtonLarge]} onPress={() => router.push('/calendar')}>
             <View style={[styles.actionIcon, fontSizeLevel >= 1 && styles.actionIconLarge]}>
-              <NotificationIcon size={fontSizeLevel >= 1 ? 32 : 24} color="#34B79F" />
+              <Ionicons name="calendar-outline" size={fontSizeLevel >= 1 ? 32 : 24} color="#34B79F" />
             </View>
             <Text 
               style={[styles.actionLabel, fontSizeLevel >= 1 && styles.actionLabelLarge]}
               numberOfLines={1}
               ellipsizeMode="tail"
             >
-              알림
+              캘린더
             </Text>
           </TouchableOpacity>
         </View>

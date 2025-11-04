@@ -460,6 +460,25 @@ async def create_comment(
     # 유저 정보 조회
     user = db.query(User).filter(User.user_id == current_user.user_id).first()
     
+    # 🔔 댓글 작성 알림 전송 (비동기)
+    try:
+        import logging
+        from app.services.notification_service import NotificationService
+        logger = logging.getLogger(__name__)
+        
+        await NotificationService.notify_diary_comment_created(
+            db=db,
+            diary_id=diary_id,
+            comment_author_id=current_user.user_id,
+            comment_author_name=current_user.name,
+            diary_title=diary.title
+        )
+        logger.info(f"📤 일기 댓글 작성 알림 전송 완료: {diary_id}")
+    except Exception as notify_error:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"⚠️ 일기 댓글 작성 알림 전송 실패 (댓글은 생성됨): {str(notify_error)}")
+    
     return {
         "comment_id": new_comment.comment_id,
         "user_id": new_comment.user_id,
