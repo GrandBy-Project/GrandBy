@@ -1034,6 +1034,25 @@ export const CalendarScreen = () => {
                             <Text style={styles.diaryPreviewContent} numberOfLines={2}>
                               {diary.content}
                             </Text>
+                            {/* 댓글 및 사진 배지 */}
+                            {(diary.photos && diary.photos.length > 0) || (diary.comment_count !== undefined && diary.comment_count > 0) ? (
+                              <View style={styles.diaryBadgeContainer}>
+                                {/* 사진 배지 */}
+                                {diary.photos && diary.photos.length > 0 && (
+                                  <View style={styles.diaryPhotoCountBadge}>
+                                    <Ionicons name="camera-outline" size={14} color="#FF9500" />
+                                    <Text style={styles.diaryPhotoCountText}>{diary.photos.length}</Text>
+                                  </View>
+                                )}
+                                {/* 댓글 배지 */}
+                                {diary.comment_count !== undefined && diary.comment_count > 0 && (
+                                  <View style={styles.diaryCommentCountBadge}>
+                                    <Ionicons name="chatbubble-outline" size={14} color={Colors.primary} />
+                                    <Text style={styles.diaryCommentCountText}>{diary.comment_count}</Text>
+                                  </View>
+                                )}
+                              </View>
+                            ) : null}
                           </TouchableOpacity>
                         );
                       })}
@@ -1355,6 +1374,25 @@ export const CalendarScreen = () => {
                               <Text style={styles.scheduleDescription} numberOfLines={3}>
                                 {diary.content}
                               </Text>
+                              {/* 댓글 및 사진 배지 */}
+                              {(diary.photos && diary.photos.length > 0) || (diary.comment_count !== undefined && diary.comment_count > 0) ? (
+                                <View style={styles.diaryBadgeContainer}>
+                                  {/* 사진 배지 */}
+                                  {diary.photos && diary.photos.length > 0 && (
+                                    <View style={styles.diaryPhotoCountBadge}>
+                                      <Ionicons name="camera-outline" size={14} color="#FF9500" />
+                                      <Text style={styles.diaryPhotoCountText}>{diary.photos.length}</Text>
+                                    </View>
+                                  )}
+                                  {/* 댓글 배지 */}
+                                  {diary.comment_count !== undefined && diary.comment_count > 0 && (
+                                    <View style={styles.diaryCommentCountBadge}>
+                                      <Ionicons name="chatbubble-outline" size={14} color={Colors.primary} />
+                                      <Text style={styles.diaryCommentCountText}>{diary.comment_count}</Text>
+                                    </View>
+                                  )}
+                                </View>
+                              ) : null}
                             </View>
 
                             <View style={styles.scheduleArrow}>
@@ -2997,6 +3035,41 @@ const styles = StyleSheet.create({
     gap: 8,
     flex: 1,
     marginRight: 8,
+  },
+  // 일기 배지 스타일
+  diaryBadgeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+  },
+  diaryPhotoCountBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: '#FFF4E6',
+    borderRadius: 12,
+  },
+  diaryPhotoCountText: {
+    fontSize: 12,
+    color: '#FF9500',
+    fontWeight: '600',
+  },
+  diaryCommentCountBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: '#F0F8FF',
+    borderRadius: 12,
+  },
+  diaryCommentCountText: {
+    fontSize: 12,
+    color: Colors.primary,
+    fontWeight: '600',
   },
 });
 

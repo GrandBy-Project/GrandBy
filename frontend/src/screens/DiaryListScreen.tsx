@@ -167,12 +167,12 @@ export const DiaryListScreen = () => {
     let filtered = [...diaries];
 
     // 월 필터 적용
-    if (month) {
-      filtered = filtered.filter(diary => {
-        const diaryMonth = diary.date.substring(0, 7); // YYYY-MM
-        return diaryMonth === month;
-      });
-    }
+    // if (month) {
+    //   filtered = filtered.filter(diary => {
+    //     const diaryMonth = diary.date.substring(0, 7); // YYYY-MM
+    //     return diaryMonth === month;
+    //   });
+    // }
 
     // 감정 필터
     if (selectedMoods.length > 0) {
@@ -190,7 +190,7 @@ export const DiaryListScreen = () => {
     });
 
     return filtered;
-  }, [diaries, month, selectedMoods, selectedElderlyIds, user?.role]);
+  }, [diaries, selectedMoods, selectedElderlyIds, user?.role]);
 
   /**
    * 월별로 그룹화된 데이터 생성 (캘린더 탭용)
@@ -198,13 +198,13 @@ export const DiaryListScreen = () => {
   const groupedDiaries = useMemo(() => {
     let filtered = [...diaries];
 
-    // 월 필터 적용
-    if (month) {
-      filtered = filtered.filter(diary => {
-        const diaryMonth = diary.date.substring(0, 7); // YYYY-MM
-        return diaryMonth === month;
-      });
-    }
+    // // 월 필터 적용
+    // if (month) {
+    //   filtered = filtered.filter(diary => {
+    //     const diaryMonth = diary.date.substring(0, 7); // YYYY-MM
+    //     return diaryMonth === month;
+    //   });
+    // }
 
     // 감정 필터
     if (selectedMoods.length > 0) {
@@ -244,7 +244,7 @@ export const DiaryListScreen = () => {
       });
 
     return sections;
-  }, [diaries, month, selectedMoods, selectedElderlyIds, user?.role]);
+  }, [diaries, selectedMoods, selectedElderlyIds, user?.role]);
 
   /**
    * 월 변경 시 다이어리 다시 로드
@@ -312,7 +312,7 @@ export const DiaryListScreen = () => {
       loadAllDiaries();
       // 선택된 월의 다이어리 로드
       loadDiaries(true);
-    }, [selectedElderlyId, user])
+    }, [selectedElderlyId, user, month])
   );
 
   /**
@@ -407,6 +407,16 @@ export const DiaryListScreen = () => {
     const authorBadge = getAuthorBadgeInfo(item);
     const moodInfo = getMoodIcon(item.mood);
     const borderColor = moodInfo ? moodInfo.color : '#9C27B0';
+    
+    // 디버깅용 (개발 중에만)
+    if (__DEV__) {
+      console.log('Diary item:', {
+        diary_id: item.diary_id,
+        photos: item.photos,
+        photosLength: item.photos?.length,
+        comment_count: item.comment_count,
+      });
+    }
 
     return (
       <TouchableOpacity
@@ -469,7 +479,7 @@ export const DiaryListScreen = () => {
         {/* 내용 미리보기 */}
         <Text style={styles.contentPreview}>{contentPreview}</Text>
 
-        {/* 작성 시간 및 댓글 개수 */}
+        {/* 작성 시간 및 댓글 개수, 사진 개수 */}
         <View style={styles.footerRow}>
           <Text style={styles.timestamp}>
             {new Date(item.created_at).toLocaleString('ko-KR', {
@@ -479,12 +489,24 @@ export const DiaryListScreen = () => {
               minute: '2-digit',
             })}
           </Text>
-          {item.comment_count !== undefined && (
-            <View style={styles.commentCountBadge}>
-              <Ionicons name="chatbubble-outline" size={14} color={Colors.primary} />
-              <Text style={styles.commentCountText}>{item.comment_count}</Text>
+          {(item.photos && item.photos.length > 0) || (item.comment_count !== undefined && item.comment_count > 0) ? (
+            <View style={styles.badgeContainer}>
+              {/* 사진 배지 */}
+              {item.photos && item.photos.length > 0 && (
+                <View style={styles.photoCountBadge}>
+                  <Ionicons name="camera-outline" size={14} color="#FF9500" />
+                  <Text style={styles.photoCountText}>{item.photos.length}</Text>
+                </View>
+              )}
+              {/* 댓글 배지 */}
+              {item.comment_count !== undefined && item.comment_count > 0 && (
+                <View style={styles.commentCountBadge}>
+                  <Ionicons name="chatbubble-outline" size={14} color={Colors.primary} />
+                  <Text style={styles.commentCountText}>{item.comment_count}</Text>
+                </View>
+              )}
             </View>
-          )}
+          ) : null}
         </View>
       </TouchableOpacity>
     );
@@ -1040,6 +1062,25 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+  },
+  badgeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  photoCountBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: '#FFF4E6',
+    borderRadius: 12,
+  },
+  photoCountText: {
+    fontSize: 13,
+    color: '#FF9500',
+    fontWeight: '600',
   },
   commentCountBadge: {
     flexDirection: 'row',

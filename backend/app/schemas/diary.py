@@ -14,7 +14,7 @@ class DiaryCreate(BaseModel):
     title: Optional[str] = None
     content: str
     mood: Optional[str] = None
-    status: DiaryStatus = DiaryStatus.DRAFT
+    status: DiaryStatus = DiaryStatus.PUBLISHED
 
 class DiaryUpdate(BaseModel):
     """다이어리 수정"""
@@ -22,6 +22,16 @@ class DiaryUpdate(BaseModel):
     content: Optional[str] = None
     mood: Optional[str] = None
     status: Optional[DiaryStatus] = None
+
+
+class DiaryPhotoResponse(BaseModel):
+    """다이어리 사진 응답"""
+    photo_id: str
+    photo_url: str
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
 
 
 class DiaryResponse(BaseModel):
@@ -39,6 +49,7 @@ class DiaryResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     comment_count: int = 0  # 댓글 개수
+    photos: List[DiaryPhotoResponse] = []  # 사진 목록
     
     class Config:
         from_attributes = True
