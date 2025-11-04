@@ -195,8 +195,8 @@ export const CalendarScreen = () => {
 
   // 시간 옵션 (0-23)
   const hourOptions = Array.from({ length: 24 }, (_, i) => i);
-  // 분 옵션 (0-59)
-  const minuteOptions = Array.from({ length: 60 }, (_, i) => i);
+  // 분 옵션 (5분 단위 0-55)
+  const minuteOptions = Array.from({ length: 12 }, (_, i) => i * 5);
 
   // 시간 형식 변환 함수 (HH:MM 형식 유지)
   const convertKoreanTimeToHHMM = (timeStr: string): string => {
@@ -1612,7 +1612,7 @@ export const CalendarScreen = () => {
                             const itemHeight = isSmallScreen ? 40 : isMediumScreen ? 45 : 50;
                             setTimeout(() => {
                               minuteScrollRef.current?.scrollTo({
-                                y: minute * itemHeight,
+                                y: Math.round(minute / 5) * itemHeight,
                                 animated: false,
                               });
                             }, 300);
@@ -1622,11 +1622,12 @@ export const CalendarScreen = () => {
                           const itemHeight = isSmallScreen ? 40 : isMediumScreen ? 45 : 50;
                           const offsetY = event.nativeEvent.contentOffset.y;
                           const index = Math.round(offsetY / itemHeight);
-                          const clampedIndex = Math.max(0, Math.min(index, 59));
-                          setSelectedMinute(clampedIndex);
+                          const clampedIndex = Math.max(0, Math.min(index, 11));
+                          const minuteValue = minuteOptions[clampedIndex];
+                          setSelectedMinute(minuteValue);
                           setNewSchedule({ 
                             ...newSchedule, 
-                            time: formatTimeToHHMM(selectedHour, clampedIndex) 
+                            time: formatTimeToHHMM(selectedHour, minuteValue) 
                           });
                         }}
                       >
