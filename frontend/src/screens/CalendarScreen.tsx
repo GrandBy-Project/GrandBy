@@ -47,6 +47,9 @@ export const CalendarScreen = () => {
 
   // 날짜 스크롤 뷰 ref
   const dayScrollViewRef = useRef<ScrollView>(null);
+  // 시간 선택 스크롤 뷰 ref
+  const hourScrollRef = useRef<ScrollView>(null);
+  const minuteScrollRef = useRef<ScrollView>(null);
 
   // 월간/일간 뷰 상태
   const [isMonthlyView, setIsMonthlyView] = useState(false);
@@ -59,8 +62,6 @@ export const CalendarScreen = () => {
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
 
-  // 시간 드롭다운 상태
-  const [showTimePicker, setShowTimePicker] = useState(false);
 
   // 날짜 선택 모달 상태
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -70,9 +71,12 @@ export const CalendarScreen = () => {
   const [newSchedule, setNewSchedule] = useState({
     title: '',
     description: '',
-    time: '',
+    time: '', // HH:MM 형식
     date: '',
   });
+  // 시간 선택 상태 (시간, 분) - 기본값 12:00
+  const [selectedHour, setSelectedHour] = useState(12);
+  const [selectedMinute, setSelectedMinute] = useState(0);
 
   // 일정 상세 모달 상태
   const [showDetailModal, setShowDetailModal] = useState(false);
@@ -189,45 +193,29 @@ export const CalendarScreen = () => {
     return marked;
   };
 
-  const timeOptions = [
-    '오전 6시', '오전 7시', '오전 8시', '오전 9시', '오전 10시',
-    '오전 11시', '오후 12시', '오후 1시', '오후 2시', '오후 3시',
-    '오후 4시', '오후 5시', '오후 6시', '오후 7시', '오후 8시',
-    '오후 9시', '하루 종일'
-  ];
+  // 시간 옵션 (0-23)
+  const hourOptions = Array.from({ length: 24 }, (_, i) => i);
+  // 분 옵션 (0-59)
+  const minuteOptions = Array.from({ length: 60 }, (_, i) => i);
 
-  // 시간 형식 변환 함수
-  const convertKoreanTimeToHHMM = (koreanTime: string): string => {
-    if (koreanTime === '하루 종일') return '00:00';
-
-    const match = koreanTime.match(/(오전|오후)\s*(\d+)시/);
-    if (!match) return '00:00';
-
-    const [, period, hourStr] = match;
-    let hour = parseInt(hourStr, 10);
-
-    if (period === '오후' && hour !== 12) {
-      hour += 12;
-    } else if (period === '오전' && hour === 12) {
-      hour = 0;
-    }
-
-    return `${hour.toString().padStart(2, '0')}:00`;
+  // 시간 형식 변환 함수 (HH:MM 형식 유지)
+  const convertKoreanTimeToHHMM = (timeStr: string): string => {
+    if (!timeStr || timeStr === '하루 종일') return '00:00';
+    // 이미 HH:MM 형식이면 그대로 반환
+    if (timeStr.includes(':')) return timeStr;
+    return '00:00';
   };
 
   const convertHHMMToKoreanTime = (timeStr: string | null): string => {
     if (!timeStr) return '시간 미정';
 
-    const [hourStr, minute] = timeStr.split(':');
-    let hour = parseInt(hourStr, 10);
+    const [hourStr, minuteStr] = timeStr.split(':');
+    const hour = parseInt(hourStr, 10);
+    const minute = parseInt(minuteStr, 10);
 
-    if (hour === 0 && minute === '00') return '하루 종일';
+    if (hour === 0 && minute === 0) return '하루 종일';
 
-    const period = hour >= 12 ? '오후' : '오전';
-    if (hour > 12) hour -= 12;
-    if (hour === 0) hour = 12;
-
-    return `${period} ${hour}시`;
+    return `${hour}시 ${minute}분`;
   };
 
   // 날짜 범위별 일정 조회
@@ -591,14 +579,67 @@ export const CalendarScreen = () => {
     setShowYearMonthPicker(false);
   };
 
+  // 현재 한국 시간 가져오기
+  const getCurrentKoreaTime = () => {
+    const now = new Date();
+    const koreaTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
+    return {
+      hour: koreaTime.getHours(),
+      minute: koreaTime.getMinutes(),
+    };
+  };
+
+  // 시간을 HH:MM 형식으로 변환
+  const formatTimeToHHMM = (hour: number, minute: number): string => {
+    return `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
+  };
+
+  // HH:MM을 "14시 36분" 형식으로 변환
+  const formatHHMMToDisplay = (timeStr: string): string => {
+    if (!timeStr) return '시간을 선택해주세요';
+    const [hourStr, minuteStr] = timeStr.split(':');
+    const hour = parseInt(hourStr || '0', 10);
+    const minute = parseInt(minuteStr || '0', 10);
+    if (isNaN(hour) || isNaN(minute)) {
+      return '시간을 선택해주세요';
+    }
+    return `${hour}시 ${minute}분`;
+  };
+
   const handleAddSchedule = () => {
     // 선택된 날짜 또는 오늘 날짜로 일정 추가 모달 열기
     const targetDate = selectedDay || new Date();
+    // 기본 시간 12:00으로 설정
+    const defaultTime = formatTimeToHHMM(12, 0);
+    
+    // 시간과 분을 먼저 설정 (12:00으로)
+    setSelectedHour(12);
+    setSelectedMinute(0);
+    
     setNewSchedule({
-      ...newSchedule,
+      title: '',
+      description: '',
+      time: defaultTime,
       date: formatDateString(targetDate)
     });
     setShowAddModal(true);
+    
+    // 모달이 열린 후 스크롤 위치 설정 (선택된 항목이 중앙에 오도록)
+    const itemHeight = isSmallScreen ? 40 : isMediumScreen ? 45 : 50;
+    setTimeout(() => {
+      if (hourScrollRef.current) {
+        hourScrollRef.current.scrollTo({
+          y: 12 * itemHeight,
+          animated: false,
+        });
+      }
+      if (minuteScrollRef.current) {
+        minuteScrollRef.current.scrollTo({
+          y: 0 * itemHeight,
+          animated: false,
+        });
+      }
+    }, 350);
   };
 
   // 날짜 표시 포맷팅 (예: 2024년 10월 31일 (목))
@@ -616,7 +657,6 @@ export const CalendarScreen = () => {
   const handleDateSelectInModal = (day: { dateString: string }) => {
     setNewSchedule({ ...newSchedule, date: day.dateString });
     setShowDatePicker(false);
-    setShowTimePicker(false); // 시간 드롭다운도 닫기
   };
 
   const handleDateSelect = (date: Date) => {
@@ -653,8 +693,8 @@ export const CalendarScreen = () => {
     try {
       setIsLoading(true);
 
-      // 시간 형식 변환: "오후 12시" → "12:00"
-      const timeHHMM = convertKoreanTimeToHHMM(newSchedule.time);
+      // 시간 형식 (이미 HH:MM 형식)
+      const timeHHMM = newSchedule.time;
 
       const todoData = {
         elderly_id: user.user_id,
@@ -687,7 +727,6 @@ export const CalendarScreen = () => {
   const handleCancelAdd = () => {
     setNewSchedule({ title: '', description: '', time: '', date: '' });
     setShowAddModal(false);
-    setShowTimePicker(false); // 시간 선택 모달도 함께 닫기
     setShowDatePicker(false); // 날짜 선택 모달도 함께 닫기
   };
 
@@ -1101,21 +1140,38 @@ export const CalendarScreen = () => {
             </ScrollView>
 
 
-            {/* 일정 추가 버튼 - 'diary' 필터가 아닐 때만 표시 */}
-            {selectedFilter !== 'diary' && (
-              <View style={styles.addScheduleSection}>
+            {/* 일기 작성 및 일정 추가 버튼 */}
+            <View style={styles.addButtonSection}>
+              {/* 일기 작성 버튼 - 'schedule' 필터가 아닐 때만 표시 */}
+              {selectedFilter !== 'schedule' && (
                 <TouchableOpacity
-                  style={styles.addScheduleButton}
+                  style={styles.addDiaryButton}
+                  onPress={() => {
+                    const today = formatDateString(new Date());
+                    router.push(`/diary-write?date=${today}`);
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="book-outline" size={20} color={Colors.textWhite} />
+                  <Text style={styles.addDiaryButtonText}>일기 작성</Text>
+                </TouchableOpacity>
+              )}
+
+              {/* 일정 추가 버튼 - 'diary' 필터가 아닐 때만 표시 */}
+              {selectedFilter !== 'diary' && (
+                <TouchableOpacity
+                  style={[
+                    styles.addScheduleButton,
+                    selectedFilter === 'schedule' && styles.addScheduleButtonFullWidth
+                  ]}
                   onPress={handleAddSchedule}
                   activeOpacity={0.7}
                 >
-                  <Ionicons name="add" size={22} color={Colors.textWhite} />
-                  <Text style={styles.addScheduleText}>
-                    {selectedDate ? `${formatDate(selectedDate)} 일정 추가` : '일정 추가'}
-                  </Text>
+                  <Ionicons name="add" size={20} color={Colors.textWhite} />
+                  <Text style={styles.addScheduleText}>일정 추가</Text>
                 </TouchableOpacity>
-              </View>
-            )}
+              )}
+            </View>
 
             {/* 시간대별 일정 목록 - 'diary' 필터가 아닐 때만 표시 */}
             {selectedFilter !== 'diary' && (
@@ -1323,112 +1379,103 @@ export const CalendarScreen = () => {
       {/* 하단 네비게이션 바 */}
       <BottomNavigationBar />
 
-      {/* 일정 추가 모달 */}
+      {/* 일정 추가 모달 - 중앙 배치 */}
       <Modal
         visible={showAddModal}
         transparent
-        animationType="slide"
+        animationType="fade"
         onRequestClose={handleCancelAdd}
-        presentationStyle="overFullScreen"
       >
         <KeyboardAvoidingView
-          style={styles.modalOverlay}
+          style={styles.centeredModalOverlay}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
         >
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>일정 추가</Text>
+          <TouchableWithoutFeedback onPress={handleCancelAdd}>
+            <View style={styles.centeredModalBackdrop} />
+          </TouchableWithoutFeedback>
+          
+          <View style={styles.centeredModalContent}>
+            {/* 헤더 */}
+            <View style={styles.centeredModalHeader}>
+              <Text style={styles.centeredModalTitle}>일정 추가</Text>
               <TouchableOpacity 
                 onPress={handleCancelAdd} 
-                style={styles.closeButton}
-                onPressIn={() => {
-                  setShowDatePicker(false);
-                  setShowTimePicker(false);
-                }}
+                style={styles.centeredCloseButton}
               >
-                <Ionicons name="close" size={18} color={Colors.textSecondary} />
+                <Ionicons name="close" size={24} color={Colors.textSecondary} />
               </TouchableOpacity>
             </View>
-            
+
             <ScrollView
-              style={styles.modalBody}
+              style={styles.centeredModalBody}
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
-              contentInsetAdjustmentBehavior={Platform.OS === 'ios' ? 'automatic' : 'never'}
-              automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
-              scrollEnabled={!showTimePicker && !showDatePicker}
+              contentContainerStyle={{ paddingBottom: 20 }}
+              nestedScrollEnabled={true}
+              scrollEnabled={!showDatePicker}
+              bounces={false}
             >
               {/* 날짜 선택 */}
               <View style={styles.inputSection}>
                 <Text style={styles.inputLabel}>날짜</Text>
-                <View style={styles.datePickerContainer}>
-                  <TouchableOpacity
-                    style={styles.datePickerButton}
-                    onPress={() => {
-                      setShowDatePicker(!showDatePicker);
-                      if (!showDatePicker) {
-                        setShowTimePicker(false); // 시간 드롭다운 닫기
-                      }
-                    }}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={[
-                      styles.datePickerText,
-                      !newSchedule.date && styles.datePickerPlaceholder
-                    ]}>
-                      {newSchedule.date ? formatDateDisplay(newSchedule.date) : '날짜를 선택해주세요'}
-                    </Text>
-                    <Ionicons
-                      name="calendar-outline"
-                      size={20}
-                      color={Colors.primary}
-                    />
-                  </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.datePickerButton}
+                  onPress={() => {
+                    setShowDatePicker(!showDatePicker);
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[
+                    styles.datePickerText,
+                    !newSchedule.date && styles.datePickerPlaceholder
+                  ]}>
+                    {newSchedule.date ? formatDateDisplay(newSchedule.date) : '날짜를 선택해주세요'}
+                  </Text>
+                  <Ionicons
+                    name="calendar-outline"
+                    size={20}
+                    color={Colors.primary}
+                  />
+                </TouchableOpacity>
 
-                  {/* 날짜 선택 달력 - 오버레이 형식 */}
-                  {showDatePicker && (
-                    <View 
-                      style={styles.datePickerDropdown}
-                      pointerEvents="auto"
-                    >
-                      <View>
-                        <Calendar
-                          current={newSchedule.date || formatDateString(selectedDay)}
-                          onDayPress={handleDateSelectInModal}
-                          monthFormat={'yyyy년 M월'}
-                          hideExtraDays={true}
-                          theme={{
-                            backgroundColor: '#FFFFFF',
-                            calendarBackground: '#FFFFFF',
-                            textSectionTitleColor: '#666666',
-                            selectedDayBackgroundColor: Colors.primary,
-                            selectedDayTextColor: '#FFFFFF',
-                            todayTextColor: Colors.primary,
-                            dayTextColor: '#333333',
-                            textDisabledColor: '#CCCCCC',
-                            dotColor: Colors.primary,
-                            selectedDotColor: '#FFFFFF',
-                            arrowColor: Colors.primary,
-                            monthTextColor: '#333333',
-                            textDayFontWeight: '500',
-                            textMonthFontWeight: '700',
-                            textDayHeaderFontWeight: '600',
-                            textDayFontSize: 16,
-                            textMonthFontSize: 18,
-                            textDayHeaderFontSize: 14,
-                          }}
-                          markedDates={{
-                            [newSchedule.date || formatDateString(selectedDay)]: {
-                              selected: true,
-                              selectedColor: Colors.primary,
-                            }
-                          }}
-                        />
-                      </View>
-                    </View>
-                  )}
-                </View>
+                {/* 날짜 선택 달력 */}
+                {showDatePicker && (
+                  <View style={styles.centeredDatePickerContainer}>
+                    <Calendar
+                      current={newSchedule.date || formatDateString(selectedDay)}
+                      onDayPress={handleDateSelectInModal}
+                      monthFormat={'yyyy년 M월'}
+                      hideExtraDays={true}
+                      theme={{
+                        backgroundColor: '#FFFFFF',
+                        calendarBackground: '#FFFFFF',
+                        textSectionTitleColor: '#666666',
+                        selectedDayBackgroundColor: Colors.primary,
+                        selectedDayTextColor: '#FFFFFF',
+                        todayTextColor: Colors.primary,
+                        dayTextColor: '#333333',
+                        textDisabledColor: '#CCCCCC',
+                        dotColor: Colors.primary,
+                        selectedDotColor: '#FFFFFF',
+                        arrowColor: Colors.primary,
+                        monthTextColor: '#333333',
+                        textDayFontWeight: '500',
+                        textMonthFontWeight: '700',
+                        textDayHeaderFontWeight: '600',
+                        textDayFontSize: 16,
+                        textMonthFontSize: 18,
+                        textDayHeaderFontSize: 14,
+                      }}
+                      markedDates={{
+                        [newSchedule.date || formatDateString(selectedDay)]: {
+                          selected: true,
+                          selectedColor: Colors.primary,
+                        }
+                      }}
+                    />
+                  </View>
+                )}
               </View>
 
               {/* 제목 입력 */}
@@ -1440,8 +1487,7 @@ export const CalendarScreen = () => {
                   onChangeText={(text) => setNewSchedule({ ...newSchedule, title: text })}
                   placeholder="일정 제목을 입력해주세요"
                   placeholderTextColor={Colors.textLight}
-                  pointerEvents={showTimePicker || showDatePicker ? 'none' : 'auto'}
-                  editable={!showTimePicker && !showDatePicker}
+                  editable={!showDatePicker}
                 />
               </View>
 
@@ -1456,92 +1502,175 @@ export const CalendarScreen = () => {
                   placeholderTextColor={Colors.textLight}
                   multiline
                   numberOfLines={4}
-                  pointerEvents={showTimePicker || showDatePicker ? 'none' : 'auto'}
-                  editable={!showTimePicker && !showDatePicker}
+                  editable={!showDatePicker}
                 />
               </View>
 
-              {/* 시간 선택 */}
+              {/* 시간 선택 - 시간/분 스크롤 휠 (항상 표시) */}
               <View style={styles.inputSection}>
                 <Text style={styles.inputLabel}>시간</Text>
-
-                <View style={styles.timePickerContainer}>
-                  {/* 드롭다운 선택 버튼 */}
-                  <TouchableOpacity
-                    style={styles.timePickerButton}
-                    onPress={() => {
-                      setShowTimePicker(!showTimePicker);
-                      if (!showTimePicker) {
-                        setShowDatePicker(false); // 날짜 드롭다운 닫기
-                      }
-                    }}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={[
-                      styles.timePickerText,
-                      !newSchedule.time && styles.timePickerPlaceholder
-                    ]}>
-                      {newSchedule.time || '시간을 선택해주세요'}
-                    </Text>
-                    <Ionicons
-                      name={showTimePicker ? "chevron-up" : "chevron-down"}
-                      size={16}
-                      color={Colors.primary}
-                    />
-                  </TouchableOpacity>
-
-                  {/* 드롭다운 목록 - 위 방향 */}
-                  {showTimePicker && (
-                    <View 
-                      style={styles.timePickerDropdown}
-                      pointerEvents="box-none"
-                      collapsable={false}
-                    >
+                <Text style={styles.timeDisplayText}>
+                  {formatHHMMToDisplay(newSchedule.time || `${selectedHour.toString().padStart(2, '0')}:${selectedMinute.toString().padStart(2, '0')}`)}
+                </Text>
+                
+                {/* 시간/분 선택 스크롤 휠 */}
+                <View style={styles.timeWheelContainer}>
+                  <View style={styles.timeWheelMask} pointerEvents="none" />
+                  <View style={styles.timeWheelRow}>
+                    {/* 시간 선택 */}
+                    <View style={styles.timeWheelColumn}>
                       <ScrollView
-                        style={styles.timePickerScroll}
-                        contentContainerStyle={styles.timePickerScrollContent}
-                        showsVerticalScrollIndicator={true}
+                        ref={hourScrollRef}
+                        style={styles.timeWheelScroll}
+                        contentContainerStyle={styles.timeWheelContent}
+                        showsVerticalScrollIndicator={false}
+                        snapToInterval={isSmallScreen ? 40 : isMediumScreen ? 45 : 50}
+                        decelerationRate="fast"
                         nestedScrollEnabled={true}
-                        bounces={false}
-                        scrollEventThrottle={16}
-                        alwaysBounceVertical={false}
                         scrollEnabled={true}
-                        onStartShouldSetResponder={() => true}
-                        onStartShouldSetResponderCapture={() => true}
-                        onMoveShouldSetResponder={() => true}
-                        onMoveShouldSetResponderCapture={() => true}
-                        pointerEvents="auto"
+                        onLayout={() => {
+                          if (hourScrollRef.current) {
+                            // selectedHour가 설정되어 있으면 사용, 없으면 12시 사용
+                            const hour = (selectedHour !== undefined && !isNaN(selectedHour)) 
+                              ? selectedHour 
+                              : 12;
+                            const itemHeight = isSmallScreen ? 40 : isMediumScreen ? 45 : 50;
+                            setTimeout(() => {
+                              hourScrollRef.current?.scrollTo({
+                                y: hour * itemHeight,
+                                animated: false,
+                              });
+                            }, 300);
+                          }
+                        }}
+                        onMomentumScrollEnd={(event) => {
+                          const itemHeight = isSmallScreen ? 40 : isMediumScreen ? 45 : 50;
+                          const offsetY = event.nativeEvent.contentOffset.y;
+                          const index = Math.round(offsetY / itemHeight);
+                          const clampedIndex = Math.max(0, Math.min(index, 23));
+                          setSelectedHour(clampedIndex);
+                          setNewSchedule({ 
+                            ...newSchedule, 
+                            time: formatTimeToHHMM(clampedIndex, selectedMinute) 
+                          });
+                        }}
                       >
-                        {timeOptions.map((time) => (
+                        <View style={{ height: 5 }} />
+                        {hourOptions.map((hour, index) => (
                           <TouchableOpacity
-                            key={time}
+                            key={hour}
                             style={[
-                              styles.timePickerOption,
-                              newSchedule.time === time && styles.timePickerOptionSelected,
+                              styles.timeWheelItem,
+                              selectedHour === hour && styles.timeWheelItemSelected,
                             ]}
                             onPress={() => {
-                              setNewSchedule({ ...newSchedule, time });
-                              setShowTimePicker(false);
+                              setSelectedHour(hour);
+                              setNewSchedule({ 
+                                ...newSchedule, 
+                                time: formatTimeToHHMM(hour, selectedMinute) 
+                              });
+                              const itemHeight = isSmallScreen ? 40 : isMediumScreen ? 45 : 50;
+                              hourScrollRef.current?.scrollTo({
+                                y: index * itemHeight,
+                                animated: true,
+                              });
                             }}
                             activeOpacity={0.7}
                           >
                             <Text style={[
-                              styles.timePickerOptionText,
-                              newSchedule.time === time && styles.timePickerOptionTextSelected,
+                              styles.timeWheelItemText,
+                              selectedHour === hour && styles.timeWheelItemTextSelected,
                             ]}>
-                              {time}
+                              {hour}
                             </Text>
                           </TouchableOpacity>
                         ))}
+                        <View style={{ height: 5 }} />
+                        </ScrollView>
+                      </View>
+
+                    {/* 구분선 */}
+                    <Text style={styles.timeWheelSeparator} pointerEvents="none">:</Text>
+
+                    {/* 분 선택 */}
+                    <View style={styles.timeWheelColumn}>
+                      <ScrollView
+                        ref={minuteScrollRef}
+                        style={styles.timeWheelScroll}
+                        contentContainerStyle={styles.timeWheelContent}
+                        showsVerticalScrollIndicator={false}
+                        snapToInterval={isSmallScreen ? 40 : isMediumScreen ? 45 : 50}
+                        decelerationRate="fast"
+                        nestedScrollEnabled={true}
+                        scrollEnabled={true}
+                        onLayout={() => {
+                          if (minuteScrollRef.current) {
+                            // selectedMinute가 설정되어 있으면 사용, 없으면 0분 사용
+                            const minute = (selectedMinute !== undefined && !isNaN(selectedMinute)) 
+                              ? selectedMinute 
+                              : 0;
+                            const itemHeight = isSmallScreen ? 40 : isMediumScreen ? 45 : 50;
+                            setTimeout(() => {
+                              minuteScrollRef.current?.scrollTo({
+                                y: minute * itemHeight,
+                                animated: false,
+                              });
+                            }, 300);
+                          }
+                        }}
+                        onMomentumScrollEnd={(event) => {
+                          const itemHeight = isSmallScreen ? 40 : isMediumScreen ? 45 : 50;
+                          const offsetY = event.nativeEvent.contentOffset.y;
+                          const index = Math.round(offsetY / itemHeight);
+                          const clampedIndex = Math.max(0, Math.min(index, 59));
+                          setSelectedMinute(clampedIndex);
+                          setNewSchedule({ 
+                            ...newSchedule, 
+                            time: formatTimeToHHMM(selectedHour, clampedIndex) 
+                          });
+                        }}
+                      >
+                        <View style={{ height: 5 }} />
+                        {minuteOptions.map((minute, index) => (
+                          <TouchableOpacity
+                            key={minute}
+                            style={[
+                              styles.timeWheelItem,
+                              selectedMinute === minute && styles.timeWheelItemSelected,
+                            ]}
+                            onPress={() => {
+                              setSelectedMinute(minute);
+                              setNewSchedule({ 
+                                ...newSchedule, 
+                                time: formatTimeToHHMM(selectedHour, minute) 
+                              });
+                              const itemHeight = isSmallScreen ? 40 : isMediumScreen ? 45 : 50;
+                              minuteScrollRef.current?.scrollTo({
+                                y: index * itemHeight,
+                                animated: true,
+                              });
+                            }}
+                            activeOpacity={0.7}
+                          >
+                            <Text style={[
+                              styles.timeWheelItemText,
+                              selectedMinute === minute && styles.timeWheelItemTextSelected,
+                            ]}>
+                              {minute.toString().padStart(2, '0')}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                        <View style={{ height: 5 }} />
                       </ScrollView>
                     </View>
-                  )}
+
+                  </View>
                 </View>
               </View>
             </ScrollView>
 
             {/* 저장 버튼 */}
-            <View style={styles.modalFooter}>
+            <View style={styles.centeredModalFooter}>
               <TouchableOpacity
                 style={styles.saveButton}
                 onPress={handleSaveSchedule}
@@ -1724,7 +1853,7 @@ export const CalendarScreen = () => {
                 </ScrollView>
 
                 {/* 하단 버튼 */}
-                <View style={styles.detailModalFooter}>
+                <View style={[styles.detailModalFooter, { paddingBottom: insets.bottom }]}>
                   <TouchableOpacity
                     style={styles.detailEditButton}
                     onPress={handleEditSchedule}
@@ -1752,6 +1881,12 @@ export const CalendarScreen = () => {
     </View>
   );
 };
+
+// 반응형 디자인을 위한 화면 크기 계산
+const windowWidth = Dimensions.get('window').width;
+const windowHeight = Dimensions.get('window').height;
+const isSmallScreen = windowHeight < 700;
+const isMediumScreen = windowHeight >= 700 && windowHeight < 900;
 
 const styles = StyleSheet.create({
   container: {
@@ -2173,16 +2308,40 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
   },
-  // 일정 추가 버튼
-  addScheduleSection: {
-    marginHorizontal: 24,
+  // 일기 작성 및 일정 추가 버튼 섹션
+  addButtonSection: {
+    flexDirection: 'row',
+    marginHorizontal: Math.max(16, Dimensions.get('window').width * 0.06),
     marginTop: 8,
     marginBottom: 20,
+    gap: 12,
+  },
+  addDiaryButton: {
+    flex: 1,
+    backgroundColor: '#6FCDB7',
+    borderRadius: 20,
+    paddingVertical: Math.max(16, Dimensions.get('window').height * 0.022),
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#9C27B0',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    elevation: 8,
+    minHeight: 56,
+  },
+  addDiaryButtonText: {
+    color: Colors.textWhite,
+    fontSize: Math.max(14, Dimensions.get('window').width * 0.04),
+    fontWeight: '600',
+    marginLeft: 6,
   },
   addScheduleButton: {
+    flex: 1,
     backgroundColor: Colors.primary,
     borderRadius: 20,
-    paddingVertical: 18,
+    paddingVertical: Math.max(16, Dimensions.get('window').height * 0.022),
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -2191,12 +2350,16 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 12,
     elevation: 8,
+    minHeight: 56,
   },
   addScheduleText: {
     color: Colors.textWhite,
-    fontSize: 17,
+    fontSize: Math.max(14, Dimensions.get('window').width * 0.04),
     fontWeight: '600',
-    marginLeft: 8,
+    marginLeft: 6,
+  },
+  addScheduleButtonFullWidth: {
+    flex: 1,
   },
   // 모달 스타일
   modalOverlay: {
@@ -2209,7 +2372,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    maxHeight: '85%',
+    maxHeight: Dimensions.get('window').height * 0.85,
   },
   modalHeader: {
     flexDirection: 'row',
@@ -2243,6 +2406,12 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#333333',
     marginBottom: 12,
+  },
+  timeDisplayText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: Colors.primary,
+    marginBottom: 8,
   },
   titleInput: {
     borderWidth: 1,
@@ -2343,16 +2512,17 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E9ECEF',
     borderRadius: 12,
-    height: 250,
+    maxHeight: Math.min(250, Dimensions.get('window').height * 0.3),
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
     shadowRadius: 8,
     elevation: 8,
     zIndex: 1000,
+    overflow: 'hidden',
   },
   timePickerScroll: {
-    height: 250,
+    maxHeight: Math.min(250, Dimensions.get('window').height * 0.3),
   },
   timePickerScrollContent: {
     paddingVertical: 4,
@@ -2385,7 +2555,9 @@ const styles = StyleSheet.create({
   },
 
   modalFooter: {
-    padding: 24,
+    paddingTop: 20,
+    paddingHorizontal: 24,
+    paddingBottom: 24,
     borderTopWidth: 1,
     borderTopColor: '#F0F0F0',
     backgroundColor: '#FFFFFF',
@@ -2407,6 +2579,154 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
+  },
+
+  // 중앙 모달 스타일
+  centeredModalOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  centeredModalBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  centeredModalContent: {
+    width: '90%',
+    maxWidth: 500,
+    maxHeight: Dimensions.get('window').height * 0.85,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    overflow: 'hidden',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  centeredModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  centeredModalTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#333333',
+  },
+  centeredCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#F8F9FA',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  centeredModalBody: {
+    maxHeight: Dimensions.get('window').height * 0.5,
+    padding: 20,
+  },
+  centeredModalFooter: {
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#F0F0F0',
+    backgroundColor: '#FFFFFF',
+  },
+  centeredDatePickerContainer: {
+    marginTop: 12,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E9ECEF',
+    overflow: 'hidden',
+  },
+
+  // 시간 선택 스크롤 휠 스타일
+  timeWheelContainer: {
+    marginTop: 12,
+    height: isSmallScreen ? 160 : isMediumScreen ? 180 : 200,
+    position: 'relative',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E9ECEF',
+    overflow: 'hidden',
+    zIndex: 10,
+  },
+  timeWheelMask: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'transparent',
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderTopColor: '#E9ECEF',
+    borderBottomColor: '#E9ECEF',
+    zIndex: 1,
+    pointerEvents: 'none',
+  },
+  timeWheelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: isSmallScreen ? 160 : isMediumScreen ? 180 : 200,
+  },
+  timeWheelColumn: {
+    flex: 1,
+    height: '100%',
+  },
+  timeWheelScroll: {
+    flex: 1,
+  },
+  timeWheelContent: {
+    paddingVertical: isSmallScreen ? 55 : isMediumScreen ? 65 : 75,
+  },
+  timeWheelSeparator: {
+    fontSize: isSmallScreen ? 20 : isMediumScreen ? 22 : 24,
+    fontWeight: '700',
+    color: '#40B59F',
+    marginHorizontal: 8,
+    marginTop: isSmallScreen ? 5 : isMediumScreen ? 5 : 5,
+  },
+  timeWheelUnitContainer: {
+    width: 30,
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  timeWheelUnit: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#666666',
+    height: 50,
+    lineHeight: 50,
+  },
+  timeWheelItem: {
+    height: isSmallScreen ? 40 : isMediumScreen ? 45 : 50,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: isSmallScreen ? 12 : 16,
+  },
+  timeWheelItemSelected: {
+    backgroundColor: '#E6F7F4',
+  },
+  timeWheelItemText: {
+    fontSize: isSmallScreen ? 16 : isMediumScreen ? 17 : 18,
+    color: '#666666',
+    fontWeight: '400',
+  },
+  timeWheelItemTextSelected: {
+    color: '#40B59F',
+    fontWeight: '700',
+    fontSize: isSmallScreen ? 18 : isMediumScreen ? 19 : 20,
   },
 
   // 년/월 피커 스타일
