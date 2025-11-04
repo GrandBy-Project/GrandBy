@@ -126,7 +126,7 @@ export const DiaryListScreen = () => {
       const params: any = {
         start_date: startDate,
         end_date: endDate,
-        limit: reset ? limit : limit * (page + 1),
+        limit: reset ? 100 : limit * (page + 1), // 월별 조회 시 최대 100개까지 가져오기
         skip: 0,
       };
       if (user?.role === 'caregiver' && selectedElderlyId) {
