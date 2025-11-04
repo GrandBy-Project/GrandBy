@@ -173,40 +173,17 @@ export const ElderlyHomeScreen = () => {
     }
   };
 
-  // ✅ 최근 통화 기록 확인 함수
+  // ✅ 최근 통화 기록 확인 함수 (백엔드에서 처리)
   const checkRecentCalls = async () => {
     try {
-      const { getCallLogs } = await import('../api/call');
-      const { getDiaries } = await import('../api/diary');
+      const { checkDiaryReminder } = await import('../api/call');
+      const { should_show_banner } = await checkDiaryReminder();
+      setHasRecentCall(should_show_banner);
       
-      // 통화 기록 조회
-      const calls = await getCallLogs({ 
-        limit: 10, 
-        elderly_id: user?.user_id 
-      });
-      
-      // 오늘 다이어리 작성 여부 확인
-      const diaries = await getDiaries({ limit: 10 });
-      const today = new Date().toISOString().split('T')[0];
-      const hasTodayDiary = diaries.some(diary => 
-        diary.date === today && diary.status === 'published'
-      );
-      
-    // 오늘(당일) 통화 기록이 있는지 확인
-      const todayCalls = calls.filter((call: any) => {
-        const callDate = new Date(call.created_at);
-        const callDateString = callDate.toISOString().split('T')[0];
-        return callDateString === today && call.call_status === 'completed';
-      });
-      
-      // 통화가 있고 오늘 다이어리가 없을 때만 배너 표시
-      const hasTodayCall = todayCalls.length > 0 && !hasTodayDiary;
-      setHasRecentCall(hasTodayCall);
-      
-      console.log(`📞 오늘의 통화 기록 확인: ${hasTodayCall ? '있음' : '없음'} - 오늘 다이어리: ${hasTodayDiary ? '작성됨' : '없음'} - 사용자: ${user?.user_id}`);
-      return hasTodayCall;
+      console.log(`📞 다이어리 안내 배너: ${should_show_banner ? '표시' : '숨김'} - 사용자: ${user?.user_id}`);
+      return should_show_banner;
     } catch (error) {
-      console.error('오늘의 통화 기록 확인 실패:', error);
+      console.error('다이어리 안내 배너 확인 실패:', error);
       setHasRecentCall(false);
       return false;
     }
