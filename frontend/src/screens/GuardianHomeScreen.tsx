@@ -23,6 +23,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as todoApi from '../api/todo';
 import * as connectionsApi from '../api/connections';
 import { useAlert } from '../components/GlobalAlertProvider';
+import * as healthApi from '../api/health';
 
 interface ElderlyProfile {
   id: string;
@@ -85,6 +86,11 @@ export const GuardianHomeScreen = () => {
   // 연결된 어르신 목록 (API에서 가져옴)
   const [connectedElderly, setConnectedElderly] = useState<ElderlyProfile[]>([]);
   const [isLoadingElderly, setIsLoadingElderly] = useState(false);
+
+  // 어르신 걸음 수 관련 state
+  const [elderlySteps, setElderlySteps] = useState<number>(0);
+  const [elderlyDistance, setElderlyDistance] = useState<number>(0);
+  const [isLoadingElderlySteps, setIsLoadingElderlySteps] = useState(false);
   
   // 현재 보여줄 어르신 (마지막 인덱스는 "추가하기" 카드)
   const currentElderly = currentElderlyIndex < connectedElderly.length 
@@ -301,6 +307,53 @@ export const GuardianHomeScreen = () => {
               >
                 <Text style={styles.navButtonText}>▶</Text>
               </TouchableOpacity>
+            </View>
+          )}
+        </View>
+      )}
+
+      {/* 어르신 걸음 수 카드 - 데이터가 있을 때만 표시 */}
+      {currentElderly && elderlySteps > 0 && (
+        <View style={styles.elderlyStepsCard}>
+          <View style={styles.elderlyStepsCardHeader}>
+            <View style={styles.elderlyStepsCardIconContainer}>
+              <Ionicons name="footsteps" size={20} color="#34B79F" />
+            </View>
+            <View style={styles.elderlyStepsCardHeaderText}>
+              <Text style={styles.elderlyStepsCardTitle}>
+                {currentElderly.name}님의 오늘 걸음 수
+              </Text>
+              <Text style={styles.elderlyStepsCardSubtitle}>
+                {dateString} 기준
+              </Text>
+            </View>
+          </View>
+          
+          {isLoadingElderlySteps ? (
+            <View style={styles.elderlyStepsCardContent}>
+              <ActivityIndicator size="small" color="#34B79F" />
+              <Text style={styles.elderlyStepsCardLoadingText}>
+                걸음 수를 불러오는 중...
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.elderlyStepsCardContent}>
+              <View style={styles.elderlyStepsCardMain}>
+                <Text style={styles.elderlyStepsCardNumber}>
+                  {elderlySteps.toLocaleString()}
+                </Text>
+                <Text style={styles.elderlyStepsCardUnit}>
+                  걸음
+                </Text>
+              </View>
+              {elderlyDistance > 0 && (
+                <View style={styles.elderlyStepsCardDistance}>
+                  <Ionicons name="map-outline" size={14} color="#666" />
+                  <Text style={styles.elderlyStepsCardDistanceText}>
+                    약 {Math.round(elderlyDistance / 1000 * 10) / 10}km
+                  </Text>
+                </View>
+              )}
             </View>
           )}
         </View>
@@ -772,6 +825,27 @@ export const GuardianHomeScreen = () => {
     }
   };
 
+  // 어르신의 오늘 걸음 수 불러오기
+  const loadElderlyHealthData = async (elderlyId: string) => {
+    setIsLoadingElderlySteps(true);
+    try {
+      const healthData = await healthApi.getTodayHealthData(elderlyId);
+      if (healthData) {
+        setElderlySteps(healthData.step_count);
+        setElderlyDistance(healthData.distance);
+      } else {
+        setElderlySteps(0);
+        setElderlyDistance(0);
+      }
+    } catch (error) {
+      console.error('❌ 어르신 건강 데이터 로딩 실패:', error);
+      setElderlySteps(0);
+      setElderlyDistance(0);
+    } finally {
+      setIsLoadingElderlySteps(false);
+    }
+  };
+
   // 어르신의 주간 통계 불러오기
   const loadWeeklyStatsForElderly = async (elderlyId: string) => {
     setIsLoadingStats(true);
@@ -819,6 +893,7 @@ export const GuardianHomeScreen = () => {
           loadTodosForElderly(currentElderly.id),
           loadWeeklyStatsForElderly(currentElderly.id),
           loadMonthlyStatsForElderly(currentElderly.id),
+          loadElderlyHealthData(currentElderly.id),
         ]);
       }
     } catch (error) {
@@ -839,6 +914,7 @@ export const GuardianHomeScreen = () => {
       loadTodosForElderly(currentElderly.id);
       loadWeeklyStatsForElderly(currentElderly.id);
       loadMonthlyStatsForElderly(currentElderly.id);
+      loadElderlyHealthData(currentElderly.id);
     }
   }, [currentElderlyIndex, connectedElderly.length]);
 
@@ -853,6 +929,7 @@ export const GuardianHomeScreen = () => {
         loadTodosForElderly(currentElderly.id);
         loadWeeklyStatsForElderly(currentElderly.id);
         loadMonthlyStatsForElderly(currentElderly.id);
+        loadElderlyHealthData(currentElderly.id);
       }
     }, [user, currentElderly?.id]) // user 의존성 추가
   );
@@ -2658,5 +2735,81 @@ const styles = StyleSheet.create({
   pickerOptionText: {
     fontSize: 16,
     color: '#333333',
+  },
+
+  // 어르신 걸음 수 카드
+  elderlyStepsCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 20,
+    marginHorizontal: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  elderlyStepsCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  elderlyStepsCardIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#E8F5F3',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  elderlyStepsCardHeaderText: {
+    flex: 1,
+  },
+  elderlyStepsCardTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#333333',
+    marginBottom: 4,
+  },
+  elderlyStepsCardSubtitle: {
+    fontSize: 12,
+    color: '#666666',
+  },
+  elderlyStepsCardContent: {
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  elderlyStepsCardMain: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    marginBottom: 12,
+  },
+  elderlyStepsCardNumber: {
+    fontSize: 32,
+    fontWeight: '700',
+    color: '#34B79F',
+    marginRight: 8,
+  },
+  elderlyStepsCardUnit: {
+    fontSize: 16,
+    color: '#666666',
+    fontWeight: '500',
+  },
+  elderlyStepsCardDistance: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  elderlyStepsCardDistanceText: {
+    fontSize: 13,
+    color: '#666666',
+    marginLeft: 6,
+  },
+  elderlyStepsCardLoadingText: {
+    fontSize: 13,
+    color: '#999999',
+    marginTop: 8,
   },
 });

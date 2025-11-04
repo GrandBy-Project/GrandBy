@@ -38,8 +38,8 @@
         "android.permission.READ_CONTACTS",
         "android.permission.WRITE_CONTACTS",
         "android.permission.POST_NOTIFICATIONS",
-        "android.permission.ACTIVITY_RECOGNITION",
-        "android.permission.FITNESS_ACTIVITY_READ"
+        "android.permission.health.READ_STEPS",
+        "android.permission.health.WRITE_STEPS"
       ]
     },
     "plugins": [

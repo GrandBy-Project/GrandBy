@@ -31,6 +31,8 @@ import { useFontSizeStore } from '../store/fontSizeStore';
 import { useWeatherStore } from '../store/weatherStore';
 import { elderlyHomeStyles } from './ElderlyHomeScreen.styles';
 import { useAlert } from '../components/GlobalAlertProvider';
+import * as healthApi from '../api/health';
+import { getStepCount, getDistance, isHealthConnectUsable } from '../services/healthConnect';
 
 export const ElderlyHomeScreen = () => {
   const router = useRouter();
@@ -62,6 +64,12 @@ export const ElderlyHomeScreen = () => {
 
   // 가장 가까운 일정 state
   const [upcomingTodo, setUpcomingTodo] = useState<any | null>(null);
+
+  // 걸음 수 관련 state
+  const [todaySteps, setTodaySteps] = useState<number>(0);
+  const [todayDistance, setTodayDistance] = useState<number>(0);
+  const [isLoadingSteps, setIsLoadingSteps] = useState(false);
+  const [isHealthConnectAvailable, setIsHealthConnectAvailable] = useState<boolean>(false);
 
   // 연결 애니메이션
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -363,6 +371,69 @@ export const ElderlyHomeScreen = () => {
     );
   };
 
+  // 오늘 걸음 수 불러오기
+  const loadTodayHealthData = async () => {
+    if (Platform.OS !== 'android') {
+      // Android가 아니면 표시 안 함
+      setIsHealthConnectAvailable(false);
+      return;
+    }
+
+    // Health Connect 사용 가능 여부 확인
+    const canUseHealthConnect = isHealthConnectUsable();
+    setIsHealthConnectAvailable(canUseHealthConnect);
+
+    setIsLoadingSteps(true);
+    try {
+      // 먼저 백엔드에서 오늘 데이터 조회
+      const backendData = await healthApi.getTodayHealthData();
+      
+      if (backendData && (backendData.step_count > 0 || backendData.distance > 0)) {
+        // 백엔드에 데이터가 있으면 사용 (걸음 수가 0이 아니면)
+        setTodaySteps(backendData.step_count);
+        setTodayDistance(backendData.distance);
+        setIsHealthConnectAvailable(true); // 데이터가 있으면 카드 표시
+      } else if (canUseHealthConnect) {
+        // 백엔드에 데이터가 없고 Health Connect 사용 가능하면 시도
+        const steps = await getStepCount();
+        const distance = await getDistance();
+        
+        setTodaySteps(steps);
+        setTodayDistance(distance);
+        
+        // 백엔드에 저장 (데이터가 있을 때만)
+        if (steps > 0 || distance > 0) {
+          try {
+            await healthApi.createOrUpdateHealthData({
+              step_count: steps,
+              distance: distance,
+            });
+            setIsHealthConnectAvailable(true); // 데이터가 있으면 카드 표시
+          } catch (saveError) {
+            // 백엔드 저장 실패는 조용히 무시
+            console.log('건강 데이터 저장 실패 (무시됨):', saveError);
+          }
+        } else {
+          // Health Connect에서 데이터를 가져올 수 없으면 카드 숨김
+          setIsHealthConnectAvailable(false);
+        }
+      } else {
+        // Health Connect 사용 불가능하면 카드 숨김
+        setIsHealthConnectAvailable(false);
+        setTodaySteps(0);
+        setTodayDistance(0);
+      }
+    } catch (error) {
+      // 백엔드 조회 실패 시 카드 숨김
+      console.log('건강 데이터 불러오기 실패 (무시됨):', error);
+      setIsHealthConnectAvailable(false);
+      setTodaySteps(0);
+      setTodayDistance(0);
+    } finally {
+      setIsLoadingSteps(false);
+    }
+  };
+
   // 화면 포커스 시 데이터 새로고침
   useFocusEffect(
     React.useCallback(() => {
@@ -371,6 +442,7 @@ export const ElderlyHomeScreen = () => {
       loadActiveConnections();
       loadWeather();
       checkRecentCalls();
+      loadTodayHealthData();
     }, [loadWeather])
   );
 
@@ -589,6 +661,53 @@ export const ElderlyHomeScreen = () => {
             )}
           </View>
         </View>
+
+        {/* 오늘 걸음 수 카드 - Android 전용, Health Connect 사용 가능할 때만 표시 */}
+        {Platform.OS === 'android' && isHealthConnectAvailable && (
+          <View style={styles.stepsCard}>
+            <View style={styles.stepsCardHeader}>
+              <View style={styles.stepsCardIconContainer}>
+                <Ionicons name="footsteps" size={24} color="#34B79F" />
+              </View>
+              <View style={styles.stepsCardHeaderText}>
+                <Text style={[styles.stepsCardTitle, fontSizeLevel >= 1 && styles.stepsCardTitleLarge]}>
+                  오늘 걸음 수
+                </Text>
+                <Text style={[styles.stepsCardSubtitle, fontSizeLevel >= 1 && styles.stepsCardSubtitleLarge]}>
+                  {dateString} 기준
+                </Text>
+              </View>
+            </View>
+            
+            {isLoadingSteps ? (
+              <View style={styles.stepsCardContent}>
+                <ActivityIndicator size="small" color="#34B79F" />
+                <Text style={[styles.stepsCardLoadingText, fontSizeLevel >= 1 && styles.stepsCardLoadingTextLarge]}>
+                  걸음 수를 불러오는 중...
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.stepsCardContent}>
+                <View style={styles.stepsCardMain}>
+                  <Text style={[styles.stepsCardNumber, fontSizeLevel >= 1 && styles.stepsCardNumberLarge, fontSizeLevel >= 2 && { fontSize: 48 }]}>
+                    {todaySteps.toLocaleString()}
+                  </Text>
+                  <Text style={[styles.stepsCardUnit, fontSizeLevel >= 1 && styles.stepsCardUnitLarge]}>
+                    걸음
+                  </Text>
+                </View>
+                {todayDistance > 0 && (
+                  <View style={styles.stepsCardDistance}>
+                    <Ionicons name="map-outline" size={16} color="#666" />
+                    <Text style={[styles.stepsCardDistanceText, fontSizeLevel >= 1 && styles.stepsCardDistanceTextLarge]}>
+                      약 {Math.round(todayDistance / 1000 * 10) / 10}km
+                    </Text>
+                  </View>
+                )}
+              </View>
+            )}
+          </View>
+        )}
 
         {/* 빠른 액션 버튼들 */}
         <View style={styles.quickActions}>

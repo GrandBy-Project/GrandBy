@@ -26,14 +26,14 @@ export interface HealthDataUpdate {
 }
 
 export interface HealthDataStats {
-  date: string; // YYYY-MM-DD
+  date: string; // YYYY-MM-DD (백엔드에서 date 타입이 JSON으로 변환되면 string이 됨)
   step_count: number;
   distance: number;
 }
 
 export interface HealthDataRange {
-  start_date: string;
-  end_date: string;
+  start_date: string; // YYYY-MM-DD (백엔드에서 date 타입이 JSON으로 변환되면 string이 됨)
+  end_date: string; // YYYY-MM-DD
   total_steps: number;
   total_distance: number;
   average_steps: number;

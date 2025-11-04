@@ -16,6 +16,7 @@ from app.models import (
     Diary, DiaryPhoto, DiaryComment,
     Todo,
     Notification,
+    HealthData,
 )
 
 # this is the Alembic Config object

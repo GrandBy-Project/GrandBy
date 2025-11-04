@@ -602,5 +602,99 @@ export const elderlyHomeStyles = StyleSheet.create({
     fontWeight: '600',
     color: '#FFFFFF',
   },
+
+  // 걸음 수 카드
+  stepsCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  stepsCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  stepsCardIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#E8F5F3',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  stepsCardHeaderText: {
+    flex: 1,
+  },
+  stepsCardTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#333333',
+    marginBottom: 4,
+  },
+  stepsCardSubtitle: {
+    fontSize: 14,
+    color: '#666666',
+  },
+  stepsCardContent: {
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  stepsCardMain: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    marginBottom: 12,
+  },
+  stepsCardNumber: {
+    fontSize: 36,
+    fontWeight: '700',
+    color: '#34B79F',
+    marginRight: 8,
+  },
+  stepsCardUnit: {
+    fontSize: 18,
+    color: '#666666',
+    fontWeight: '500',
+  },
+  stepsCardDistance: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  stepsCardDistanceText: {
+    fontSize: 14,
+    color: '#666666',
+    marginLeft: 6,
+  },
+  stepsCardLoadingText: {
+    fontSize: 14,
+    color: '#999999',
+    marginTop: 8,
+  },
+  // 큰 폰트 크기용
+  stepsCardTitleLarge: {
+    fontSize: 22,
+  },
+  stepsCardSubtitleLarge: {
+    fontSize: 16,
+  },
+  stepsCardNumberLarge: {
+    fontSize: 42,
+  },
+  stepsCardUnitLarge: {
+    fontSize: 20,
+  },
+  stepsCardDistanceTextLarge: {
+    fontSize: 16,
+  },
+  stepsCardLoadingTextLarge: {
+    fontSize: 16,
+  },
 });
 
