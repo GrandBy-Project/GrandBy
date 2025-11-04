@@ -412,10 +412,6 @@ export const AICallScreen = () => {
           </View>
         )}
         
-        {/* Call SID 표시 (디버깅용) */}
-        {callSid && __DEV__ && (
-          <Text style={styles.debugText}>Call SID: {callSid}</Text>
-        )}
         
         {/* 재시도 버튼 */}
         {callStatus === 'error' && (
@@ -450,6 +446,41 @@ export const AICallScreen = () => {
               <Text style={styles.doneButtonText}>다이어리 작성하기</Text>
             </View>
           </TouchableOpacity>
+        )}
+        
+        {/* 통화 버튼 */}
+        {callStatus === 'idle' && (
+          <>
+            <TouchableOpacity
+              style={[
+                styles.callButton,
+                (isLoading || autoCallEnabled) && styles.callButtonDisabled,
+              ]}
+              onPress={startAICall}
+              disabled={isLoading || autoCallEnabled}
+            >
+              {isLoading ? (
+                <ActivityIndicator color="#FFFFFF" size="large" />
+              ) : (
+                <>
+                  <Ionicons 
+                    name="call" 
+                    size={28} 
+                    color="#FFFFFF" 
+                    style={{ marginRight: 12 }} 
+                  />
+                  <Text style={styles.callButtonText}>
+                    하루와 대화하기
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+            {autoCallEnabled && (
+              <Text style={styles.callButtonHint}>
+                자동 전화 예약이 활성화되어 있습니다
+              </Text>
+            )}
+          </>
         )}
       </View>
       
@@ -566,29 +597,6 @@ export const AICallScreen = () => {
           </Animated.View>
         </View>
       )}
-      
-      {/* 통화 버튼 */}
-      {callStatus === 'idle' && (
-        <View style={styles.callButtonContainer}>
-          <TouchableOpacity
-            style={[
-              styles.callButton,
-              isLoading && styles.callButtonDisabled,
-            ]}
-            onPress={startAICall}
-            disabled={isLoading}
-          >
-            {isLoading ? (
-              <ActivityIndicator color="#FFFFFF" size="large" />
-            ) : (
-              <>
-                <Ionicons name="call" size={28} color="#FFFFFF" style={{ marginRight: 12 }} />
-                <Text style={styles.callButtonText}>하루와 대화하기</Text>
-              </>
-            )}
-          </TouchableOpacity>
-        </View>
-      )}
       </ScrollView>
       
       {/* 하단 네비게이션 바 */}
@@ -662,12 +670,6 @@ const styles = StyleSheet.create({
     color: '#999999',
     marginTop: 8,
   },
-  callButtonContainer: {
-    width: '100%',
-    paddingHorizontal: 24,
-    marginTop: 24,
-    marginBottom: 24,
-  },
   callButton: {
     width: '100%',
     height: 64,
@@ -683,12 +685,19 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   callButtonDisabled: {
-    backgroundColor: '#CCCCCC',
+    backgroundColor: '#2A9D87',
+    opacity: 0.6,
   },
   callButtonText: {
     fontSize: 20,
     fontWeight: '600',
     color: '#FFFFFF',
+  },
+  callButtonHint: {
+    fontSize: 14,
+    color: '#999999',
+    textAlign: 'center',
+    marginTop: 8,
   },
   retryButton: {
     width: '100%',
