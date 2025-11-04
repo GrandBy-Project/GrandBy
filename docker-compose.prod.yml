@@ -1,0 +1,316 @@
+version: '3.8'
+
+# ============================================
+# Grandby 프로덕션 배포용 Docker Compose
+# 
+# 사용법:
+#   docker compose -f docker-compose.prod.yml up -d
+# 
+# 주의사항:
+# - DB는 RDS를 사용하므로 DATABASE_URL 환경 변수 필수
+# - Redis는 EC2 내부 또는 ElastiCache 사용 가능
+# - 모든 환경 변수는 backend/.env 파일에서 로드
+# ============================================
+
+services:
+  # Redis (캐싱 & Celery 브로커)
+  # 프로덕션에서는 ElastiCache 사용 권장하지만, EC2 내부 Redis도 가능
+  redis:
+    image: redis:7-alpine
+    container_name: grandby_redis
+    ports:
+      - "127.0.0.1:6379:6379"  # 외부 접근 차단 (로컬만)
+    volumes:
+      - redis_data:/data
+    networks:
+      - grandby_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-}  # 비밀번호 설정 가능
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+  # FastAPI Backend
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: grandby_api
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      # Database (RDS 사용)
+      # backend/.env 파일에서 DATABASE_URL 설정 필요
+      # 예: DATABASE_URL=postgresql://user:password@rds-endpoint:5432/dbname
+      DATABASE_URL: ${DATABASE_URL}
+      DB_ECHO: ${DB_ECHO:-false}
+      
+      # Redis (EC2 내부 또는 ElastiCache)
+      # EC2 내부: redis://redis:6379/0
+      # ElastiCache: redis://your-elasticache-endpoint:6379/0
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      
+      # JWT
+      SECRET_KEY: ${SECRET_KEY}
+      ALGORITHM: ${ALGORITHM:-HS256}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-7}
+      
+      # OpenAI API
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      OPENAI_WHISPER_MODEL: ${OPENAI_WHISPER_MODEL:-whisper-1}
+      OPENAI_TTS_MODEL: ${OPENAI_TTS_MODEL:-tts-1}
+      OPENAI_TTS_VOICE: ${OPENAI_TTS_VOICE:-nova}
+      
+      # Twilio
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN}
+      TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER}
+      API_BASE_URL: ${API_BASE_URL}  # 필수: HTTPS 도메인 (예: api.grandby.com)
+      TEST_PHONE_NUMBER: ${TEST_PHONE_NUMBER}
+
+      # AWS S3
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_REGION: ${AWS_REGION:-ap-northeast-2}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME}
+      
+      # App Settings (프로덕션)
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      DEBUG: ${DEBUG:-false}
+      APP_NAME: ${APP_NAME:-Grandby}
+      APP_VERSION: ${APP_VERSION:-1.0.0}
+      
+      # CORS (프로덕션 도메인만 허용)
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://grandby.com,https://www.grandby.com}
+      
+      # Email (SMTP)
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-그랜비 Grandby}
+      ENABLE_EMAIL: ${ENABLE_EMAIL:-true}
+      
+      # Auto Seed (프로덕션에서는 비활성화)
+      AUTO_SEED: ${AUTO_SEED:-false}
+
+      # Speech-to-Text Provider
+      STT_PROVIDER: ${STT_PROVIDER:-rtzr}
+      
+      # RTZR STT (Korean Speech Recognition)
+      RTZR_CLIENT_ID: ${RTZR_CLIENT_ID}
+      RTZR_CLIENT_SECRET: ${RTZR_CLIENT_SECRET}
+      RTZR_API_HOST: ${RTZR_API_HOST:-openapi.vito.ai}
+      RTZR_SAMPLE_RATE: ${RTZR_SAMPLE_RATE:-8000}
+      RTZR_ENCODING: ${RTZR_ENCODING:-LINEAR16}
+
+      # Naver Clova TTS
+      NAVER_CLOVA_CLIENT_ID: ${NAVER_CLOVA_CLIENT_ID}
+      NAVER_CLOVA_CLIENT_SECRET: ${NAVER_CLOVA_CLIENT_SECRET}
+      NAVER_CLOVA_TTS_SPEAKER: ${NAVER_CLOVA_TTS_SPEAKER:-nara}
+      NAVER_CLOVA_TTS_SPEED: ${NAVER_CLOVA_TTS_SPEED:--1}
+      NAVER_CLOVA_TTS_PITCH: ${NAVER_CLOVA_TTS_PITCH:-1}
+      NAVER_CLOVA_TTS_VOLUME: ${NAVER_CLOVA_TTS_VOLUME:-0}
+      NAVER_CLOVA_TTS_ALPHA: ${NAVER_CLOVA_TTS_ALPHA:--1}
+      NAVER_CLOVA_TTS_EMOTION: ${NAVER_CLOVA_TTS_EMOTION:-2}
+      
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      
+      # Sentry (에러 모니터링)
+      SENTRY_DSN: ${SENTRY_DSN}
+      
+      # Celery
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-${REDIS_URL:-redis://redis:6379/0}}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-${REDIS_URL:-redis://redis:6379/0}}
+      
+      # AI Call Settings
+      DEFAULT_CALL_TIME: ${DEFAULT_CALL_TIME:-20:00}
+      MAX_CALL_DURATION: ${MAX_CALL_DURATION:-10}
+      MAX_PROMPT_TOKENS: ${MAX_PROMPT_TOKENS:-4000}
+      
+      # Feature Flags
+      ENABLE_AUTO_DIARY: ${ENABLE_AUTO_DIARY:-true}
+      ENABLE_TODO_EXTRACTION: ${ENABLE_TODO_EXTRACTION:-true}
+      ENABLE_EMOTION_ANALYSIS: ${ENABLE_EMOTION_ANALYSIS:-true}
+      ENABLE_NOTIFICATIONS: ${ENABLE_NOTIFICATIONS:-true}
+    ports:
+      - "127.0.0.1:8000:8000"  # Nginx 리버스 프록시 사용 시 로컬만 노출
+    networks:
+      - grandby_network
+    restart: unless-stopped
+    # 프로덕션: --reload 옵션 제거
+    # 워커 수: CPU 코어 수에 따라 조정 (2개 권장, 필요시 증가)
+    # 참고: 워커 1개 = 약 100-200 요청/초 처리 가능
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2 --log-level info
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Celery Worker (비동기 작업 처리)
+  celery_worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: grandby_celery_worker
+    depends_on:
+      redis:
+        condition: service_healthy
+    entrypoint: []
+    environment:
+      # API와 동일한 환경 변수
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      SECRET_KEY: ${SECRET_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN}
+      TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER}
+      API_BASE_URL: ${API_BASE_URL}
+      TEST_PHONE_NUMBER: ${TEST_PHONE_NUMBER}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_REGION: ${AWS_REGION:-ap-northeast-2}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME}
+      NAVER_CLOVA_CLIENT_ID: ${NAVER_CLOVA_CLIENT_ID}
+      NAVER_CLOVA_CLIENT_SECRET: ${NAVER_CLOVA_CLIENT_SECRET}
+      NAVER_CLOVA_TTS_SPEAKER: ${NAVER_CLOVA_TTS_SPEAKER:-nara}
+      NAVER_CLOVA_TTS_SPEED: ${NAVER_CLOVA_TTS_SPEED:--1}
+      NAVER_CLOVA_TTS_PITCH: ${NAVER_CLOVA_TTS_PITCH:-1}
+      NAVER_CLOVA_TTS_VOLUME: ${NAVER_CLOVA_TTS_VOLUME:-0}
+      NAVER_CLOVA_TTS_ALPHA: ${NAVER_CLOVA_TTS_ALPHA:--1}
+      NAVER_CLOVA_TTS_EMOTION: ${NAVER_CLOVA_TTS_EMOTION:-2}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-${REDIS_URL:-redis://redis:6379/0}}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-${REDIS_URL:-redis://redis:6379/0}}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    networks:
+      - grandby_network
+    restart: unless-stopped
+    # 프로덕션: 동시 작업 처리 수 (필요시 증가)
+    # 참고: concurrency는 CPU 코어 수에 따라 조정 (2개 권장)
+    command: celery -A app.tasks.celery_app:celery_app worker --loglevel=info --concurrency=2 --max-tasks-per-child=1000
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 1.5G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Celery Beat (스케줄러 - AI 자동 전화)
+  celery_beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: grandby_celery_beat
+    depends_on:
+      redis:
+        condition: service_healthy
+    entrypoint: []
+    environment:
+      # API와 동일한 환경 변수
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      SECRET_KEY: ${SECRET_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN}
+      TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER}
+      API_BASE_URL: ${API_BASE_URL}
+      TEST_PHONE_NUMBER: ${TEST_PHONE_NUMBER}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_REGION: ${AWS_REGION:-ap-northeast-2}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME}
+      NAVER_CLOVA_CLIENT_ID: ${NAVER_CLOVA_CLIENT_ID}
+      NAVER_CLOVA_CLIENT_SECRET: ${NAVER_CLOVA_CLIENT_SECRET}
+      NAVER_CLOVA_TTS_SPEAKER: ${NAVER_CLOVA_TTS_SPEAKER:-nara}
+      NAVER_CLOVA_TTS_SPEED: ${NAVER_CLOVA_TTS_SPEED:--1}
+      NAVER_CLOVA_TTS_PITCH: ${NAVER_CLOVA_TTS_PITCH:-1}
+      NAVER_CLOVA_TTS_VOLUME: ${NAVER_CLOVA_TTS_VOLUME:-0}
+      NAVER_CLOVA_TTS_ALPHA: ${NAVER_CLOVA_TTS_ALPHA:--1}
+      NAVER_CLOVA_TTS_EMOTION: ${NAVER_CLOVA_TTS_EMOTION:-2}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-${REDIS_URL:-redis://redis:6379/0}}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-${REDIS_URL:-redis://redis:6379/0}}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    networks:
+      - grandby_network
+    restart: unless-stopped
+    command: celery -A app.tasks.celery_app:celery_app beat --loglevel=info
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # Flower (Celery 모니터링 - 선택사항)
+  # 프로덕션에서는 보안을 위해 비활성화하거나 인증 추가 권장
+  flower:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: grandby_flower
+    depends_on:
+      - redis
+      - celery_worker
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-${REDIS_URL:-redis://redis:6379/0}}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-${REDIS_URL:-redis://redis:6379/0}}
+      FLOWER_BASIC_AUTH: ${FLOWER_BASIC_AUTH:-admin:admin}  # username:password 형식
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+    ports:
+      - "127.0.0.1:5555:5555"  # 외부 접근 차단 (로컬만)
+    networks:
+      - grandby_network
+    restart: unless-stopped
+    command: celery -A app.tasks.celery_app:celery_app flower --port=5555 --basic_auth=${FLOWER_BASIC_AUTH:-admin:admin}
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+networks:
+  grandby_network:
+    driver: bridge
+
+volumes:
+  redis_data:
+    driver: local
+

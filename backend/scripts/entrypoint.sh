@@ -7,9 +7,69 @@ echo "🚀 Grandby Backend 시작 중..."
 
 # DB가 준비될 때까지 대기
 echo "⏳ 데이터베이스 연결 대기 중..."
-while ! nc -z db 5432; do
-  sleep 1
-done
+
+# DATABASE_URL에서 호스트 추출
+DB_HOST=$(echo "$DATABASE_URL" | sed -n 's/.*@\([^:]*\):.*/\1/p' || echo "")
+
+if [ -n "$DB_HOST" ] && [ "$DB_HOST" != "db" ]; then
+    # RDS 또는 외부 DB인 경우 (호스트가 db가 아님)
+    echo "🔗 외부 데이터베이스 연결 확인 중: $DB_HOST"
+    DB_PORT=$(echo "$DATABASE_URL" | sed -n 's/.*:\([0-9]*\)\/.*/\1/p' || echo "5432")
+    
+    # Python으로 실제 연결 테스트 (더 안정적)
+    python -c "
+import os
+import sys
+import time
+from urllib.parse import urlparse
+
+database_url = os.getenv('DATABASE_URL', '')
+if not database_url:
+    sys.exit(1)
+
+parsed = urlparse(database_url)
+host = parsed.hostname
+port = parsed.port or 5432
+
+# psycopg2로 연결 시도
+try:
+    import psycopg2
+    max_retries = 30
+    for i in range(max_retries):
+        try:
+            conn = psycopg2.connect(
+                host=host,
+                port=port,
+                user=parsed.username,
+                password=parsed.password,
+                database=parsed.path[1:],
+                connect_timeout=5
+            )
+            conn.close()
+            sys.exit(0)
+        except psycopg2.OperationalError:
+            if i < max_retries - 1:
+                time.sleep(1)
+            else:
+                sys.exit(1)
+except ImportError:
+    # psycopg2가 없으면 간단히 호스트 연결만 확인
+    import socket
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(5)
+    result = sock.connect_ex((host, port))
+    sock.close()
+    sys.exit(0 if result == 0 else 1)
+" || {
+        echo "⚠️ 데이터베이스 연결 확인 실패 (계속 진행)..."
+    }
+else
+    # 로컬 Docker Compose DB인 경우
+    while ! nc -z db 5432; do
+        sleep 1
+    done
+fi
+
 echo "✅ 데이터베이스 연결 완료!"
 
 # Alembic 마이그레이션 실행
