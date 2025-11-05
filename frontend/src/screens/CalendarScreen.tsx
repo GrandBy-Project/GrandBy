@@ -246,7 +246,7 @@ export const CalendarScreen = () => {
   };
 
   // 날짜 범위별 일정 조회
-  const loadSchedules = async () => {
+  const loadSchedules = async (baseDate?: Date) => {
     if (!user) {
       console.log('⚠️ 사용자 정보 없음, 조회 중단');
       return;
@@ -270,12 +270,24 @@ export const CalendarScreen = () => {
     try {
       setIsLoading(true);
 
-      // 현재 보이는 날짜 범위 계산 (selectedDay 기준으로 ±2주)
-      const startDate = new Date(selectedDay);
-      startDate.setDate(startDate.getDate() - 14);
+      // 기준 날짜 설정 (기본값: selectedDay)
+      const referenceDate = baseDate || selectedDay;
 
-      const endDate = new Date(selectedDay);
-      endDate.setDate(endDate.getDate() + 21);
+      let startDate: Date;
+      let endDate: Date;
+
+      if (isMonthlyView) {
+        // 월간 뷰일 때는 ±1개월 범위 조회
+        const rangeMonths = 1;
+        startDate = new Date(referenceDate.getFullYear(), referenceDate.getMonth() - rangeMonths, 1);
+        endDate = new Date(referenceDate.getFullYear(), referenceDate.getMonth() + rangeMonths + 1, 0);
+      } else {
+        // 일간 뷰일 때는 기존 범위 유지 (selectedDay 기준으로 ±2주, +3주)
+        startDate = new Date(referenceDate);
+        startDate.setDate(startDate.getDate() - 14);
+        endDate = new Date(referenceDate);
+        endDate.setDate(endDate.getDate() + 21);
+      }
 
       const startDateStr = formatDateString(startDate);
       const endDateStr = formatDateString(endDate);
@@ -285,6 +297,7 @@ export const CalendarScreen = () => {
       console.log(`  - 사용자 역할: ${user.role}`);
       console.log(`  - 어르신 ID: ${user.role === 'caregiver' ? selectedElderlyId : 'N/A'}`);
       console.log(`  - 날짜 범위: ${startDateStr} ~ ${endDateStr}`);
+      console.log(`  - 월간 뷰: ${isMonthlyView}`);
 
       // 보호자인 경우 어르신 ID 전달
       // 보호자는 공유 필터 적용 (showSharedOnly가 true면 공유된 일정만)
@@ -315,26 +328,39 @@ export const CalendarScreen = () => {
   };
 
   // 일기 조회
-  const loadDiaries = async () => {
+  const loadDiaries = async (baseDate?: Date) => {
     if (!user) {
       return;
     }
 
     try {
-      // 현재 보이는 날짜 범위 계산 (selectedDay 기준으로 ±30일)
-      const startDate = new Date(selectedDay);
-      startDate.setDate(startDate.getDate() - 30);
+      // 기준 날짜 설정 (기본값: selectedDay)
+      const referenceDate = baseDate || selectedDay;
 
-      const endDate = new Date(selectedDay);
-      endDate.setDate(endDate.getDate() + 30);
+      let startDate: Date;
+      let endDate: Date;
+
+      if (isMonthlyView) {
+        // 월간 뷰일 때는 ±1개월 범위 조회
+        const rangeMonths = 1;
+        startDate = new Date(referenceDate.getFullYear(), referenceDate.getMonth() - rangeMonths, 1);
+        endDate = new Date(referenceDate.getFullYear(), referenceDate.getMonth() + rangeMonths + 1, 0);
+      } else {
+        // 일간 뷰일 때는 기존 범위 유지 (selectedDay 기준으로 ±30일)
+        startDate = new Date(referenceDate);
+        startDate.setDate(startDate.getDate() - 30);
+        endDate = new Date(referenceDate);
+        endDate.setDate(endDate.getDate() + 30);
+      }
 
       const startDateStr = formatDateString(startDate);
       const endDateStr = formatDateString(endDate);
 
       console.log(`📖 일기 조회 시작: ${startDateStr} ~ ${endDateStr}`);
+      console.log(`  - 월간 뷰: ${isMonthlyView}`);
 
       const params: any = { 
-        limit: 100,
+        limit: 200, // 더 넓은 범위를 위해 limit 증가
         start_date: startDateStr,
         end_date: endDateStr
       };
@@ -375,7 +401,7 @@ export const CalendarScreen = () => {
     }
     loadSchedules();
     loadDiaries();
-  }, [selectedDay]);
+  }, [selectedDay, isMonthlyView]);
 
   // 날짜 변경 시 스크롤 뷰에서 해당 날짜로 이동
   useEffect(() => {
@@ -1036,6 +1062,12 @@ export const CalendarScreen = () => {
                 setSelectedDay(newDate);
                 // 월간 뷰 유지, 일간 뷰로 전환하지 않음
               }}
+              onMonthChange={(month) => {
+                // 월 변경 시 데이터 로드
+                const newDate = new Date(month.year, month.month - 1, 1);
+                loadSchedules(newDate);
+                loadDiaries(newDate);
+              }}
               monthFormat={'yyyy년 MM월'}
               hideArrows={false}
               hideExtraDays={true}
@@ -1371,7 +1403,8 @@ export const CalendarScreen = () => {
                   const dateSchedules = schedules.filter(schedule => schedule.due_date === targetDateString);
                   const filteredSchedules = getFilteredSchedules(dateSchedules);
 
-                  if (isLoading) {
+                  // 일간 뷰에서는 로딩 마커 표시하지 않음
+                  if (isLoading && isMonthlyView) {
                     return (
                       <View style={styles.emptyState}>
                         <ActivityIndicator size="large" color={Colors.primary} />
@@ -1461,7 +1494,8 @@ export const CalendarScreen = () => {
                 {(() => {
                   const filteredDiaries = getDiariesForDate(selectedDay);
 
-                  if (isLoading) {
+                  // 일간 뷰에서는 로딩 마커 표시하지 않음
+                  if (isLoading && isMonthlyView) {
                     return (
                       <View style={styles.emptyState}>
                         <ActivityIndicator size="large" color={Colors.primary} />

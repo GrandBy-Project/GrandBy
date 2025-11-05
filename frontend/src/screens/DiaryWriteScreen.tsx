@@ -333,6 +333,7 @@ export const DiaryWriteScreen = () => {
         allowsEditing: false,
         quality: 0.8,
         allowsMultipleSelection: true,
+        selectionLimit: remainingSlots,
       });
 
       if (result.canceled) {
@@ -341,7 +342,6 @@ export const DiaryWriteScreen = () => {
 
       // 선택된 이미지 URI 추가 (최대 5장까지)
       const newImageUris = result.assets
-        .slice(0, remainingSlots)
         .map(asset => asset.uri);
       
       if (result.assets.length > remainingSlots) {

@@ -551,10 +551,65 @@ app.add_middleware(
 # 요청 로깅 Middleware
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
-    """모든 HTTP 요청 로깅"""
+    """모든 HTTP 요청 로깅 (응답 크기 및 로딩 시간 포함)"""
+    start_time = time.perf_counter()
+    
+    # 요청 시작 로깅
     logger.info(f"📥 {request.method} {request.url.path}")
+    
+    # 응답 처리
     response = await call_next(request)
-    logger.info(f"📤 {request.method} {request.url.path} - {response.status_code}")
+    
+    # 로딩 시간 계산 (밀리초)
+    elapsed_time = (time.perf_counter() - start_time) * 1000
+    
+    # 응답 크기 측정
+    response_size = None
+    if "content-length" in response.headers:
+        # Content-Length 헤더가 있으면 사용
+        try:
+            response_size = int(response.headers["content-length"])
+        except (ValueError, TypeError):
+            response_size = None
+    else:
+        # Content-Length 헤더가 없으면 응답 본문 읽기 (스트리밍 응답이 아닌 경우에만)
+        try:
+            body = b""
+            async for chunk in response.body_iterator:
+                body += chunk
+            response_size = len(body)
+            
+            # 응답 본문을 다시 스트림으로 변환
+            from starlette.responses import Response
+            response = Response(
+                content=body,
+                status_code=response.status_code,
+                headers=dict(response.headers),
+                media_type=getattr(response, 'media_type', None) or response.headers.get('content-type', 'application/json')
+            )
+        except Exception as e:
+            # 응답 본문 읽기 실패 시 크기 측정 건너뛰기
+            logger.debug(f"⚠️ 응답 크기 측정 실패 (스트리밍 응답일 수 있음): {e}")
+            response_size = None
+    
+    # 크기를 읽기 쉬운 형식으로 변환
+    size_str = ""
+    if response_size is not None:
+        if response_size < 1024:
+            size_str = f"{response_size}B"
+        elif response_size < 1024 * 1024:
+            size_str = f"{response_size / 1024:.2f}KB"
+        else:
+            size_str = f"{response_size / (1024 * 1024):.2f}MB"
+    
+    # 응답 로깅 (상태 코드, 크기, 시간)
+    logger.info(
+        f"📤 {request.method} {request.url.path} - "
+        f"{response.status_code} | "
+        f"{size_str} | "
+        f"{elapsed_time:.2f}ms"
+    )
+    
     return response
 
 
