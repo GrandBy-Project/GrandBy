@@ -11,6 +11,7 @@ import asyncio
 from pathlib import Path
 from typing import Optional, Tuple
 from app.config import settings
+from app.utils.s3 import upload_file_to_s3, delete_file_from_s3
 
 logger = logging.getLogger(__name__)
 
@@ -151,25 +152,46 @@ class NaverClovaTTSService:
             if response.status_code == 200:
                 logger.info(f"📦 API 응답 받음: {len(response.content)} bytes")
                 
-                # WAV 파일로 직접 저장 (변환 과정 없음)
-                logger.info(f"💾 WAV 파일 저장 중: {output_path}")
-                with open(output_path, 'wb') as f:
-                    f.write(response.content)
+                # S3에 업로드
+                audio_filename = os.path.basename(output_path) if output_path else f"tts_{int(time.time() * 1000)}.wav"
+                s3_key = f"audio/tts/{audio_filename}"
                 
-                # 저장 확인
-                if os.path.exists(output_path):
-                    file_size = os.path.getsize(output_path)
+                try:
+                    s3_url = upload_file_to_s3(
+                        file_data=response.content,
+                        s3_key=s3_key,
+                        content_type="audio/wav"
+                    )
+                    logger.info(f"✅ TTS 음성 파일 S3 업로드 완료: {s3_url}")
+                    
                     elapsed_time = time.time() - start_time
                     
                     logger.info(f"✅ TTS 변환 완료!")
-                    logger.info(f"  - 파일: {output_path}")
-                    logger.info(f"  - 크기: {file_size} bytes")
+                    logger.info(f"  - S3 URL: {s3_url}")
+                    logger.info(f"  - 크기: {len(response.content)} bytes")
                     logger.info(f"  - 시간: {elapsed_time:.2f}초")
                     
-                    return output_path, elapsed_time
-                else:
-                    logger.error("❌ 파일 저장 실패!")
-                    return None, 0
+                    # S3 URL 반환 (로컬 경로 대신)
+                    return s3_url, elapsed_time
+                except Exception as e:
+                    logger.error(f"❌ S3 업로드 실패, 로컬에 저장 시도: {e}")
+                    # S3 업로드 실패 시 로컬에 저장 (하위 호환성)
+                    with open(output_path, 'wb') as f:
+                        f.write(response.content)
+                    
+                    if os.path.exists(output_path):
+                        file_size = os.path.getsize(output_path)
+                        elapsed_time = time.time() - start_time
+                        
+                        logger.info(f"✅ TTS 변환 완료 (로컬 저장)!")
+                        logger.info(f"  - 파일: {output_path}")
+                        logger.info(f"  - 크기: {file_size} bytes")
+                        logger.info(f"  - 시간: {elapsed_time:.2f}초")
+                        
+                        return output_path, elapsed_time
+                    else:
+                        logger.error("❌ 파일 저장 실패!")
+                        return None, 0
             else:
                 logger.error(f"❌ API 호출 실패: {response.status_code}")
                 logger.error(f"  - 응답: {response.text}")

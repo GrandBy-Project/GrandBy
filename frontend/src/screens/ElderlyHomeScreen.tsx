@@ -17,7 +17,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../store/authStore';
 import { useRouter } from 'expo-router';
-import { BottomNavigationBar, Header, CheckIcon, PhoneIcon, DiaryIcon, NotificationIcon, PillIcon, SunIcon, ProfileIcon } from '../components';
+import { BottomNavigationBar, Header, CheckIcon, PhoneIcon, DiaryIcon, NotificationIcon, PillIcon, SunIcon, ProfileIcon, QuickActionGrid, type QuickAction } from '../components';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import * as todoApi from '../api/todo';
@@ -50,7 +50,9 @@ export const ElderlyHomeScreen = () => {
   
   const [todayTodos, setTodayTodos] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [expandedTodoId, setExpandedTodoId] = useState<string | null>(null);
+  const [selectedDayTab, setSelectedDayTab] = useState<'today' | 'tomorrow'>('today'); // 오늘/내일 탭
+  const [selectedTodo, setSelectedTodo] = useState<any | null>(null);
+  const [showTodoModal, setShowTodoModal] = useState(false);
 
   // 연결 요청 알림 관련 state
   const [pendingConnections, setPendingConnections] = useState<connectionsApi.ConnectionWithUserInfo[]>([]);
@@ -94,8 +96,27 @@ export const ElderlyHomeScreen = () => {
   }, [activeConnections.length, pulseAnim]);
 
   const loadTodayTodos = async () => {
+    if (!user) {
+      console.warn('⚠️ 어르신: user가 없어서 TODO 로딩 스킵');
+      return;
+    }
+    
+    setIsLoading(true);
     try {
-      const todos = await todoApi.getTodos('today');
+      // 선택된 탭에 따라 날짜 필터 결정
+      const dateFilter = selectedDayTab === 'today' ? 'today' : 'tomorrow';
+      console.log(`📥 어르신: ${selectedDayTab === 'today' ? '오늘' : '내일'} TODO 로딩 시작 - user_id:`, user.user_id);
+      
+      const todos = await todoApi.getTodos(dateFilter);
+      console.log(`✅ 어르신: TODO 로딩 성공 - ${todos.length}개 (${selectedDayTab === 'today' ? '오늘' : '내일'})`);
+      console.log('📊 전체 TODO 목록:', todos.map(t => ({
+        id: t.todo_id,
+        title: t.title,
+        date: t.due_date,
+        is_recurring: t.is_recurring,
+        is_shared: t.is_shared_with_caregiver
+      })));
+      
       setTodayTodos(todos);
       
       // 가장 가까운 미완료 일정 찾기
@@ -113,8 +134,10 @@ export const ElderlyHomeScreen = () => {
       });
       
       setUpcomingTodo(sortedTodos[0] || null);
-    } catch (error) {
-      console.error('오늘 할 일 불러오기 실패:', error);
+    } catch (error: any) {
+      console.error('❌ 오늘 할 일 불러오기 실패:', error);
+      console.error('❌ 에러 상세:', error.response?.data || error.message);
+      setTodayTodos([]); // 에러 시 빈 배열로 설정
     } finally {
       setIsLoading(false);
     }
@@ -294,6 +317,33 @@ export const ElderlyHomeScreen = () => {
     return categoryMap[category] || '기타';
   };
 
+  // 카테고리 아이콘 매핑 (Ionicons 사용)
+  const getCategoryIcon = (category: string | null) => {
+    const iconMap: Record<string, any> = {
+      'medicine': 'medical',
+      'MEDICINE': 'medical',
+      'exercise': 'fitness',
+      'EXERCISE': 'fitness',
+      'meal': 'restaurant',
+      'MEAL': 'restaurant',
+      'hospital': 'medical-outline',
+      'HOSPITAL': 'medical-outline',
+      'other': 'list',
+      'OTHER': 'list',
+    };
+    return iconMap[category || 'other'] || 'list';
+  };
+
+  // 시간 포맷 변환 (HH:MM -> 오전/오후 X시)
+  const formatTimeToDisplay = (time24: string | null): string => {
+    if (!time24) return '';
+    const [hour] = time24.split(':').map(Number);
+    if (hour === 0) return '오전 12시';
+    if (hour < 12) return `오전 ${hour}시`;
+    if (hour === 12) return '오후 12시';
+    return `오후 ${hour - 12}시`;
+  };
+
   // 전화 앱으로 연결 (Android 대상)
   const dialPhoneNumber = async (rawNumber?: string) => {
     try {
@@ -322,8 +372,6 @@ export const ElderlyHomeScreen = () => {
       show('완료!', '할 일을 완료했습니다.');
       // TODO 목록 새로고침
       loadTodayTodos();
-      // 확장된 항목 닫기
-      setExpandedTodoId(null);
     } catch (error) {
       console.error('할 일 완료 실패:', error);
       show('오류', '할 일 완료에 실패했습니다.');
@@ -337,8 +385,6 @@ export const ElderlyHomeScreen = () => {
       show('취소됨', '할 일 완료를 취소했습니다.');
       // TODO 목록 새로고침
       loadTodayTodos();
-      // 확장된 항목 닫기
-      setExpandedTodoId(null);
     } catch (error) {
       console.error('할 일 취소 실패:', error);
       show('오류', '할 일 취소에 실패했습니다.');
@@ -371,7 +417,7 @@ export const ElderlyHomeScreen = () => {
       loadActiveConnections();
       loadWeather();
       checkRecentCalls();
-    }, [loadWeather])
+    }, [loadWeather, selectedDayTab])
   );
 
   // 날씨 정보 30분마다 자동 갱신 (강제 새로고침)
@@ -602,76 +648,62 @@ export const ElderlyHomeScreen = () => {
         </View>
 
         {/* 빠른 액션 버튼들 */}
-        <View style={styles.quickActions}>
-          <TouchableOpacity style={[styles.actionButton, fontSizeLevel >= 1 && styles.actionButtonLarge]} onPress={() => router.push('/todos')}>
-            <View style={[styles.actionIcon, fontSizeLevel >= 1 && styles.actionIconLarge]}>
-              <CheckIcon size={fontSizeLevel >= 1 ? 32 : 24} color="#34B79F" />
-            </View>
-            <Text 
-              style={[styles.actionLabel, fontSizeLevel >= 1 && styles.actionLabelLarge]}
-              numberOfLines={1}
-              ellipsizeMode="tail"
-            >
-              할 일
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.actionButton, fontSizeLevel >= 1 && styles.actionButtonLarge]} onPress={() => router.push('/ai-call')}>
-            <View style={[styles.actionIcon, fontSizeLevel >= 1 && styles.actionIconLarge]}>
-              <PhoneIcon size={fontSizeLevel >= 1 ? 32 : 24} color="#34B79F" />
-            </View>
-            <Text 
-              style={[styles.actionLabel, fontSizeLevel >= 1 && styles.actionLabelLarge]}
-              numberOfLines={1}
-              ellipsizeMode="tail"
-            >
-              AI 통화
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.actionButton, fontSizeLevel >= 1 && styles.actionButtonLarge]} onPress={() => router.push('/diaries')}>
-            <View style={[styles.actionIcon, fontSizeLevel >= 1 && styles.actionIconLarge]}>
-              <DiaryIcon size={fontSizeLevel >= 1 ? 32 : 24} color="#34B79F" />
-            </View>
-            <Text 
-              style={[styles.actionLabel, fontSizeLevel >= 1 && styles.actionLabelLarge]}
-              numberOfLines={1}
-              ellipsizeMode="tail"
-            >
-              일기
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.actionButton, fontSizeLevel >= 1 && styles.actionButtonLarge]} onPress={() => router.push('/calendar')}>
-            <View style={[styles.actionIcon, fontSizeLevel >= 1 && styles.actionIconLarge]}>
-              <Ionicons name="calendar-outline" size={fontSizeLevel >= 1 ? 32 : 24} color="#34B79F" />
-            </View>
-            <Text 
-              style={[styles.actionLabel, fontSizeLevel >= 1 && styles.actionLabelLarge]}
-              numberOfLines={1}
-              ellipsizeMode="tail"
-            >
-              캘린더
-            </Text>
-          </TouchableOpacity>
-        </View>
+        <QuickActionGrid
+          actions={[
+            {
+              id: 'todos',
+              label: '내 일정',
+              icon: <CheckIcon size={fontSizeLevel >= 1 ? 32 : 24} color="#34B79F" />,
+              onPress: () => router.push('/todos'), // 할 일 목록 조회 및 완료 처리
+            },
+            {
+              id: 'ai-call',
+              label: 'AI 통화',
+              icon: <PhoneIcon size={fontSizeLevel >= 1 ? 32 : 24} color="#34B79F" />,
+              onPress: () => router.push('/ai-call'), // AI 전화 통화
+            },
+            {
+              id: 'diaries',
+              label: '일기',
+              icon: <DiaryIcon size={fontSizeLevel >= 1 ? 32 : 24} color="#34B79F" />,
+              onPress: () => router.push('/diaries'), // 일기 작성 및 조회
+            },
+            {
+              id: 'calendar',
+              label: '캘린더',
+              icon: 'calendar-outline',
+              onPress: () => router.push('/calendar'), // 전체 일정 한눈에 보기
+            },
+          ]}
+          size={fontSizeLevel >= 1 ? 'large' : 'default'}
+        />
 
-        {/* 오늘의 일정 카드 - 미완료 */}
+        {/* 오늘/내일의 일정 카드 - 미완료 */}
         <View style={styles.scheduleCard}>
-          <View style={styles.cardHeader}>
-            <Text 
-              style={[styles.cardTitle, fontSizeLevel >= 1 && styles.cardTitleLarge]}
-              numberOfLines={1}
-              ellipsizeMode="tail"
-            >
-              오늘의 일정
-            </Text>
-            <TouchableOpacity onPress={() => router.push('/todos')}>
-              <Text 
-                style={[styles.viewAllText, fontSizeLevel >= 1 && styles.viewAllTextLarge]}
-                numberOfLines={1}
-                ellipsizeMode="tail"
-              >
-                전체보기
-              </Text>
-            </TouchableOpacity>
+          <View>
+            {/* 오늘/내일 탭 */}
+            <View style={styles.cardHeader}>
+              <View style={styles.dayTabContainer}>
+                <TouchableOpacity
+                  style={[styles.dayTab, selectedDayTab === 'today' && styles.dayTabActive]}
+                  onPress={() => setSelectedDayTab('today')}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.dayTabText, selectedDayTab === 'today' && styles.dayTabTextActive]}>
+                    오늘
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.dayTab, selectedDayTab === 'tomorrow' && styles.dayTabActive]}
+                  onPress={() => setSelectedDayTab('tomorrow')}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.dayTabText, selectedDayTab === 'tomorrow' && styles.dayTabTextActive]}>
+                    내일
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
           </View>
           
           {isLoading ? (
@@ -685,65 +717,52 @@ export const ElderlyHomeScreen = () => {
             
             return pendingTodos.length === 0 ? (
               <View style={{ paddingVertical: 40, alignItems: 'center' }}>
-                <Text style={{ fontSize: 16, color: '#999999' }}>오늘 할 일이 없습니다</Text>
+                <Text style={{ fontSize: 16, color: '#999999' }}>
+                  {selectedDayTab === 'today' ? '오늘' : '내일'} 할 일이 없습니다
+                </Text>
               </View>
             ) : (
               pendingTodos.slice(0, 3).map((todo, index) => {
-                const isExpanded = expandedTodoId === todo.todo_id;
-                
                 return (
-                  <View key={todo.todo_id}>
-                    <TouchableOpacity
-                      style={styles.scheduleItem}
-                      onPress={() => setExpandedTodoId(isExpanded ? null : todo.todo_id)}
-                      activeOpacity={0.7}
-                    >
-                      <View style={styles.scheduleTime}>
-                        <Text style={[styles.scheduleTimeText, fontSizeLevel >= 1 && styles.scheduleTimeTextLarge]}>
-                          {todo.due_time ? todo.due_time.substring(0, 5) : '시간미정'}
-                        </Text>
-                      </View>
-                      <View style={styles.scheduleContent}>
-                        <Text 
-                          style={[styles.scheduleTitle, fontSizeLevel >= 1 && styles.scheduleTitleLarge]}
-                          numberOfLines={1}
-                          ellipsizeMode="tail"
-                        >
-                          {todo.title}
-                        </Text>
-                        <Text 
-                          style={[styles.scheduleLocation, fontSizeLevel >= 1 && styles.scheduleLocationLarge]}
-                          numberOfLines={1}
-                          ellipsizeMode="tail"
-                        >
-                          {todo.description || ''}
-                        </Text>
-                        <Text style={[styles.scheduleDate, fontSizeLevel >= 1 && styles.scheduleDateLarge]}>
-                          {todo.category ? `[${getCategoryName(todo.category)}]` : ''}
-                        </Text>
-                      </View>
-                      <View style={styles.scheduleStatus}>
-                        <Text style={[styles.scheduleStatusText, fontSizeLevel >= 1 && styles.scheduleStatusTextLarge]}>
-                          예정
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                    
-                    {/* 확장된 영역 - 완료 버튼 */}
-                    {isExpanded && (
-                      <View style={styles.scheduleActionContainer}>
-                        <TouchableOpacity
-                          style={[styles.scheduleActionButton, styles.completeButton]}
-                          onPress={() => handleCompleteTodo(todo.todo_id)}
-                          activeOpacity={0.7}
-                        >
-                          <Text style={[styles.scheduleActionButtonText, fontSizeLevel >= 1 && { fontSize: 18 }]}>
-                            완료하기
-                          </Text>
-                        </TouchableOpacity>
-                      </View>
-                    )}
-                  </View>
+                  <TouchableOpacity
+                    key={todo.todo_id}
+                    style={styles.scheduleItem}
+                    onPress={() => {
+                      setSelectedTodo(todo);
+                      setShowTodoModal(true);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.scheduleTime}>
+                      <Text style={[styles.scheduleTimeText, fontSizeLevel >= 1 && styles.scheduleTimeTextLarge]}>
+                        {todo.due_time ? todo.due_time.substring(0, 5) : '시간미정'}
+                      </Text>
+                    </View>
+                    <View style={styles.scheduleContent}>
+                      <Text 
+                        style={[styles.scheduleTitle, fontSizeLevel >= 1 && styles.scheduleTitleLarge]}
+                        numberOfLines={1}
+                        ellipsizeMode="tail"
+                      >
+                        {todo.title}
+                      </Text>
+                      <Text 
+                        style={[styles.scheduleLocation, fontSizeLevel >= 1 && styles.scheduleLocationLarge]}
+                        numberOfLines={1}
+                        ellipsizeMode="tail"
+                      >
+                        {todo.description || ''}
+                      </Text>
+                      <Text style={[styles.scheduleDate, fontSizeLevel >= 1 && styles.scheduleDateLarge]}>
+                        {todo.category ? `[${getCategoryName(todo.category)}]` : ''}
+                      </Text>
+                    </View>
+                    <View style={styles.scheduleStatus}>
+                      <Text style={[styles.scheduleStatusText, fontSizeLevel >= 1 && styles.scheduleStatusTextLarge]}>
+                        예정
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
                 );
               })
             );
@@ -774,61 +793,46 @@ export const ElderlyHomeScreen = () => {
               </View>
               
               {completedTodos.slice(0, 3).map((todo, index) => {
-                const isExpanded = expandedTodoId === todo.todo_id;
-                
                 return (
-                  <View key={todo.todo_id}>
-                    <TouchableOpacity
-                      style={[styles.scheduleItem, styles.completedScheduleItem]}
-                      onPress={() => setExpandedTodoId(isExpanded ? null : todo.todo_id)}
-                      activeOpacity={0.7}
-                    >
-                      <View style={styles.scheduleTime}>
-                        <Text style={[styles.scheduleTimeText, styles.completedTimeText, fontSizeLevel >= 1 && styles.scheduleTimeTextLarge]}>
-                          {todo.due_time ? todo.due_time.substring(0, 5) : '시간미정'}
-                        </Text>
-                      </View>
-                      <View style={styles.scheduleContent}>
-                        <Text 
-                          style={[styles.scheduleTitle, styles.completedTitleText, fontSizeLevel >= 1 && styles.scheduleTitleLarge]}
-                          numberOfLines={1}
-                          ellipsizeMode="tail"
-                        >
-                          {todo.title}
-                        </Text>
-                        <Text 
-                          style={[styles.scheduleLocation, styles.completedDescText, fontSizeLevel >= 1 && styles.scheduleLocationLarge]}
-                          numberOfLines={1}
-                          ellipsizeMode="tail"
-                        >
-                          {todo.description || ''}
-                        </Text>
-                        <Text style={[styles.scheduleDate, styles.completedDescText, fontSizeLevel >= 1 && styles.scheduleDateLarge]}>
-                          {todo.category ? `[${getCategoryName(todo.category)}]` : ''}
-                        </Text>
-                      </View>
-                      <View style={[styles.scheduleStatus, styles.completedStatus]}>
-                        <Text style={[styles.scheduleStatusText, fontSizeLevel >= 1 && styles.scheduleStatusTextLarge]}>
-                          완료
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                    
-                    {/* 확장된 영역 - 취소 버튼 */}
-                    {isExpanded && (
-                      <View style={styles.scheduleActionContainer}>
-                        <TouchableOpacity
-                          style={[styles.scheduleActionButton, styles.cancelButton]}
-                          onPress={() => handleCancelTodo(todo.todo_id)}
-                          activeOpacity={0.7}
-                        >
-                          <Text style={[styles.scheduleActionButtonText, fontSizeLevel >= 1 && { fontSize: 18 }]}>
-                            완료 취소
-                          </Text>
-                        </TouchableOpacity>
-                      </View>
-                    )}
-                  </View>
+                  <TouchableOpacity
+                    key={todo.todo_id}
+                    style={[styles.scheduleItem, styles.completedScheduleItem]}
+                    onPress={() => {
+                      setSelectedTodo(todo);
+                      setShowTodoModal(true);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.scheduleTime}>
+                      <Text style={[styles.scheduleTimeText, styles.completedTimeText, fontSizeLevel >= 1 && styles.scheduleTimeTextLarge]}>
+                        {todo.due_time ? todo.due_time.substring(0, 5) : '시간미정'}
+                      </Text>
+                    </View>
+                    <View style={styles.scheduleContent}>
+                      <Text 
+                        style={[styles.scheduleTitle, styles.completedTitleText, fontSizeLevel >= 1 && styles.scheduleTitleLarge]}
+                        numberOfLines={1}
+                        ellipsizeMode="tail"
+                      >
+                        {todo.title}
+                      </Text>
+                      <Text 
+                        style={[styles.scheduleLocation, styles.completedDescText, fontSizeLevel >= 1 && styles.scheduleLocationLarge]}
+                        numberOfLines={1}
+                        ellipsizeMode="tail"
+                      >
+                        {todo.description || ''}
+                      </Text>
+                      <Text style={[styles.scheduleDate, styles.completedDescText, fontSizeLevel >= 1 && styles.scheduleDateLarge]}>
+                        {todo.category ? `[${getCategoryName(todo.category)}]` : ''}
+                      </Text>
+                    </View>
+                    <View style={[styles.scheduleStatus, styles.completedStatus]}>
+                      <Text style={[styles.scheduleStatusText, fontSizeLevel >= 1 && styles.scheduleStatusTextLarge]}>
+                        완료
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
                 );
               })}
             </View>
@@ -961,6 +965,110 @@ export const ElderlyHomeScreen = () => {
         {/* 하단 여백 - 바텀 네비게이션 바 공간 */}
         <View style={{ height: 20 }} />
       </ScrollView>
+
+      {/* 할일 상세보기 모달 */}
+      <Modal
+        visible={showTodoModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => {
+          setShowTodoModal(false);
+          setSelectedTodo(null);
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.editModalContent}>
+            {/* 모달 헤더 */}
+            <View style={styles.editModalHeader}>
+              <Text style={styles.editModalTitle}>할 일 상세</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setShowTodoModal(false);
+                  setSelectedTodo(null);
+                }}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.closeButton}>×</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* TODO 정보 */}
+            {selectedTodo && (
+              <ScrollView style={styles.editModalBody} showsVerticalScrollIndicator={false}>
+                <View style={styles.todoDetailSection}>
+                  <Text style={styles.todoDetailLabel}>제목</Text>
+                  <Text style={styles.todoDetailValue}>{selectedTodo.title}</Text>
+                </View>
+
+                {selectedTodo.description && (
+                  <View style={styles.todoDetailSection}>
+                    <Text style={styles.todoDetailLabel}>설명</Text>
+                    <Text style={styles.todoDetailValue}>{selectedTodo.description}</Text>
+                  </View>
+                )}
+
+                <View style={styles.todoDetailRow}>
+                  <View style={[styles.todoDetailSection, { flex: 1 }]}>
+                    <Text style={styles.todoDetailLabel}>카테고리</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <Ionicons name={getCategoryIcon(selectedTodo.category)} size={16} color="#34B79F" style={{ marginRight: 4 }} />
+                      <Text style={styles.todoDetailValue}>{getCategoryName(selectedTodo.category)}</Text>
+                    </View>
+                  </View>
+
+                  <View style={[styles.todoDetailSection, { flex: 1 }]}>
+                    <Text style={styles.todoDetailLabel}>시간</Text>
+                    <Text style={styles.todoDetailValue}>
+                      {formatTimeToDisplay(selectedTodo.due_time) || '-'}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.todoDetailSection}>
+                  <Text style={styles.todoDetailLabel}>상태</Text>
+                  <Text style={[
+                    styles.todoDetailValue,
+                    { color: selectedTodo.status === 'completed' || selectedTodo.status === 'COMPLETED' ? '#34B79F' : '#666666' }
+                  ]}>
+                    {selectedTodo.status === 'completed' || selectedTodo.status === 'COMPLETED' ? '완료' : 
+                     selectedTodo.status === 'cancelled' || selectedTodo.status === 'CANCELLED' ? '취소' : '대기'}
+                  </Text>
+                </View>
+
+                {selectedTodo.is_recurring && (
+                  <View style={styles.todoDetailSection}>
+                    <Text style={styles.todoDetailLabel}>반복 일정</Text>
+                    <Text style={styles.todoDetailValue}>
+                      {selectedTodo.recurring_type === 'DAILY' ? '매일' :
+                       selectedTodo.recurring_type === 'WEEKLY' ? '매주' :
+                       selectedTodo.recurring_type === 'MONTHLY' ? '매월' : '-'}
+                    </Text>
+                  </View>
+                )}
+              </ScrollView>
+            )}
+
+            {/* 모달 액션 버튼 */}
+            <View style={[styles.editModalFooter, { paddingBottom: Math.max(insets.bottom, 20) }]}>
+              {selectedTodo && (selectedTodo.status !== 'completed' && selectedTodo.status !== 'COMPLETED') && (
+                <TouchableOpacity
+                  style={[styles.modalActionButton, styles.editButton]}
+                  onPress={async () => {
+                    if (selectedTodo) {
+                      await handleCompleteTodo(selectedTodo.todo_id);
+                      setShowTodoModal(false);
+                      setSelectedTodo(null);
+                    }
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.editButtonText}>완료하기</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* 연결 요청 수락/거절 모달 */}
       <Modal
