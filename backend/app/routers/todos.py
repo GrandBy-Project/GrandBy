@@ -142,10 +142,13 @@ async def get_detailed_todo_stats(
     TODO 상세 통계 조회 (카테고리별 포함)
     
     - **period**: week (7일), month (이번 달), last_month (지난 달)
+    - **보호자**: 공유된 TODO만 통계에 포함 (shared_only=True 자동 적용)
+    - **어르신**: 본인의 모든 TODO 통계 (shared_only=False)
     """
     # 어르신인 경우 본인 ID 사용
     if current_user.role == UserRole.ELDERLY:
         target_elderly_id = current_user.user_id
+        shared_only = False  # 어르신은 모든 할일 볼 수 있음
     else:
         if not elderly_id:
             from fastapi import HTTPException, status
@@ -154,6 +157,7 @@ async def get_detailed_todo_stats(
                 detail="보호자는 elderly_id를 지정해야 합니다."
             )
         target_elderly_id = elderly_id
+        shared_only = True  # 보호자는 공유된 할일만 볼 수 있음
     
     # 기간 계산
     today = date.today()
@@ -169,6 +173,7 @@ async def get_detailed_todo_stats(
         end_date = today
     elif period == "last_month":
         # 지난 달의 1일부터 마지막 날까지
+        from calendar import monthrange
         if today.month == 1:
             # 1월이면 전년 12월
             start_date = date(today.year - 1, 12, 1)
@@ -177,11 +182,8 @@ async def get_detailed_todo_stats(
             # 지난 달의 1일
             start_date = date(today.year, today.month - 1, 1)
             # 지난 달의 마지막 날 계산
-            if today.month - 1 == 12:
-                end_date = date(today.year - 1, 12, 31)
-            else:
-                # 다음 달의 1일에서 1일 빼면 지난 달의 마지막 날
-                end_date = date(today.year, today.month, 1) - timedelta(days=1)
+            last_day = monthrange(today.year, today.month - 1)[1]
+            end_date = date(today.year, today.month - 1, last_day)
     else:  # month (이번 달)
         # 이번 달의 1일
         start_date = date(today.year, today.month, 1)
@@ -191,7 +193,8 @@ async def get_detailed_todo_stats(
         db=db,
         elderly_id=target_elderly_id,
         start_date=start_date,
-        end_date=end_date
+        end_date=end_date,
+        shared_only=shared_only
     )
     
     return stats
@@ -208,10 +211,13 @@ async def get_todo_stats(
     TODO 통계 조회
     
     - **period**: week (7일), month (30일)
+    - **보호자**: 공유된 TODO만 통계에 포함 (shared_only=True 자동 적용)
+    - **어르신**: 본인의 모든 TODO 통계 (shared_only=False)
     """
     # 어르신인 경우 본인 ID 사용
     if current_user.role == UserRole.ELDERLY:
         target_elderly_id = current_user.user_id
+        shared_only = False  # 어르신은 모든 할일 볼 수 있음
     else:
         if not elderly_id:
             from fastapi import HTTPException, status
@@ -220,6 +226,7 @@ async def get_todo_stats(
                 detail="보호자는 elderly_id를 지정해야 합니다."
             )
         target_elderly_id = elderly_id
+        shared_only = True  # 보호자는 공유된 할일만 볼 수 있음
     
     # 기간 계산
     today = date.today()
@@ -240,7 +247,8 @@ async def get_todo_stats(
         db=db,
         elderly_id=target_elderly_id,
         start_date=start_date,
-        end_date=today
+        end_date=today,
+        shared_only=shared_only
     )
     
     return stats

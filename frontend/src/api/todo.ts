@@ -200,6 +200,14 @@ export const createTodo = async (data: TodoCreateRequest): Promise<TodoItem> => 
 };
 
 /**
+ * TODO 상세 조회
+ */
+export const getTodoById = async (todo_id: string): Promise<TodoItem> => {
+  const response = await apiClient.get<TodoItem>(`/api/todos/${todo_id}`);
+  return response.data;
+};
+
+/**
  * TODO 수정 (보호자 전용)
  */
 export const updateTodo = async (
