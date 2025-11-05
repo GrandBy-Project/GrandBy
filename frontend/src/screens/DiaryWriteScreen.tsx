@@ -295,7 +295,7 @@ export const DiaryWriteScreen = () => {
     setEditingTodo({
       title: todo.title,
       description: todo.description || '',
-      isShared: true,  // 기본값: 공유
+      isShared: false,  // 기본값: 비공유 (AI 추출 TODO는 개인 일정)
     });
   };
 
@@ -333,6 +333,7 @@ export const DiaryWriteScreen = () => {
         allowsEditing: false,
         quality: 0.8,
         allowsMultipleSelection: true,
+        selectionLimit: remainingSlots,
       });
 
       if (result.canceled) {
@@ -341,7 +342,6 @@ export const DiaryWriteScreen = () => {
 
       // 선택된 이미지 URI 추가 (최대 5장까지)
       const newImageUris = result.assets
-        .slice(0, remainingSlots)
         .map(asset => asset.uri);
       
       if (result.assets.length > remainingSlots) {
@@ -727,15 +727,24 @@ export const DiaryWriteScreen = () => {
                     
                     {/* 공유 설정 토글 */}
                     <View style={styles.formField}>
+                      <Text style={styles.formLabel}>공유 설정</Text>
                       <View style={styles.shareToggleContainer}>
                         <View style={styles.shareToggleLeft}>
-                          <Text style={styles.shareToggleLabel}>
-                            보호자와 공유
-                          </Text>
+                          <View style={styles.shareToggleHeader}>
+                            <Ionicons 
+                              name={editingTodo.isShared ? "people" : "lock-closed"} 
+                              size={24} 
+                              color={editingTodo.isShared ? '#34B79F' : '#666666'} 
+                              style={styles.shareToggleIcon}
+                            />
+                            <Text style={styles.shareToggleLabel}>
+                              보호자와 공유
+                            </Text>
+                          </View>
                           <Text style={styles.shareToggleHint}>
                             {editingTodo.isShared 
-                              ? '보호자도 이 일정을 볼 수 있어요'
-                              : '나만 볼 수 있어요'}
+                              ? '보호자도 이 일정을 볼 수 있어요 ✓'
+                              : '나만 볼 수 있어요 (비공개)'}
                           </Text>
                         </View>
                         <Switch
@@ -745,6 +754,7 @@ export const DiaryWriteScreen = () => {
                           }
                           trackColor={{ false: '#E8E8E8', true: '#34B79F' }}
                           thumbColor='#FFFFFF'
+                          ios_backgroundColor='#E8E8E8'
                         />
                       </View>
                     </View>
@@ -1083,21 +1093,33 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     backgroundColor: '#F0F8FF',
-    padding: 12,
-    borderRadius: 8,
+    padding: 20,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#E0F2F1',
+    minHeight: 80,
   },
   shareToggleLeft: {
     flex: 1,
+    marginRight: 16,
+  },
+  shareToggleHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  shareToggleIcon: {
+    marginRight: 10,
   },
   shareToggleLabel: {
-    fontSize: 15,
-    fontWeight: '600',
+    fontSize: 18,
+    fontWeight: '700',
     color: '#333333',
-    marginBottom: 2,
   },
   shareToggleHint: {
-    fontSize: 12,
+    fontSize: 14,
     color: '#666666',
+    lineHeight: 20,
   },
   // 버튼들
   formButtons: {

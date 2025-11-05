@@ -197,6 +197,32 @@ export const elderlyHomeStyles = StyleSheet.create({
     elevation: 4,
     overflow: 'hidden',
   },
+  // 오늘/내일 탭 스타일
+  dayTabContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#F5F5F5',
+    borderRadius: 8,
+    padding: 4,
+  },
+  dayTab: {
+    flex: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 6,
+    alignItems: 'center',
+  },
+  dayTabActive: {
+    backgroundColor: '#34B79F',
+  },
+  dayTabText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#999999',
+  },
+  dayTabTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
   healthSummaryCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
@@ -220,8 +246,25 @@ export const elderlyHomeStyles = StyleSheet.create({
     fontWeight: '700',
     color: '#333333',
   },
+  viewAllButton: {
+    flexShrink: 0,
+  },
   viewAllText: {
     fontSize: 14,
+    color: '#4A90E2',
+    fontWeight: '500',
+  },
+  viewAllContainer: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 4,
+    marginBottom: 16,
+  },
+  viewAllButtonBelow: {
+    flexShrink: 0,
+  },
+  viewAllTextBelow: {
+    fontSize: 12,
     color: '#4A90E2',
     fontWeight: '500',
   },
@@ -350,6 +393,9 @@ export const elderlyHomeStyles = StyleSheet.create({
   },
   viewAllTextLarge: {
     fontSize: 18,
+  },
+  viewAllTextBelowLarge: {
+    fontSize: 14,
   },
   scheduleTimeTextLarge: {
     fontSize: 20,
@@ -618,6 +664,83 @@ export const elderlyHomeStyles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#FFFFFF',
+  },
+  
+  // 할일 상세보기 모달 스타일
+  editModalContent: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    width: '100%',
+    maxWidth: 500,
+    maxHeight: '80%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  editModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E0E0E0',
+  },
+  editModalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333333',
+  },
+  closeButton: {
+    fontSize: 32,
+    color: '#999999',
+    fontWeight: '300',
+  },
+  editModalBody: {
+    padding: 20,
+    maxHeight: 400,
+  },
+  todoDetailSection: {
+    marginBottom: 20,
+  },
+  todoDetailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  todoDetailLabel: {
+    fontSize: 14,
+    color: '#666666',
+    marginBottom: 6,
+  },
+  todoDetailValue: {
+    fontSize: 16,
+    color: '#333333',
+    fontWeight: '500',
+  },
+  editModalFooter: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    gap: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#E0E0E0',
+  },
+  modalActionButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  editButton: {
+    backgroundColor: '#34B79F',
+  },
+  editButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
 

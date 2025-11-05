@@ -1,7 +1,7 @@
 /**
  * 보호자 전용 홈 화면 (대시보드)
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -14,11 +14,12 @@ import {
   KeyboardAvoidingView,
   Platform,
   RefreshControl,
+  Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../store/authStore';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { BottomNavigationBar, Header } from '../components';
+import { BottomNavigationBar, Header, QuickActionGrid, type QuickAction, CheckIcon, PhoneIcon, DiaryIcon } from '../components';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as todoApi from '../api/todo';
 import * as connectionsApi from '../api/connections';
@@ -43,7 +44,7 @@ interface Task {
   completed: boolean;
 }
 
-type TabType = 'family' | 'stats' | 'health' | 'communication';
+// TabType 제거됨 (탭 네비게이션 제거)
 
 export const GuardianHomeScreen = () => {
   const router = useRouter();
@@ -51,7 +52,6 @@ export const GuardianHomeScreen = () => {
   const insets = useSafeAreaInsets();
   const { show } = useAlert();
   const [currentElderlyIndex, setCurrentElderlyIndex] = useState(0);
-  const [activeTab, setActiveTab] = useState<TabType>('family');
   const [todayTodos, setTodayTodos] = useState<todoApi.TodoItem[]>([]);
   const [isLoadingTodos, setIsLoadingTodos] = useState(false);
   const [selectedTodo, setSelectedTodo] = useState<todoApi.TodoItem | null>(null);
@@ -75,16 +75,26 @@ export const GuardianHomeScreen = () => {
   const [isConnecting, setIsConnecting] = useState(false);
 
   // 통계 데이터 상태
-  const [weeklyStats, setWeeklyStats] = useState<todoApi.TodoDetailedStats | null>(null);
   const [monthlyStats, setMonthlyStats] = useState<todoApi.TodoDetailedStats | null>(null);
+  const [lastMonthStats, setLastMonthStats] = useState<todoApi.TodoDetailedStats | null>(null);
   const [isLoadingStats, setIsLoadingStats] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showAllTodos, setShowAllTodos] = useState(false);
-  const [selectedPeriod, setSelectedPeriod] = useState<'week' | 'month'>('week');
+  const [selectedPeriod, setSelectedPeriod] = useState<'month' | 'last_month'>('month');
+  const [allTodos, setAllTodos] = useState<todoApi.TodoItem[]>([]); // 전체 할일 목록 (통계 없을 때 구분용)
+  const [selectedDayTab, setSelectedDayTab] = useState<'today' | 'tomorrow'>('today'); // 오늘/내일 탭
 
   // 연결된 어르신 목록 (API에서 가져옴)
   const [connectedElderly, setConnectedElderly] = useState<ElderlyProfile[]>([]);
   const [isLoadingElderly, setIsLoadingElderly] = useState(false);
+  
+  // 스크롤 관련 ref
+  const scrollViewRef = useRef<ScrollView>(null);
+  const statsSectionRef = useRef<View>(null);
+  const [statsSectionY, setStatsSectionY] = useState(0);
+  
+  // 보호자용: 공유 필터 상태 (기본값: 공유된 일정만)
+  const [showSharedOnly, setShowSharedOnly] = useState(true);
   
   // 현재 보여줄 어르신 (마지막 인덱스는 "추가하기" 카드)
   const currentElderly = currentElderlyIndex < connectedElderly.length 
@@ -306,85 +316,109 @@ export const GuardianHomeScreen = () => {
         </View>
       )}
 
-      {/* 오늘 섹션 */}
+      {/* 빠른 액션 버튼 (어르신 카드 바로 아래) */}
+      {currentElderly && quickActions.length > 0 && (
+        <QuickActionGrid actions={quickActions} />
+      )}
+
+      {/* 오늘/내일 할 일 카드 (어르신 화면 스타일) */}
       {currentElderly && (
-        <View style={styles.todaySection}>
-          <View style={styles.todayHeader}>
-            <Text style={styles.todayTitle}>오늘</Text>
-            <View style={styles.dateTag}>
-              <Text style={styles.dateText}>{dateString} {dayString}</Text>
+        <View style={styles.scheduleCard}>
+          <View style={styles.cardHeader}>
+            {/* 오늘/내일 탭 */}
+            <View style={styles.dayTabContainer}>
+              <TouchableOpacity
+                style={[styles.dayTab, selectedDayTab === 'today' && styles.dayTabActive]}
+                onPress={() => {
+                  setSelectedDayTab('today');
+                  if (currentElderly) {
+                    loadTodosForElderly(currentElderly.id, false, 'today');
+                  }
+                }}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.dayTabText, selectedDayTab === 'today' && styles.dayTabTextActive]}>
+                  오늘
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.dayTab, selectedDayTab === 'tomorrow' && styles.dayTabActive]}
+                onPress={() => {
+                  setSelectedDayTab('tomorrow');
+                  if (currentElderly) {
+                    loadTodosForElderly(currentElderly.id, false, 'tomorrow');
+                  }
+                }}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.dayTabText, selectedDayTab === 'tomorrow' && styles.dayTabTextActive]}>
+                  내일
+                </Text>
+              </TouchableOpacity>
             </View>
           </View>
 
-          {/* 할일 목록 */}
-          <View style={styles.tasksList}>
-            {isLoadingTodos ? (
-              <ActivityIndicator size="large" color="#34B79F" style={{ marginVertical: 20 }} />
-            ) : todayTodos.length === 0 ? (
-              <Text style={{ textAlign: 'center', color: '#999', paddingVertical: 20 }}>
-                오늘 등록된 할 일이 없습니다
-              </Text>
+          {isLoadingTodos ? (
+            <View style={{ paddingVertical: 40, alignItems: 'center' }}>
+              <ActivityIndicator size="large" color="#34B79F" />
+            </View>
+          ) : (() => {
+            const pendingTodos = todayTodos.filter(todo => 
+              todo.status !== 'completed' && todo.status !== 'cancelled'
+            );
+            
+            return pendingTodos.length === 0 ? (
+              <View style={{ paddingVertical: 40, alignItems: 'center' }}>
+                <Text style={{ fontSize: 16, color: '#999999' }}>
+                  {selectedDayTab === 'today' ? '오늘' : '내일'} 할 일이 없습니다
+                </Text>
+              </View>
             ) : (
-              (showAllTodos ? todayTodos : todayTodos.slice(0, 5)).map((todo) => (
+              pendingTodos.slice(0, 3).map((todo) => (
                 <TouchableOpacity
                   key={todo.todo_id}
-                  style={[
-                    styles.taskItem,
-                    todo.status === 'completed' && styles.taskItemCompleted
-                  ]}
-                  activeOpacity={0.7}
+                  style={styles.scheduleItem}
                   onPress={() => {
                     setSelectedTodo(todo);
                     setShowEditModal(true);
                   }}
+                  activeOpacity={0.7}
                 >
-                  <View style={styles.taskIconContainer}>
-                    <Ionicons name={getCategoryIcon(todo.category)} size={20} color="#34B79F" />
+                  <View style={styles.scheduleTime}>
+                    <Text style={styles.scheduleTimeText}>
+                      {todo.due_time ? todo.due_time.substring(0, 5) : '시간미정'}
+                    </Text>
                   </View>
-                  <View style={styles.taskContent}>
-                    <Text style={[
-                      styles.taskTitle,
-                      todo.status === 'completed' && styles.taskTitleCompleted
-                    ]}>
+                  <View style={styles.scheduleContent}>
+                    <Text 
+                      style={styles.scheduleTitle}
+                      numberOfLines={1}
+                      ellipsizeMode="tail"
+                    >
                       {todo.title}
                     </Text>
-                    {todo.due_time && (
-                      <Text style={styles.taskTime}>
-                        {formatTime(todo.due_time)}
+                    {todo.description && (
+                      <Text 
+                        style={styles.scheduleLocation}
+                        numberOfLines={1}
+                        ellipsizeMode="tail"
+                      >
+                        {todo.description}
+                      </Text>
+                    )}
+                    {todo.category && (
+                      <Text style={styles.scheduleDate}>
+                        [{getCategoryName(todo.category)}]
                       </Text>
                     )}
                   </View>
-                  {todo.status === 'completed' ? (
-                    <Ionicons name="checkmark-circle" size={24} color="#34C759" />
-                  ) : todo.status === 'cancelled' ? (
-                    <Ionicons name="close-circle" size={24} color="#FF3B30" />
-                  ) : null}
+                  <View style={styles.scheduleStatus}>
+                    <Text style={styles.scheduleStatusText}>예정</Text>
+                  </View>
                 </TouchableOpacity>
               ))
-            )}
-            {todayTodos.length > 5 && (
-              <TouchableOpacity 
-                style={styles.viewMoreButton}
-                onPress={() => setShowAllTodos(!showAllTodos)}
-              >
-                <Text style={styles.viewMoreText}>
-                  {showAllTodos 
-                    ? '접기' 
-                    : `+${todayTodos.length - 5}개 더보기`
-                  }
-                </Text>
-              </TouchableOpacity>
-            )}
-          </View>
-
-          {/* 새 할일 추가 버튼 */}
-          <TouchableOpacity
-            style={styles.addTaskButton}
-            onPress={() => router.push(`/guardian-todo-add?elderlyId=${currentElderly.id}&elderlyName=${encodeURIComponent(currentElderly.name)}`)}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.addTaskText}>+ 새로운 할 일 추가하기</Text>
-          </TouchableOpacity>
+            );
+          })()}
         </View>
       )}
 
@@ -392,45 +426,72 @@ export const GuardianHomeScreen = () => {
   );
 
   // 통계 탭 (새로 추가)
-  const renderStatsTab = () => (
-    <>
-      {connectedElderly.length > 0 && (selectedPeriod === 'week' ? weeklyStats : monthlyStats) ? (
-        <>
-          {/* 주간/월간 요약 선택 */}
-          <View style={styles.periodSelectorCard}>
-            <View style={styles.periodSelector}>
-              <TouchableOpacity 
-                style={[styles.periodButton, selectedPeriod === 'week' && styles.periodButtonActive]}
-                activeOpacity={0.7}
-                onPress={() => setSelectedPeriod('week')}
-              >
-                <Text style={[styles.periodButtonText, selectedPeriod === 'week' && styles.periodButtonTextActive]}>
-                  이번 주
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[styles.periodButton, selectedPeriod === 'month' && styles.periodButtonActive]}
-                activeOpacity={0.7}
-                onPress={() => setSelectedPeriod('month')}
-              >
-                <Text style={[styles.periodButtonText, selectedPeriod === 'month' && styles.periodButtonTextActive]}>
-                  이번 달
-                </Text>
-              </TouchableOpacity>
-            </View>
-            
-            {/* 원형 차트 요약 */}
+  const renderStatsTab = () => {
+    const stats = selectedPeriod === 'month' ? monthlyStats : lastMonthStats;
+    
+    // 데이터 로딩 중
+    if (!connectedElderly.length || !stats) {
+      return (
+        <View style={styles.emptyState}>
+          <ActivityIndicator size="large" color="#34B79F" />
+          <Text style={styles.emptyStateText}>통계 데이터를 불러오는 중...</Text>
+        </View>
+      );
+    }
+    
+    // 통계 데이터가 없을 때 (total === 0) - 하루 이미지와 안내 문구 표시
+    const hasNoStats = stats.total === 0;
+    
+    return (
+      <>
+        {/* 월간/전월 요약 선택 - 항상 표시 */}
+        <View style={styles.periodSelectorCard}>
+          <View style={styles.periodSelector}>
+            <TouchableOpacity 
+              style={[styles.periodButton, selectedPeriod === 'month' && styles.periodButtonActive]}
+              activeOpacity={0.7}
+              onPress={() => {
+                setSelectedPeriod('month');
+                // 월간 통계가 없으면 로딩
+                if (currentElderly && !monthlyStats) {
+                  loadMonthlyStatsForElderly(currentElderly.id);
+                }
+              }}
+            >
+              <Text style={[styles.periodButtonText, selectedPeriod === 'month' && styles.periodButtonTextActive]}>
+                이번 달
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={[styles.periodButton, selectedPeriod === 'last_month' && styles.periodButtonActive]}
+              activeOpacity={0.7}
+              onPress={() => {
+                setSelectedPeriod('last_month');
+                // 전월 통계가 없으면 로딩
+                if (currentElderly && !lastMonthStats) {
+                  loadLastMonthStatsForElderly(currentElderly.id);
+                }
+              }}
+            >
+              <Text style={[styles.periodButtonText, selectedPeriod === 'last_month' && styles.periodButtonTextActive]}>
+                지난 달
+              </Text>
+            </TouchableOpacity>
+          </View>
+          
+          {/* 원형 차트 요약 - 통계 데이터가 있을 때만 표시 */}
+          {!hasNoStats && (
             <View style={styles.summaryChartContainer}>
               <View style={styles.chartSection}>
                 <View style={styles.completionChart}>
                   <View style={styles.chartCircle}>
                     <View style={[styles.chartProgress, { 
-                      transform: [{ rotate: `${((selectedPeriod === 'week' ? weeklyStats : monthlyStats)?.completion_rate || 0) * 360 - 90}deg` }]
+                      transform: [{ rotate: `${(stats.completion_rate || 0) * 360 - 90}deg` }]
                     }]}>
                     </View>
                     <View style={styles.chartInnerCircle}>
                       <Text style={styles.chartPercentage}>
-                        {Math.round(((selectedPeriod === 'week' ? weeklyStats : monthlyStats)?.completion_rate || 0) * 100)}%
+                        {Math.round((stats.completion_rate || 0) * 100)}%
                       </Text>
                       <Text style={styles.chartLabel}>완료율</Text>
                     </View>
@@ -441,107 +502,210 @@ export const GuardianHomeScreen = () => {
               <View style={styles.summaryStats}>
                 <View style={styles.summaryStatItem}>
                   <Ionicons name="checkmark-circle" size={20} color="#34B79F" />
-                  <Text style={styles.summaryStatNumber}>{(selectedPeriod === 'week' ? weeklyStats : monthlyStats)?.completed || 0}</Text>
+                  <Text style={styles.summaryStatNumber}>{stats.completed || 0}</Text>
                   <Text style={styles.summaryStatLabel}>완료</Text>
                 </View>
                 <View style={styles.summaryStatItem}>
                   <Ionicons name="time" size={20} color="#FF9500" />
-                  <Text style={styles.summaryStatNumber}>{(selectedPeriod === 'week' ? weeklyStats : monthlyStats)?.pending || 0}</Text>
+                  <Text style={styles.summaryStatNumber}>{stats.pending || 0}</Text>
                   <Text style={styles.summaryStatLabel}>대기</Text>
                 </View>
                 <View style={styles.summaryStatItem}>
                   <Ionicons name="close-circle" size={20} color="#FF6B6B" />
-                  <Text style={styles.summaryStatNumber}>{(selectedPeriod === 'week' ? weeklyStats : monthlyStats)?.cancelled || 0}</Text>
+                  <Text style={styles.summaryStatNumber}>{stats.cancelled || 0}</Text>
                   <Text style={styles.summaryStatLabel}>취소</Text>
                 </View>
               </View>
             </View>
-          </View>
-
-          {/* 건강 상태 알림 */}
-          <View style={styles.healthStatusCard}>
-            <Text style={styles.healthStatusTitle}>건강 상태 체크</Text>
-            
-            {/* 주의 필요 */}
-            {generateHealthAlerts(selectedPeriod === 'week' ? weeklyStats : monthlyStats).length > 0 && (
-              <View style={styles.statusSection}>
-                <Text style={styles.statusSectionTitle}>확인이 필요한 부분</Text>
-                {generateHealthAlerts(selectedPeriod === 'week' ? weeklyStats : monthlyStats).map((alert, index) => (
-                  <View key={index} style={styles.statusItem}>
-                    <View style={styles.statusItemHeader}>
-                      <Ionicons name="alert-circle" size={16} color="#FF9500" />
-                      <Text style={styles.statusItemText}>{alert.message}</Text>
-                    </View>
-                    <Text style={styles.statusRecommendation}>{alert.recommendation}</Text>
-                  </View>
-                ))}
-              </View>
-            )}
-
-            {/* 잘하고 있는 부분 */}
-            {generateGoodStatus(selectedPeriod === 'week' ? weeklyStats : monthlyStats).length > 0 && (
-              <View style={styles.statusSection}>
-                <Text style={styles.statusSectionTitle}>잘하고 있어요</Text>
-                {generateGoodStatus(selectedPeriod === 'week' ? weeklyStats : monthlyStats).map((item, index) => (
-                  <View key={index} style={styles.statusGoodItem}>
-                    <Ionicons name="checkmark-circle" size={16} color="#4CAF50" />
-                    <Text style={styles.statusGoodText}>{item}</Text>
-                  </View>
-                ))}
-              </View>
-            )}
-
-            {/* 조언 */}
-            <View style={styles.statusSection}>
-              <Text style={styles.statusSectionTitle}>조언</Text>
-              {generateRecommendations(selectedPeriod === 'week' ? weeklyStats : monthlyStats).map((rec, index) => (
-                <View key={index} style={styles.statusAdviceItem}>
-                  <Ionicons name="bulb" size={16} color="#34B79F" />
-                  <Text style={styles.statusAdviceText}>{rec}</Text>
-                </View>
-              ))}
-            </View>
-          </View>
-
-          {/* 카테고리별 완료 현황 */}
-          <View style={styles.categoryStatsCard}>
-            <Text style={styles.categoryStatsTitle}>카테고리별 완료율</Text>
-            {(selectedPeriod === 'week' ? weeklyStats : monthlyStats)?.by_category.map((cat) => (
-              <View key={cat.category} style={styles.categoryStatRow}>
-                <View style={styles.categoryStatLabelContainer}>
-                  <Ionicons name={getCategoryIcon(cat.category)} size={16} color="#34B79F" />
-                  <Text style={styles.categoryStatLabel}>
-                    {getCategoryName(cat.category)}
-                  </Text>
-                </View>
-                <View style={styles.categoryProgressContainer}>
-                  <View style={styles.categoryProgressBg}>
-                    <View 
-                      style={[
-                        styles.categoryProgressBar, 
-                        { width: `${Math.round(cat.completion_rate * 100)}%` }
-                      ]} 
-                    />
-                  </View>
-                  <Text style={styles.categoryProgressText}>
-                    {cat.completed}/{cat.total} ({Math.round(cat.completion_rate * 100)}%)
-                  </Text>
-                </View>
-              </View>
-            ))}
-          </View>
-        </>
-      ) : (
-        <View style={styles.emptyState}>
-          <ActivityIndicator size="large" color="#34B79F" />
-          <Text style={styles.emptyStateText}>통계 데이터를 불러오는 중...</Text>
+          )}
         </View>
-      )}
-    </>
-  );
+
+        {/* 통계 데이터가 없을 때 - 하루 이미지와 안내 문구 */}
+        {hasNoStats ? (
+          <View style={styles.emptyStatsCard}>
+            <Image 
+              source={require('../../assets/haru-error.png')} 
+              style={styles.emptyStatsImage}
+              resizeMode="contain"
+            />
+            {(() => {
+              // 할일이 아예 없는지, 미래 일정만 있는지 확인
+              const hasAnyTodos = allTodos.length > 0;
+              const today = new Date();
+              today.setHours(0, 0, 0, 0); // 시간 제거하여 날짜만 비교
+              
+              // 미래 할일만 있는지 확인
+              const hasFutureTodos = allTodos.some(todo => {
+                if (!todo.due_date) return false;
+                const todoDate = new Date(todo.due_date);
+                todoDate.setHours(0, 0, 0, 0);
+                return todoDate > today;
+              });
+              
+              const hasPastOrTodayTodos = allTodos.some(todo => {
+                if (!todo.due_date) return false;
+                const todoDate = new Date(todo.due_date);
+                todoDate.setHours(0, 0, 0, 0);
+                return todoDate <= today;
+              });
+              
+              // 할일이 아예 없는 경우
+              if (!hasAnyTodos) {
+                return (
+                  <>
+                    <Text style={styles.emptyStatsText}>할일을 등록해주세요!</Text>
+                    <Text style={styles.emptyStatsSubText}>
+                      어르신의 할일을 등록하시면{'\n'}통계와 조언을 제공해드릴게요
+                    </Text>
+                  </>
+                );
+              }
+              
+              // 할일은 있지만 미래 일정만 있는 경우 (과거/오늘 할일이 없음)
+              if (hasFutureTodos && !hasPastOrTodayTodos) {
+                return (
+                  <>
+                    <Text style={styles.emptyStatsText}>아직 통계 데이터가 없어요</Text>
+                    <Text style={styles.emptyStatsSubText}>
+                      {selectedPeriod === 'month' ? '이번 달' : '지난 달'}에 해당하는 할일이 없습니다.{'\n'}
+                      할일이 등록되어 있지만 미래 날짜라서 통계가 잡히지 않았어요
+                    </Text>
+                  </>
+                );
+              }
+              
+              // 그 외의 경우 (할일이 있지만 통계가 안 잡힌 경우 - 혹시 모를 상황)
+              return (
+                <>
+                  <Text style={styles.emptyStatsText}>할일을 등록해주세요!</Text>
+                  <Text style={styles.emptyStatsSubText}>
+                    어르신의 할일을 등록하시면{'\n'}통계와 조언을 제공해드릴게요
+                  </Text>
+                </>
+              );
+            })()}
+            {currentElderly && (
+              <TouchableOpacity
+                style={styles.addTodoButton}
+                onPress={() => router.push(`/guardian-todo-add?elderlyId=${currentElderly.id}&elderlyName=${encodeURIComponent(currentElderly.name)}`)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.addTodoButtonText}>할일 등록하기</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        ) : (
+          <>
+            {/* 건강 상태 알림 */}
+            <View style={styles.healthStatusCard}>
+              <Text style={styles.healthStatusTitle}>건강 상태 체크</Text>
+              
+              {/* 주의 필요 */}
+              {generateHealthAlerts(stats).length > 0 && (
+                <View style={styles.statusSection}>
+                  <Text style={styles.statusSectionTitle}>확인이 필요한 부분</Text>
+                  {generateHealthAlerts(stats).map((alert, index) => (
+                    <View key={index} style={styles.statusItem}>
+                      <View style={styles.statusItemHeader}>
+                        <Ionicons name="alert-circle" size={16} color="#FF9500" />
+                        <Text style={styles.statusItemText}>{alert.message}</Text>
+                      </View>
+                      <Text style={styles.statusRecommendation}>{alert.recommendation}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {/* 잘하고 있는 부분 */}
+              {generateGoodStatus(stats).length > 0 && (
+                <View style={styles.statusSection}>
+                  <Text style={styles.statusSectionTitle}>잘하고 있어요</Text>
+                  {generateGoodStatus(stats).map((item, index) => (
+                    <View key={index} style={styles.statusGoodItem}>
+                      <Ionicons name="checkmark-circle" size={16} color="#4CAF50" />
+                      <Text style={styles.statusGoodText}>{item}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {/* 조언 */}
+              <View style={styles.statusSection}>
+                <Text style={styles.statusSectionTitle}>조언</Text>
+                {(() => {
+                  const recommendations = generateRecommendations(stats);
+                  
+                  if (recommendations.length === 0) {
+                    return (
+                      <View style={styles.statusAdviceItem}>
+                        <Ionicons name="checkmark-circle" size={16} color="#4CAF50" />
+                        <Text style={[styles.statusAdviceText, { color: '#4CAF50' }]}>
+                          모든 할일을 잘 수행하고 계세요! 현재 상태를 계속 유지해주세요.
+                        </Text>
+                      </View>
+                    );
+                  }
+                  
+                  return recommendations.map((rec, index) => (
+                    <View key={index} style={styles.statusAdviceItem}>
+                      <Ionicons name="bulb" size={16} color="#34B79F" />
+                      <Text style={styles.statusAdviceText}>{rec}</Text>
+                    </View>
+                  ));
+                })()}
+              </View>
+            </View>
+
+            {/* 카테고리별 완료 현황 */}
+            <View style={styles.categoryStatsCard}>
+              <Text style={styles.categoryStatsTitle}>카테고리별 완료율</Text>
+              {(() => {
+                const categoriesWithData = stats.by_category.filter(cat => cat.total > 0);
+                
+                if (categoriesWithData.length === 0) {
+                  return (
+                    <View style={{ padding: 20, alignItems: 'center' }}>
+                      <Ionicons name="stats-chart-outline" size={48} color="#CCCCCC" />
+                      <Text style={{ marginTop: 12, fontSize: 14, color: '#999999', textAlign: 'center' }}>
+                        카테고리별 데이터가 없습니다
+                      </Text>
+                    </View>
+                  );
+                }
+                
+                return categoriesWithData.map((cat) => (
+                  <View key={cat.category} style={styles.categoryStatRow}>
+                    <View style={styles.categoryStatLabelContainer}>
+                      <Ionicons name={getCategoryIcon(cat.category)} size={16} color="#34B79F" />
+                      <Text style={styles.categoryStatLabel}>
+                        {getCategoryName(cat.category)}
+                      </Text>
+                    </View>
+                    <View style={styles.categoryProgressContainer}>
+                      <View style={styles.categoryProgressBg}>
+                        <View 
+                          style={[
+                            styles.categoryProgressBar, 
+                            { width: `${Math.round(cat.completion_rate * 100)}%` }
+                          ]} 
+                        />
+                      </View>
+                      <Text style={styles.categoryProgressText}>
+                        {cat.completed}/{cat.total} ({Math.round(cat.completion_rate * 100)}%)
+                      </Text>
+                    </View>
+                  </View>
+                ));
+              })()}
+            </View>
+          </>
+        )}
+      </>
+    );
+  };
 
   const renderHealthTab = () => (
-    <View style={styles.tabContent}>
+    <View>
       <View style={styles.healthSection}>
         <View style={styles.sectionTitleContainer}>
           <Ionicons name="fitness" size={24} color="#34B79F" />
@@ -600,7 +764,7 @@ export const GuardianHomeScreen = () => {
   );
 
   const renderCommunicationTab = () => (
-    <View style={styles.tabContent}>
+    <View>
       <View style={styles.communicationSection}>
         <View style={styles.sectionTitleContainer}>
           <Ionicons name="chatbubbles" size={24} color="#34B79F" />
@@ -748,63 +912,131 @@ export const GuardianHomeScreen = () => {
       }));
       
       setConnectedElderly(elderlyProfiles);
-    } catch (error) {
+    } catch (error: any) {
       console.error('❌ 연결된 어르신 로딩 실패:', error);
       setConnectedElderly([]);
+      show('오류', '연결된 어르신 목록을 불러오는데 실패했습니다.');
     } finally {
       setIsLoadingElderly(false);
     }
   };
 
-  // 어르신의 오늘 TODO 불러오기
-  const loadTodosForElderly = async (elderlyId: string) => {
-    setIsLoadingTodos(true);
+  // 어르신의 TODO 불러오기 (선택된 날짜만 조회 - 어르신 화면과 동일한 방식)
+  const loadTodosForElderly = async (
+    elderlyId: string, 
+    skipLoadingState: boolean = false,
+    dayTab?: 'today' | 'tomorrow'  // 명시적으로 전달하지 않으면 현재 selectedDayTab 사용
+  ) => {
+    // dayTab이 전달되지 않으면 현재 selectedDayTab 사용
+    const targetDayTab = dayTab ?? selectedDayTab;
+    if (!elderlyId) {
+      console.warn('⚠️ 보호자: elderlyId가 없어서 TODO 로딩 스킵');
+      return;
+    }
+    
+    // 이미 로딩 중이면 중복 호출 방지 (단, skipLoadingState가 true면 강제 실행)
+    // 하지만 dayTab이 변경된 경우(탭 전환)는 강제 실행하여 최신 데이터 로드
+    const isTabChanged = dayTab !== undefined && dayTab !== selectedDayTab;
+    if (isLoadingTodos && !skipLoadingState && !isTabChanged) {
+      console.log('⚠️ 보호자: 이미 TODO 로딩 중이므로 스킵');
+      return;
+    }
+    
+    if (!skipLoadingState) {
+      setIsLoadingTodos(true);
+    }
     try {
-      console.log('📥 보호자: 어르신 TODO 로딩 시작 -', elderlyId);
-      const todos = await todoApi.getTodos('today', elderlyId);
-      console.log('✅ 보호자: TODO 로딩 성공 -', todos.length, '개');
-      console.log('📊 완료된 TODO:', todos.filter(t => t.status === 'completed').length);
-      setTodayTodos(todos);
-    } catch (error) {
+      // 선택된 탭에 따라 날짜 필터 결정 (어르신 화면과 동일한 방식)
+      const dateFilter = targetDayTab === 'today' ? 'today' : 'tomorrow';
+      console.log('📥 보호자: 어르신 TODO 로딩 시작 -', elderlyId, `(${targetDayTab === 'today' ? '오늘' : '내일'})`);
+      
+      // 백엔드에서 해당 날짜만 조회 (반복 일정 자동 생성 포함)
+      const todos = await todoApi.getTodos(dateFilter, elderlyId);
+      
+      // 보호자는 공유 필터 적용 (showSharedOnly가 true면 공유된 일정만)
+      const filteredTodos = showSharedOnly 
+        ? todos.filter(todo => todo.is_shared_with_caregiver === true)
+        : todos;
+      
+      console.log(`✅ 보호자: TODO 로딩 성공 - 전체 ${todos.length}개, 필터링 후 ${filteredTodos.length}개 (${targetDayTab === 'today' ? '오늘' : '내일'})`);
+      console.log('📊 완료된 TODO:', filteredTodos.filter(t => t.status === 'completed').length);
+      console.log('📊 필터링된 TODO 목록:', filteredTodos.map(t => ({
+        id: t.todo_id,
+        title: t.title,
+        date: t.due_date,
+        is_recurring: t.is_recurring,
+        is_shared: t.is_shared_with_caregiver
+      })));
+      
+      // 성공 시에만 상태 업데이트 (로딩 중에도 이전 데이터 유지)
+      setTodayTodos(filteredTodos);
+    } catch (error: any) {
       console.error('❌ TODO 로딩 실패:', error);
+      console.error('❌ 에러 상세:', error.response?.data || error.message);
+      // 에러 시에만 빈 배열로 설정 (이전 데이터가 있으면 유지하지 않음)
+      // 하지만 사용자에게는 에러 알림만 표시하고 데이터는 유지
+      show('오류', '할일 목록을 불러오는데 실패했습니다.');
     } finally {
-      setIsLoadingTodos(false);
+      if (!skipLoadingState) {
+        setIsLoadingTodos(false);
+      }
     }
   };
 
-  // 어르신의 주간 통계 불러오기
-  const loadWeeklyStatsForElderly = async (elderlyId: string) => {
-    setIsLoadingStats(true);
+  // 어르신의 통계 불러오기 (통합 함수)
+  const loadStatsForElderly = async (
+    elderlyId: string, 
+    period: 'month' | 'last_month',
+    skipLoadingState: boolean = false
+  ) => {
+    if (!skipLoadingState && isLoadingStats) {
+      return; // 이미 로딩 중이면 스킵
+    }
+    if (!skipLoadingState) {
+      setIsLoadingStats(true);
+    }
     try {
-      console.log('📊 보호자: 주간 통계 로딩 시작 -', elderlyId);
-      const stats = await todoApi.getDetailedStats('week', elderlyId);
-      console.log('✅ 보호자: 주간 통계 로딩 성공');
-      console.log('📈 주간 완료율:', Math.round(stats.completion_rate * 100) + '%');
+      const periodLabel = period === 'month' ? '월간' : '전월';
+      console.log(`📊 보호자: ${periodLabel} 통계 로딩 시작 -`, elderlyId);
+      const stats = await todoApi.getDetailedStats(period, elderlyId);
+      console.log(`✅ 보호자: ${periodLabel} 통계 로딩 성공`);
+      console.log(`📈 ${periodLabel} 완료율:`, Math.round(stats.completion_rate * 100) + '%');
       console.log('📋 카테고리별:', stats.by_category.length, '개');
-      setWeeklyStats(stats);
-    } catch (error) {
-      console.error('❌ 주간 통계 로딩 실패:', error);
+      
+      // period에 따라 적절한 state에 저장
+      if (period === 'month') {
+        setMonthlyStats(stats);
+      } else {
+        setLastMonthStats(stats);
+      }
+    } catch (error: any) {
+      const periodLabel = period === 'month' ? '월간' : '전월';
+      console.error(`❌ ${periodLabel} 통계 로딩 실패:`, error);
+      show('오류', `${periodLabel} 통계를 불러오는데 실패했습니다.`);
     } finally {
-      setIsLoadingStats(false);
+      if (!skipLoadingState) {
+        setIsLoadingStats(false);
+      }
     }
   };
 
-  // Load monthly stats for a specific elderly
-  const loadMonthlyStatsForElderly = async (elderlyId: string) => {
-    setIsLoadingStats(true);
-    try {
-      console.log('📊 보호자: 월간 통계 로딩 시작 -', elderlyId);
-      const stats = await todoApi.getDetailedStats('month', elderlyId);
-      console.log('✅ 보호자: 월간 통계 로딩 성공');
-      console.log('📈 월간 완료율:', Math.round(stats.completion_rate * 100) + '%');
-      console.log('📋 카테고리별:', stats.by_category.length, '개');
-      setMonthlyStats(stats);
-    } catch (error) {
-      console.error('❌ 월간 통계 로딩 실패:', error);
-    } finally {
-      setIsLoadingStats(false);
-    }
+  // 하위 호환성을 위한 별칭 함수들 (기존 코드 호환성 유지)
+  const loadMonthlyStatsForElderly = (elderlyId: string, skipLoadingState: boolean = false) => {
+    return loadStatsForElderly(elderlyId, 'month', skipLoadingState);
   };
+
+  const loadLastMonthStatsForElderly = (elderlyId: string, skipLoadingState: boolean = false) => {
+    return loadStatsForElderly(elderlyId, 'last_month', skipLoadingState);
+  };
+
+  // 통계 새로고침 공통 함수 (선택된 기간에 따라 자동 로딩)
+  const refreshStats = useCallback(async (elderlyId: string, skipLoadingState: boolean = false) => {
+    if (selectedPeriod === 'month') {
+      await loadStatsForElderly(elderlyId, 'month', skipLoadingState);
+    } else if (selectedPeriod === 'last_month') {
+      await loadStatsForElderly(elderlyId, 'last_month', skipLoadingState);
+    }
+  }, [selectedPeriod]);
 
   // Pull-to-Refresh 핸들러
   const handleRefresh = async () => {
@@ -813,16 +1045,35 @@ export const GuardianHomeScreen = () => {
       // 연결된 어르신 목록 새로고침
       await loadConnectedElderly();
       
+      // currentElderly는 연결된 어르신 목록이 업데이트된 후에 다시 계산되므로
+      // connectedElderly 상태를 직접 사용하거나 현재 인덱스로 접근
+      const targetElderly = currentElderlyIndex < connectedElderly.length 
+        ? connectedElderly[currentElderlyIndex] 
+        : null;
+      
       // 현재 어르신이 있으면 데이터도 새로고침
-      if (currentElderly) {
-        await Promise.all([
-          loadTodosForElderly(currentElderly.id),
-          loadWeeklyStatsForElderly(currentElderly.id),
-          loadMonthlyStatsForElderly(currentElderly.id),
-        ]);
+      if (targetElderly) {
+        // Pull-to-Refresh 중에는 로딩 상태 표시 없이 백그라운드에서 업데이트
+        // 이렇게 하면 RefreshControl의 로딩 인디케이터만 표시되고 데이터는 부드럽게 업데이트됨
+        // 순차적으로 실행하여 데이터가 확실히 업데이트되도록 함
+        // selectedDayTab을 명시적으로 전달하여 최신 값 사용
+        await loadTodosForElderly(targetElderly.id, true, selectedDayTab); // skipLoadingState = true
+        // 선택된 기간에 따라 필요한 통계만 로딩 (최적화)
+        await refreshStats(targetElderly.id, true);
+        // 통계 데이터 로딩을 위해 전체 할일 목록 로드
+        await loadAllTodosForElderly(targetElderly.id);
+      } else if (currentElderly) {
+        // fallback: currentElderly가 있으면 사용
+        // selectedDayTab을 명시적으로 전달하여 최신 값 사용
+        await loadTodosForElderly(currentElderly.id, true, selectedDayTab);
+        await refreshStats(currentElderly.id, true);
+        // 통계 탭이 활성화된 경우에만 전체 할일 목록 로딩 (최적화)
+        // 통계 데이터 로딩을 위해 전체 할일 목록 로드
+        await loadAllTodosForElderly(currentElderly.id);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('새로고침 실패:', error);
+      show('오류', '데이터를 새로고침하는데 실패했습니다.');
     } finally {
       setIsRefreshing(false);
     }
@@ -833,14 +1084,39 @@ export const GuardianHomeScreen = () => {
     loadConnectedElderly();
   }, []);
 
+  // 전체 할일 목록 불러오기 (통계 없을 때 구분용)
+  const loadAllTodosForElderly = async (elderlyId: string) => {
+    try {
+      // 최근 3개월치 할일 조회 (과거/현재/미래 모두 포함)
+      const today = new Date();
+      const startDate = new Date(today);
+      startDate.setMonth(today.getMonth() - 3);
+      const endDate = new Date(today);
+      endDate.setMonth(today.getMonth() + 3);
+      
+      const startDateStr = startDate.toISOString().split('T')[0];
+      const endDateStr = endDate.toISOString().split('T')[0];
+      
+      const todos = await todoApi.getTodosByRange(startDateStr, endDateStr, elderlyId);
+      setAllTodos(todos);
+    } catch (error: any) {
+      console.error('❌ 전체 할일 조회 실패:', error);
+      setAllTodos([]);
+      // 전체 할일 조회는 통계용이므로 에러 알림은 생략 (너무 자주 발생할 수 있음)
+    }
+  };
+
   // 현재 어르신 변경 시 TODO 및 통계 다시 로딩
   useEffect(() => {
     if (currentElderly) {
-      loadTodosForElderly(currentElderly.id);
-      loadWeeklyStatsForElderly(currentElderly.id);
-      loadMonthlyStatsForElderly(currentElderly.id);
+      // selectedDayTab을 명시적으로 전달하여 최신 값 사용
+      loadTodosForElderly(currentElderly.id, false, selectedDayTab);
+      // 선택된 기간에 따라 필요한 통계만 로딩 (최적화)
+      refreshStats(currentElderly.id, false);
+      // 통계 데이터 로딩을 위해 전체 할일 목록 로드
+      loadAllTodosForElderly(currentElderly.id);
     }
-  }, [currentElderlyIndex, connectedElderly.length]);
+  }, [currentElderly?.id, selectedDayTab, selectedPeriod, refreshStats]);
 
   // 화면 포커스 시 데이터 새로고침 (다른 화면 갔다가 돌아올 때만)
   useFocusEffect(
@@ -848,14 +1124,59 @@ export const GuardianHomeScreen = () => {
       // user가 없으면 데이터 로딩 안함 (로그아웃 시)
       if (!user) return;
       
-      loadConnectedElderly();
-      if (currentElderly) {
-        loadTodosForElderly(currentElderly.id);
-        loadWeeklyStatsForElderly(currentElderly.id);
-        loadMonthlyStatsForElderly(currentElderly.id);
-      }
-    }, [user, currentElderly?.id]) // user 의존성 추가
+      let isMounted = true;
+      
+      // 할일 등록 후 백엔드 처리 시간을 고려한 지연 새로고침
+      const refreshData = async () => {
+        if (!isMounted) return;
+        
+        await loadConnectedElderly();
+        if (currentElderly && isMounted) {
+          // 로딩 상태 표시 없이 백그라운드에서 데이터만 업데이트 (깜빡임 방지)
+          // selectedDayTab을 명시적으로 전달하여 최신 값 사용
+          await loadTodosForElderly(currentElderly.id, true, selectedDayTab);
+          // 선택된 기간에 따라 필요한 통계만 로딩 (최적화)
+          await refreshStats(currentElderly.id, true);
+          // 통계 데이터 로딩을 위해 전체 할일 목록 로드
+          await loadAllTodosForElderly(currentElderly.id);
+        }
+      };
+      
+      // 300ms 후 실행 (백엔드 처리 시간 확보, 너무 빠르면 깜빡임 발생)
+      const refreshTimer = setTimeout(() => {
+        if (isMounted) {
+          refreshData();
+        }
+      }, 300);
+      
+      return () => {
+        isMounted = false;
+        clearTimeout(refreshTimer);
+      };
+    }, [user, currentElderly?.id, selectedDayTab, selectedPeriod, refreshStats]) // selectedDayTab도 의존성에 포함
   );
+
+  // 날짜 포맷팅 유틸리티 함수들
+  const DAY_NAMES = ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'];
+  
+  // 날짜를 "X월 X일" 형식으로 변환
+  const formatDateString = (date: Date): string => {
+    return `${date.getMonth() + 1}월 ${date.getDate()}일`;
+  };
+  
+  // 날짜를 "X월 X일 요일" 형식으로 변환
+  const formatDateWithDay = (date: Date): string => {
+    const dateStr = formatDateString(date);
+    const dayStr = DAY_NAMES[date.getDay()];
+    return `${dateStr} ${dayStr}`;
+  };
+  
+  // 내일 날짜를 "X월 X일 요일" 형식으로 변환
+  const formatTomorrowDate = (): string => {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    return formatDateWithDay(tomorrow);
+  };
 
   // 카테고리 아이콘 매핑 (Ionicons 사용)
   const getCategoryIcon = (category: string | null) => {
@@ -967,29 +1288,32 @@ export const GuardianHomeScreen = () => {
 
   // 개선 권장사항 생성 (다정한 문구로 변경)
   const generateRecommendations = (stats: todoApi.TodoDetailedStats | null) => {
-    if (!stats) return ['데이터를 불러오는 중입니다...'];
+    if (!stats) return [];
+    // 데이터가 없으면 조언 생성하지 않음
+    if (stats.total === 0) return [];
+    
     const recommendations = [];
     
     // 복약 관련 권장사항
     const medicineCategory = stats.by_category.find(cat => cat.category === 'MEDICINE');
-    if (medicineCategory && medicineCategory.completion_rate < 0.9) {
+    if (medicineCategory && medicineCategory.total > 0 && medicineCategory.completion_rate < 0.9) {
       recommendations.push('복약 알림을 더 자주 해주시면 어르신께서 잊지 않으실 것 같아요');
     }
 
     // 운동 관련 권장사항
     const exerciseCategory = stats.by_category.find(cat => cat.category === 'EXERCISE');
-    if (exerciseCategory && exerciseCategory.completion_rate < 0.8) {
+    if (exerciseCategory && exerciseCategory.total > 0 && exerciseCategory.completion_rate < 0.8) {
       recommendations.push('집에서 할 수 있는 간단한 스트레칭이나 산책을 함께 해보시는 건 어떨까요?');
     }
 
     // 식사 관련 권장사항
     const mealCategory = stats.by_category.find(cat => cat.category === 'MEAL');
-    if (mealCategory && mealCategory.completion_rate < 0.9) {
+    if (mealCategory && mealCategory.total > 0 && mealCategory.completion_rate < 0.9) {
       recommendations.push('규칙적인 식사 시간을 정해서 건강한 생활을 유지해보세요');
     }
 
-    // 기본 권장사항 (모든 상태가 좋을 때)
-    if (recommendations.length === 0) {
+    // 기본 권장사항 (모든 상태가 좋을 때, 데이터가 있을 때만)
+    if (recommendations.length === 0 && stats.total > 0) {
       recommendations.push('현재 상태를 잘 유지하고 계세요!');
       recommendations.push('새로운 취미나 독서 같은 활동을 추가해보시면 더욱 즐거울 것 같아요');
     }
@@ -1065,11 +1389,13 @@ export const GuardianHomeScreen = () => {
 
     setIsSaving(true);
     try {
+      // 백엔드 TodoUpdate는 due_time을 time 객체로 기대하지만,
+      // FastAPI/Pydantic이 "HH:MM" 형식 문자열을 자동으로 time 객체로 변환
       const updateData: todoApi.TodoUpdateRequest = {
         title: editedTodo.title,
         description: editedTodo.description || undefined,
         category: editedTodo.category.toUpperCase() as any,
-        due_time: parseDisplayTimeToApi(editedTodo.time),
+        due_time: parseDisplayTimeToApi(editedTodo.time), // "HH:MM" 형식 문자열
       };
 
       await todoApi.updateTodo(selectedTodo!.todo_id, updateData);
@@ -1083,9 +1409,8 @@ export const GuardianHomeScreen = () => {
             setIsEditMode(false);
             // TODO 목록 및 통계 새로고침
             if (currentElderly) {
-              await loadTodosForElderly(currentElderly.id);
-              await loadWeeklyStatsForElderly(currentElderly.id);
-              await loadMonthlyStatsForElderly(currentElderly.id);
+              await loadTodosForElderly(currentElderly.id, false, selectedDayTab);
+              await refreshStats(currentElderly.id, false);
             }
           },
         },
@@ -1120,9 +1445,12 @@ export const GuardianHomeScreen = () => {
                 setSelectedTodo(null);
                 // TODO 목록 및 통계 새로고침
                 if (currentElderly) {
-                  await loadTodosForElderly(currentElderly.id);
-                  await loadWeeklyStatsForElderly(currentElderly.id);
-                  await loadMonthlyStatsForElderly(currentElderly.id);
+                  await loadTodosForElderly(currentElderly.id, false, selectedDayTab);
+                  if (selectedPeriod === 'month') {
+                    await loadMonthlyStatsForElderly(currentElderly.id);
+                  } else if (selectedPeriod === 'last_month') {
+                    await loadLastMonthStatsForElderly(currentElderly.id);
+                  }
                 }
               } catch (error) {
                 console.error('삭제 실패:', error);
@@ -1141,9 +1469,12 @@ export const GuardianHomeScreen = () => {
                 setSelectedTodo(null);
                 // TODO 목록 및 통계 새로고침
                 if (currentElderly) {
-                  await loadTodosForElderly(currentElderly.id);
-                  await loadWeeklyStatsForElderly(currentElderly.id);
-                  await loadMonthlyStatsForElderly(currentElderly.id);
+                  await loadTodosForElderly(currentElderly.id, false, selectedDayTab);
+                  if (selectedPeriod === 'month') {
+                    await loadMonthlyStatsForElderly(currentElderly.id);
+                  } else if (selectedPeriod === 'last_month') {
+                    await loadLastMonthStatsForElderly(currentElderly.id);
+                  }
                 }
               } catch (error) {
                 console.error('삭제 실패:', error);
@@ -1174,9 +1505,12 @@ export const GuardianHomeScreen = () => {
                 setSelectedTodo(null);
                 // TODO 목록 및 통계 새로고침
                 if (currentElderly) {
-                  await loadTodosForElderly(currentElderly.id);
-                  await loadWeeklyStatsForElderly(currentElderly.id);
-                  await loadMonthlyStatsForElderly(currentElderly.id);
+                  await loadTodosForElderly(currentElderly.id, false, selectedDayTab);
+                  if (selectedPeriod === 'month') {
+                    await loadMonthlyStatsForElderly(currentElderly.id);
+                  } else if (selectedPeriod === 'last_month') {
+                    await loadLastMonthStatsForElderly(currentElderly.id);
+                  }
                 }
               } catch (error) {
                 console.error('삭제 실패:', error);
@@ -1275,9 +1609,51 @@ export const GuardianHomeScreen = () => {
 
   // 현재 날짜 정보
   const today = new Date();
-  const dateString = `${today.getMonth() + 1}월 ${today.getDate()}일`;
-  const dayNames = ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'];
-  const dayString = dayNames[today.getDay()];
+
+  // 통계 섹션으로 스크롤
+  const scrollToStats = useCallback(() => {
+    if (statsSectionY > 0 && scrollViewRef.current) {
+      scrollViewRef.current.scrollTo({ y: statsSectionY - 20, animated: true });
+    } else {
+      // 위치가 아직 측정되지 않은 경우, 약간의 지연 후 재시도
+      setTimeout(() => {
+        if (statsSectionY > 0 && scrollViewRef.current) {
+          scrollViewRef.current.scrollTo({ y: statsSectionY - 20, animated: true });
+        }
+      }, 100);
+    }
+  }, [statsSectionY]);
+
+  // 빠른 액션 버튼 설정 (보호자용)
+  const quickActions: QuickAction[] = currentElderly ? [
+    {
+      id: 'todos',
+      label: '일정 관리',
+      icon: <CheckIcon size={24} color="#34B79F" />,
+      onPress: () => router.push('/calendar'), // 캘린더에서 전체 일정 조회 및 추가/수정/삭제
+    },
+    {
+      id: 'stats',
+      label: '통계',
+      icon: 'stats-chart-outline',
+      onPress: () => scrollToStats(), // 통계 섹션으로 스크롤
+    },
+    {
+      id: 'ai-call',
+      label: 'AI 통화 설정',
+      icon: <PhoneIcon size={24} color="#34B79F" />,
+      onPress: () => {
+        // TODO: AI 통화 설정 화면으로 이동
+        show('준비중', 'AI 통화 설정 기능은 개발 중입니다.');
+      },
+    },
+    {
+      id: 'diaries',
+      label: '일기장',
+      icon: <DiaryIcon size={24} color="#34B79F" />,
+      onPress: () => router.push('/diaries'), // 어르신 일기 조회 및 인사이트
+    },
+  ] : [];
 
   return (
     <View style={styles.container}>
@@ -1287,35 +1663,9 @@ export const GuardianHomeScreen = () => {
         showMenuButton={true} 
       />
 
-      {/* 탭 네비게이션 */}
-      <View style={styles.tabNavigation}>
-        {tabs.map((tab) => (
-          <TouchableOpacity
-            key={tab.id}
-            style={[
-              styles.tabButton,
-              activeTab === tab.id && styles.tabButtonActive
-            ]}
-            onPress={() => setActiveTab(tab.id as TabType)}
-            activeOpacity={0.7}
-          >
-            <Ionicons
-              name={tab.icon as any}
-              size={24}
-              color={activeTab === tab.id ? '#34B79F' : '#999999'}
-            />
-            <Text style={[
-              styles.tabLabel,
-              activeTab === tab.id && styles.tabLabelActive
-            ]}>
-              {tab.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-          </View>
-
-      {/* 탭 컨텐츠 */}
+      {/* 메인 컨텐츠 */}
       <ScrollView 
+        ref={scrollViewRef}
         style={styles.content} 
         showsVerticalScrollIndicator={false}
         refreshControl={
@@ -1327,10 +1677,84 @@ export const GuardianHomeScreen = () => {
           />
         }
       >
-        {activeTab === 'family' && renderFamilyTab()}
-        {activeTab === 'stats' && renderStatsTab()}
-        {activeTab === 'health' && renderHealthTab()}
-        {activeTab === 'communication' && renderCommunicationTab()}
+        {/* 보호자용 공유 필터 */}
+        {currentElderly && (
+          <View style={styles.sharedFilterContainer}>
+            <TouchableOpacity
+              style={[
+                styles.sharedFilterButton,
+                showSharedOnly && styles.sharedFilterButtonActive
+              ]}
+              onPress={() => {
+                setShowSharedOnly(true);
+                // 필터 변경 시 일정 다시 로드
+                if (currentElderly) {
+                  loadTodosForElderly(currentElderly.id, false, selectedDayTab);
+                }
+              }}
+              activeOpacity={0.7}
+            >
+              <Text style={[
+                styles.sharedFilterButtonText,
+                showSharedOnly && styles.sharedFilterButtonTextActive
+              ]}>
+                공유된 일정만
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.sharedFilterButton,
+                !showSharedOnly && styles.sharedFilterButtonActive
+              ]}
+              onPress={() => {
+                setShowSharedOnly(false);
+                // 필터 변경 시 일정 다시 로드
+                if (currentElderly) {
+                  loadTodosForElderly(currentElderly.id, false, selectedDayTab);
+                }
+              }}
+              activeOpacity={0.7}
+            >
+              <Text style={[
+                styles.sharedFilterButtonText,
+                !showSharedOnly && styles.sharedFilterButtonTextActive
+              ]}>
+                전체 일정
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* 어르신 카드 섹션 */}
+        {renderFamilyTab()}
+
+        {/* 통계 섹션 */}
+        {currentElderly && (
+          <View 
+            ref={statsSectionRef}
+            style={styles.statsSection}
+            onLayout={(event) => {
+              const { y } = event.nativeEvent.layout;
+              setStatsSectionY(y);
+            }}
+          >
+            {renderStatsTab()}
+          </View>
+        )}
+
+        {/* 건강 정보 섹션 */}
+        {currentElderly && (
+          <View style={styles.healthSectionContainer}>
+            {renderHealthTab()}
+          </View>
+        )}
+
+        {/* 소통 섹션 */}
+        {currentElderly && (
+          <View style={styles.communicationSectionContainer}>
+            {renderCommunicationTab()}
+          </View>
+        )}
 
         {/* 하단 여백 (네비게이션 바 공간 확보) */}
         <View style={{ height: 20 }} />
@@ -1753,38 +2177,20 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   
-  // 탭 네비게이션
-  tabNavigation: {
-    flexDirection: 'row',
-    backgroundColor: '#FFFFFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
-    paddingHorizontal: 16,
-  },
-  tabButton: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 8,
-  },
-  tabButtonActive: {
-    borderBottomWidth: 2,
-    borderBottomColor: '#34B79F',
-  },
-  tabLabel: {
-    fontSize: 12,
-    color: '#999999',
-    fontWeight: '500',
-    marginTop: 4,
-  },
-  tabLabelActive: {
-    color: '#34B79F',
-    fontWeight: '600',
+  // 빠른 액션 버튼 컨테이너
+  quickActionsContainer: {
+    marginBottom: 20,
   },
 
-  // 탭 컨텐츠
-  tabContent: {
-    flex: 1,
+  // 섹션 스타일
+  statsSection: {
+    marginBottom: 20,
+  },
+  healthSectionContainer: {
+    marginBottom: 20,
+  },
+  communicationSectionContainer: {
+    marginBottom: 20,
   },
   sectionTitle: {
     fontSize: 20,
@@ -2114,24 +2520,85 @@ const styles = StyleSheet.create({
   todayHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 16,
+    justifyContent: 'flex-start',
+    marginBottom: 8,
+    width: '100%',
   },
   todayTitle: {
     fontSize: 18,
     fontWeight: '600',
     color: '#333333',
   },
-  dateTag: {
-    backgroundColor: '#34B79F',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
+  dayTabContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#F5F5F5',
+    borderRadius: 8,
+    padding: 4,
+    marginBottom: 0,
   },
-  dateText: {
+  dayTab: {
+    flex: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 0, // flex 아이템이 컨텐츠보다 작아질 수 있도록
+    overflow: 'hidden', // 텍스트 오버플로우 방지
+  },
+  dayTabActive: {
+    backgroundColor: '#34B79F',
+  },
+  dayTabText: {
     fontSize: 14,
-    color: '#FFFFFF',
     fontWeight: '500',
+    color: '#999999',
+    textAlign: 'center',
+    flexShrink: 1, // 텍스트가 컨테이너보다 크면 축소
+    overflow: 'hidden',
+  },
+  dayTabTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+  dateTextBelow: {
+    fontSize: 16,
+    color: '#333333',
+    fontWeight: '700',
+    marginTop: 8,
+    marginBottom: 16,
+    textAlign: 'left',
+  },
+  // 보호자용 공유 필터
+  sharedFilterContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginTop: 8,
+    marginBottom: 8,
+    gap: 8,
+  },
+  sharedFilterButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#F5F5F5',
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+  },
+  sharedFilterButtonActive: {
+    backgroundColor: '#34B79F',
+    borderColor: '#34B79F',
+  },
+  sharedFilterButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#666666',
+  },
+  sharedFilterButtonTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '600',
   },
   tasksList: {
     marginBottom: 16,
@@ -2211,6 +2678,73 @@ const styles = StyleSheet.create({
   },
   bottomSpacer: {
     height: 20,
+  },
+
+  // 어르신 화면 스타일 (scheduleCard)
+  scheduleCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 4,
+    overflow: 'hidden',
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  scheduleItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  scheduleTime: {
+    width: 60,
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  scheduleTimeText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333333',
+  },
+  scheduleContent: {
+    flex: 1,
+    marginRight: 12,
+  },
+  scheduleTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333333',
+    marginBottom: 4,
+  },
+  scheduleLocation: {
+    fontSize: 14,
+    color: '#666666',
+    marginBottom: 4,
+  },
+  scheduleDate: {
+    fontSize: 12,
+    color: '#999999',
+  },
+  scheduleStatus: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    backgroundColor: '#E0F7F4',
+  },
+  scheduleStatusText: {
+    fontSize: 12,
+    color: '#34B79F',
+    fontWeight: '500',
   },
 
   // 수정/삭제 모달 스타일
@@ -2336,6 +2870,50 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#999999',
     marginTop: 12,
+  },
+  emptyStatsCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 40,
+    marginBottom: 20,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  emptyStatsImage: {
+    width: 200,
+    height: 200,
+    marginBottom: 24,
+  },
+  emptyStatsText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333333',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  emptyStatsSubText: {
+    fontSize: 14,
+    color: '#666666',
+    marginBottom: 32,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  addTodoButton: {
+    backgroundColor: '#34B79F',
+    paddingVertical: 14,
+    paddingHorizontal: 32,
+    borderRadius: 12,
+    minWidth: 200,
+    alignItems: 'center',
+  },
+  addTodoButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
 
   // 기간 선택 카드

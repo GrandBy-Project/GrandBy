@@ -122,7 +122,76 @@ class TodoService:
                     detail=f"잘못된 시간 형식입니다: {todo_data.due_time}"
                 )
         
+        # 과거 날짜 검증
+        today = date.today()
+        if todo_data.due_date < today:
+            logger.error(f"❌ 과거 날짜로 할일 생성 시도: {todo_data.due_date} (오늘: {today})")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="과거 날짜로는 할일을 생성할 수 없습니다. 오늘 또는 미래 날짜를 선택해주세요."
+            )
+        
+        logger.info(f"✅ 날짜 검증 통과: {todo_data.due_date} (오늘: {today})")
+        
+        # 데이터 일관성 검증
+        # 반복 일정인 경우 필요한 필드 검증
+        if todo_data.is_recurring:
+            if not todo_data.recurring_type:
+                logger.error(f"❌ 반복 일정인데 recurring_type이 없음")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="반복 일정인 경우 반복 유형을 지정해야 합니다."
+                )
+            
+            if todo_data.recurring_type == RecurringType.WEEKLY:
+                if not todo_data.recurring_days or len(todo_data.recurring_days) == 0:
+                    logger.error(f"❌ 주간 반복인데 recurring_days가 없음")
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="주간 반복 일정인 경우 반복 요일을 지정해야 합니다."
+                    )
+            
+            if todo_data.recurring_type == RecurringType.MONTHLY:
+                if not todo_data.recurring_day_of_month:
+                    logger.error(f"❌ 월간 반복인데 recurring_day_of_month가 없음")
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="월간 반복 일정인 경우 반복 날짜를 지정해야 합니다."
+                    )
+        else:
+            # 반복 일정이 아닌데 반복 관련 필드가 있으면 경고 (무시)
+            if todo_data.recurring_type or todo_data.recurring_days or todo_data.recurring_day_of_month:
+                logger.warning(f"⚠️ 반복 일정이 아닌데 반복 관련 필드가 있음 (무시됨)")
+        
         # TODO 생성
+        logger.info(f"🔨 TODO 객체 생성 시작")
+        logger.info(f"   - is_recurring 값: {todo_data.is_recurring} (타입: {type(todo_data.is_recurring)})")
+        logger.info(f"   - is_shared_with_caregiver 값: {todo_data.is_shared_with_caregiver} (타입: {type(todo_data.is_shared_with_caregiver)})")
+        
+        # 출처별 공유 기본값 설정
+        # - 보호자 할당: 항상 공유 (True)
+        # - AI 추출: 기본 비공유 (False), 사용자가 선택 가능
+        # - 어르신 직접 등록: 기본 비공유 (False), 사용자가 선택 가능
+        if creator_type_value == CreatorType.CAREGIVER:
+            # 보호자가 할당한 TODO는 항상 공유
+            final_shared_status = True
+            logger.info(f"   - 보호자 할당 TODO: 항상 공유 (True)")
+        else:
+            # AI 추출 또는 어르신 직접 등록: 사용자가 명시적으로 전달한 값 사용
+            # (스키마 기본값이 True이므로, False로 명시적으로 전달해야 함)
+            final_shared_status = todo_data.is_shared_with_caregiver
+            logger.info(f"   - {creator_type_value.value} 생성 TODO: 공유 상태 = {final_shared_status}")
+        
+        # 반복 일정 템플릿의 경우, due_date는 항상 recurring_start_date와 같아야 함
+        # 템플릿은 시작일에 생성되어야 하고, 이후 날짜의 개별 TODO는 Celery Beat가 생성
+        recurring_start_date = todo_data.recurring_start_date or todo_data.due_date
+        template_due_date = recurring_start_date if todo_data.is_recurring else todo_data.due_date
+        
+        logger.info(f"   - 반복 일정 여부: {todo_data.is_recurring}")
+        logger.info(f"   - 사용자 선택 날짜 (due_date): {todo_data.due_date}")
+        logger.info(f"   - 반복 시작일 (recurring_start_date): {recurring_start_date}")
+        logger.info(f"   - 템플릿 due_date: {template_due_date}")
+        
         new_todo = Todo(
             todo_id=str(uuid.uuid4()),
             elderly_id=todo_data.elderly_id,
@@ -130,26 +199,126 @@ class TodoService:
             title=todo_data.title,
             description=todo_data.description,
             category=todo_data.category,
-            due_date=todo_data.due_date,
+            due_date=template_due_date,  # 반복 일정 템플릿은 시작일에 생성
             due_time=due_time_obj,  # 변환된 time 객체 사용
             creator_type=creator_type_value,  # 동적으로 설정된 creator_type 사용
             status=TodoStatus.PENDING,
             is_confirmed=True,
-            # 공유 설정
-            is_shared_with_caregiver=todo_data.is_shared_with_caregiver,
+            # 공유 설정 (출처별 기본값 적용)
+            is_shared_with_caregiver=final_shared_status,
             # 반복 일정 설정
             is_recurring=todo_data.is_recurring,
             recurring_type=todo_data.recurring_type,
             recurring_interval=todo_data.recurring_interval,
             recurring_days=todo_data.recurring_days,
             recurring_day_of_month=todo_data.recurring_day_of_month,
-            recurring_start_date=todo_data.recurring_start_date or todo_data.due_date,
+            recurring_start_date=recurring_start_date,
             recurring_end_date=todo_data.recurring_end_date,
         )
         
+        logger.info(f"🔨 TODO 객체 생성 완료")
+        logger.info(f"   - 생성된 객체의 is_recurring: {new_todo.is_recurring}")
+        logger.info(f"   - 생성된 객체의 is_shared_with_caregiver: {new_todo.is_shared_with_caregiver}")
+        
         db.add(new_todo)
+        logger.info(f"💾 DB에 추가 완료, commit 전")
+        
         db.commit()
+        logger.info(f"💾 DB commit 완료")
+        
         db.refresh(new_todo)
+        logger.info(f"🔄 DB refresh 완료")
+        logger.info(f"   - refresh 후 is_recurring: {new_todo.is_recurring}")
+        logger.info(f"   - refresh 후 is_shared_with_caregiver: {new_todo.is_shared_with_caregiver}")
+        logger.info(f"   - refresh 후 due_date: {new_todo.due_date}")
+        
+        # DB에서 직접 다시 조회해서 확인
+        verify_todo = db.query(Todo).filter(Todo.todo_id == new_todo.todo_id).first()
+        if verify_todo:
+            logger.info(f"✅ DB에서 직접 조회 성공:")
+            logger.info(f"   - 제목: {verify_todo.title}")
+            logger.info(f"   - is_recurring: {verify_todo.is_recurring} (타입: {type(verify_todo.is_recurring)})")
+            logger.info(f"   - is_shared_with_caregiver: {verify_todo.is_shared_with_caregiver}")
+            logger.info(f"   - due_date: {verify_todo.due_date}")
+        else:
+            logger.error(f"❌ DB에서 직접 조회 실패! TODO ID: {new_todo.todo_id}")
+        
+        # 반복 일정인 경우, 오늘 날짜와 사용자가 선택한 날짜가 반복 조건에 맞으면 즉시 개별 TODO 생성
+        if new_todo.is_recurring:
+            today = date.today()
+            user_selected_date = todo_data.due_date  # 사용자가 선택한 날짜 (템플릿의 due_date와 다를 수 있음)
+            start_date = new_todo.recurring_start_date or new_todo.due_date
+            
+            created_today = False
+            created_selected = False
+            
+            # 오늘 날짜가 반복 조건에 맞으면 생성
+            if today >= start_date:
+                should_create_today = TodoService._should_create_recurring_todo(new_todo, today)
+                if should_create_today:
+                    existing_today = db.query(Todo).filter(
+                        and_(
+                            Todo.parent_recurring_id == new_todo.todo_id,
+                            Todo.due_date == today
+                        )
+                    ).first()
+                    
+                    if not existing_today:
+                        today_todo = Todo(
+                            todo_id=str(uuid.uuid4()),
+                            elderly_id=new_todo.elderly_id,
+                            creator_id=new_todo.creator_id,
+                            title=new_todo.title,
+                            description=new_todo.description,
+                            category=new_todo.category,
+                            due_date=today,
+                            due_time=new_todo.due_time,
+                            creator_type=new_todo.creator_type,
+                            status=TodoStatus.PENDING,
+                            is_confirmed=True,
+                            is_recurring=False,
+                            parent_recurring_id=new_todo.todo_id,
+                            is_shared_with_caregiver=new_todo.is_shared_with_caregiver,
+                        )
+                        db.add(today_todo)
+                        created_today = True
+                        logger.info(f"✅ 반복 일정 생성 시 오늘 날짜({today})의 개별 TODO 즉시 생성됨")
+            
+            # 사용자가 선택한 날짜가 오늘 이후이고 반복 조건에 맞으면 생성
+            if user_selected_date > today and user_selected_date >= start_date:
+                should_create_selected = TodoService._should_create_recurring_todo(new_todo, user_selected_date)
+                if should_create_selected:
+                    existing_selected = db.query(Todo).filter(
+                        and_(
+                            Todo.parent_recurring_id == new_todo.todo_id,
+                            Todo.due_date == user_selected_date
+                        )
+                    ).first()
+                    
+                    if not existing_selected:
+                        selected_todo = Todo(
+                            todo_id=str(uuid.uuid4()),
+                            elderly_id=new_todo.elderly_id,
+                            creator_id=new_todo.creator_id,
+                            title=new_todo.title,
+                            description=new_todo.description,
+                            category=new_todo.category,
+                            due_date=user_selected_date,
+                            due_time=new_todo.due_time,
+                            creator_type=new_todo.creator_type,
+                            status=TodoStatus.PENDING,
+                            is_confirmed=True,
+                            is_recurring=False,
+                            parent_recurring_id=new_todo.todo_id,
+                            is_shared_with_caregiver=new_todo.is_shared_with_caregiver,
+                        )
+                        db.add(selected_todo)
+                        created_selected = True
+                        logger.info(f"✅ 반복 일정 생성 시 선택한 날짜({user_selected_date})의 개별 TODO 즉시 생성됨")
+            
+            # 변경사항이 있으면 commit
+            if created_today or created_selected:
+                db.commit()
         
         # TODO: 알림 전송 (나중에 구현)
         # NotificationService.send_todo_assigned(elderly_id, new_todo)
@@ -165,33 +334,137 @@ class TodoService:
         shared_only: bool = False
     ) -> List[Todo]:
         """
-        날짜별 TODO 조회
-        
+        날짜별 TODO 조회 (반복 일정 자동 생성 포함)
+
         Args:
             db: DB 세션
             elderly_id: 어르신 ID
             target_date: 조회할 날짜
             status_filter: 상태 필터 (optional)
             shared_only: 공유된 TODO만 (optional)
-        
+
         Returns:
             TODO 목록
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        logger.info(f"🔍 get_todos_by_date 호출:")
+        logger.info(f"   - elderly_id: {elderly_id}")
+        logger.info(f"   - target_date: {target_date}")
+        logger.info(f"   - status_filter: {status_filter}")
+        logger.info(f"   - shared_only: {shared_only}")
+        
+        # 조회 전에 해당 날짜에 대해 반복 일정 템플릿에서 개별 TODO 생성
+        # 사용자가 설정한 반복 일정(매일/매주/매월)이 해당 날짜에 맞으면 자동 생성
+        recurring_templates = db.query(Todo).filter(
+            and_(
+                Todo.elderly_id == elderly_id,
+                Todo.is_recurring == True,
+                Todo.parent_recurring_id.is_(None),  # 템플릿만
+                or_(
+                    Todo.recurring_end_date.is_(None),  # 종료일 없음
+                    Todo.recurring_end_date >= target_date  # 종료일이 조회 날짜 이후
+                )
+            )
+        ).all()
+        
+        if recurring_templates:
+            # 해당 날짜에 이미 생성된 TODO 조회 (배치 처리)
+            existing_todos = db.query(Todo).filter(
+                and_(
+                    Todo.elderly_id == elderly_id,
+                    Todo.parent_recurring_id.in_([t.todo_id for t in recurring_templates]),
+                    Todo.due_date == target_date
+                )
+            ).all()
+            
+            # existing 체크를 위한 Set 생성 (빠른 조회)
+            existing_set = {(t.parent_recurring_id, t.due_date) for t in existing_todos}
+            
+            # 해당 날짜에 개별 TODO 생성
+            todos_to_create = []
+            for template in recurring_templates:
+                # 시작일 체크
+                template_start_date = template.recurring_start_date or template.due_date
+                if target_date < template_start_date:
+                    continue  # 시작일 이전이면 생성 안 함
+                
+                # 종료일 체크
+                if template.recurring_end_date and target_date > template.recurring_end_date:
+                    continue  # 종료일 이후면 생성 안 함
+                
+                # 이미 생성된 TODO가 있는지 확인 (Set 조회로 빠르게)
+                if (template.todo_id, target_date) in existing_set:
+                    continue  # 이미 생성됨
+                
+                # 반복 조건 확인 (해당 날짜에 생성되어야 하는지)
+                should_create = TodoService._should_create_recurring_todo(template, target_date)
+                
+                if should_create:
+                    # 개별 TODO 생성
+                    new_todo = Todo(
+                        todo_id=str(uuid.uuid4()),
+                        elderly_id=template.elderly_id,
+                        creator_id=template.creator_id,
+                        title=template.title,
+                        description=template.description,
+                        category=template.category,
+                        due_date=target_date,
+                        due_time=template.due_time,
+                        creator_type=template.creator_type,
+                        status=TodoStatus.PENDING,
+                        is_confirmed=True,
+                        is_recurring=False,  # 생성된 TODO는 반복 아님
+                        parent_recurring_id=template.todo_id,  # 원본 템플릿 ID
+                        is_shared_with_caregiver=template.is_shared_with_caregiver,
+                    )
+                    todos_to_create.append(new_todo)
+                    logger.info(f"   ✅ 반복 일정 자동 생성: {template.title} ({target_date})")
+            
+            # 생성할 TODO들이 있으면 한 번에 추가
+            if todos_to_create:
+                db.add_all(todos_to_create)
+                db.commit()
+        
+        # 반복 일정 템플릿 제외 (is_recurring=True이고 parent_recurring_id=NULL인 것은 템플릿)
+        # 실제 할일만 조회: is_recurring=False이거나, 생성된 개별 TODO (parent_recurring_id가 있음)
         query = db.query(Todo).filter(
             and_(
                 Todo.elderly_id == elderly_id,
-                Todo.due_date == target_date
+                Todo.due_date == target_date,
+                # 반복 일정 템플릿 제외
+                or_(
+                    Todo.is_recurring == False,
+                    Todo.is_recurring.is_(None),
+                    Todo.parent_recurring_id.isnot(None)  # 생성된 개별 TODO (원본 템플릿이 아님)
+                )
             )
         )
         
         # 공유 필터 (보호자용)
         if shared_only:
+            logger.info(f"   - 공유 필터 적용: is_shared_with_caregiver == True")
             query = query.filter(Todo.is_shared_with_caregiver == True)
         
         if status_filter:
+            logger.info(f"   - 상태 필터 적용: {status_filter}")
             query = query.filter(Todo.status == status_filter)
         
-        return query.order_by(Todo.status.asc(), Todo.due_time.asc()).all()
+        # 쿼리 실행 전 전체 할일 개수 확인
+        all_todos_count = db.query(Todo).filter(
+            Todo.elderly_id == elderly_id,
+            Todo.due_date == target_date
+        ).count()
+        logger.info(f"   - 필터 전 전체 할일 개수: {all_todos_count}개")
+        
+        result = query.order_by(Todo.status.asc(), Todo.due_time.asc()).all()
+        logger.info(f"   - 최종 조회 결과: {len(result)}개")
+        
+        for todo in result:
+            logger.info(f"      - {todo.title} (is_recurring={todo.is_recurring}, is_shared={todo.is_shared_with_caregiver})")
+        
+        return result
     
     @staticmethod
     def get_todos_by_date_range(
@@ -216,11 +489,111 @@ class TodoService:
         Returns:
             TODO 목록
         """
+        # 조회 전에 범위 내 모든 날짜에 대해 반복 일정 템플릿에서 개별 TODO 생성
+        # 사용자가 설정한 반복 일정(매일/매주/매월)이 해당 날짜에 맞으면 자동 생성
+        # 성능 최적화: 템플릿을 한 번만 조회하고, existing 체크를 배치로 처리
+        
+        # 범위가 너무 넓으면 성능 저하 (7일 이상이면 제한)
+        days_diff = (end_date - start_date).days
+        if days_diff > 7:
+            # 범위가 넓으면 최근 7일만 생성 (나머지는 Celery Beat가 처리)
+            effective_end_date = start_date + timedelta(days=7)
+        else:
+            effective_end_date = end_date
+        
+        recurring_templates = db.query(Todo).filter(
+            and_(
+                Todo.elderly_id == elderly_id,
+                Todo.is_recurring == True,
+                Todo.parent_recurring_id.is_(None),  # 템플릿만
+                or_(
+                    Todo.recurring_end_date.is_(None),  # 종료일 없음
+                    Todo.recurring_end_date >= start_date  # 종료일이 범위 시작일 이후
+                )
+            )
+        ).all()
+        
+        if not recurring_templates:
+            # 템플릿이 없으면 바로 조회
+            pass
+        else:
+            # 범위 내 날짜에 이미 생성된 TODO를 한 번에 조회 (배치 처리)
+            existing_todos = db.query(Todo).filter(
+                and_(
+                    Todo.elderly_id == elderly_id,
+                    Todo.parent_recurring_id.in_([t.todo_id for t in recurring_templates]),
+                    Todo.due_date >= start_date,
+                    Todo.due_date <= effective_end_date
+                )
+            ).all()
+            
+            # existing 체크를 위한 Set 생성 (빠른 조회)
+            existing_set = {(t.parent_recurring_id, t.due_date) for t in existing_todos}
+            
+            # 범위 내 모든 날짜에 대해 개별 TODO 생성
+            current_date = start_date
+            todos_to_create = []
+            
+            while current_date <= effective_end_date:
+                for template in recurring_templates:
+                    # 시작일 체크
+                    template_start_date = template.recurring_start_date or template.due_date
+                    if current_date < template_start_date:
+                        continue  # 시작일 이전이면 생성 안 함
+                    
+                    # 종료일 체크
+                    if template.recurring_end_date and current_date > template.recurring_end_date:
+                        continue  # 종료일 이후면 생성 안 함
+                    
+                    # 이미 생성된 TODO가 있는지 확인 (Set 조회로 빠르게)
+                    if (template.todo_id, current_date) in existing_set:
+                        continue  # 이미 생성됨
+                    
+                    # 반복 조건 확인 (해당 날짜에 생성되어야 하는지)
+                    should_create = TodoService._should_create_recurring_todo(template, current_date)
+                    
+                    if should_create:
+                        # 개별 TODO 생성
+                        new_todo = Todo(
+                            todo_id=str(uuid.uuid4()),
+                            elderly_id=template.elderly_id,
+                            creator_id=template.creator_id,
+                            title=template.title,
+                            description=template.description,
+                            category=template.category,
+                            due_date=current_date,
+                            due_time=template.due_time,
+                            creator_type=template.creator_type,
+                            status=TodoStatus.PENDING,
+                            is_confirmed=True,
+                            is_recurring=False,  # 생성된 TODO는 반복 아님
+                            parent_recurring_id=template.todo_id,  # 원본 템플릿 ID
+                            is_shared_with_caregiver=template.is_shared_with_caregiver,
+                        )
+                        todos_to_create.append(new_todo)
+                        # existing_set에 추가하여 중복 방지
+                        existing_set.add((template.todo_id, current_date))
+                
+                current_date += timedelta(days=1)
+            
+            # 생성할 TODO들이 있으면 한 번에 추가
+            if todos_to_create:
+                db.add_all(todos_to_create)
+                db.commit()
+        
+        # 반복 일정 템플릿 제외 (is_recurring=True이고 parent_recurring_id=NULL인 것은 템플릿)
+        # 실제 할일만 조회: is_recurring=False이거나, 생성된 개별 TODO (parent_recurring_id가 있음)
         query = db.query(Todo).filter(
             and_(
                 Todo.elderly_id == elderly_id,
                 Todo.due_date >= start_date,
-                Todo.due_date <= end_date
+                Todo.due_date <= end_date,
+                # 반복 일정 템플릿 제외
+                or_(
+                    Todo.is_recurring == False,
+                    Todo.is_recurring.is_(None),
+                    Todo.parent_recurring_id.isnot(None)  # 생성된 개별 TODO (원본 템플릿이 아님)
+                )
             )
         )
         
@@ -411,18 +784,16 @@ class TodoService:
         
         deleted_count = 1
         
-        # 반복 일정인 경우
-        if todo.parent_recurring_id or todo.is_recurring:
-            parent_id = todo.parent_recurring_id or todo.todo_id
+        # 생성된 개별 반복 일정인 경우 (parent_recurring_id가 있음)
+        if todo.parent_recurring_id:
+            # 생성된 개별 TODO 삭제
+            parent_template_id = todo.parent_recurring_id
             
             if delete_future:
-                # 이후 모든 반복 일정 삭제
+                # 이후 모든 생성된 개별 TODO 삭제 (원본 템플릿은 유지)
                 future_todos = db.query(Todo).filter(
                     and_(
-                        or_(
-                            Todo.parent_recurring_id == parent_id,
-                            Todo.todo_id == parent_id
-                        ),
+                        Todo.parent_recurring_id == parent_template_id,
                         Todo.due_date >= todo.due_date
                     )
                 ).all()
@@ -433,8 +804,41 @@ class TodoService:
             else:
                 # 오늘 것만 삭제
                 db.delete(todo)
+        
+        # 원본 반복 일정 템플릿인 경우 (is_recurring=True이고 parent_recurring_id=NULL)
+        elif todo.is_recurring:
+            if delete_future:
+                # 원본 템플릿과 모든 생성된 개별 TODO 삭제
+                # 1. 원본 템플릿 삭제
+                db.delete(todo)
+                
+                # 2. 이 템플릿에서 생성된 모든 개별 TODO 삭제
+                generated_todos = db.query(Todo).filter(
+                    Todo.parent_recurring_id == todo.todo_id
+                ).all()
+                
+                deleted_count = 1 + len(generated_todos)
+                for generated_todo in generated_todos:
+                    db.delete(generated_todo)
+            else:
+                # 원본 템플릿은 오늘 이후의 생성된 TODO만 삭제
+                # (오늘 이전의 생성된 TODO는 유지, 템플릿은 유지)
+                future_generated_todos = db.query(Todo).filter(
+                    and_(
+                        Todo.parent_recurring_id == todo.todo_id,
+                        Todo.due_date >= date.today()
+                    )
+                ).all()
+                
+                deleted_count = len(future_generated_todos)
+                for future_todo in future_generated_todos:
+                    db.delete(future_todo)
+                
+                # 원본 템플릿은 유지 (삭제 안 함)
+                deleted_count = len(future_generated_todos)
+        
         else:
-            # 일반 TODO 삭제
+            # 일반 TODO 삭제 (반복 일정 아님)
             db.delete(todo)
         
         db.commit()
@@ -463,11 +867,18 @@ class TodoService:
         Returns:
             TODO 통계
         """
+        # 반복 일정 템플릿 제외하고 실제 할일만 조회
         todos = db.query(Todo).filter(
             and_(
                 Todo.elderly_id == elderly_id,
                 Todo.due_date >= start_date,
-                Todo.due_date <= end_date
+                Todo.due_date <= end_date,
+                # 반복 일정 템플릿 제외
+                or_(
+                    Todo.is_recurring == False,
+                    Todo.is_recurring.is_(None),
+                    Todo.parent_recurring_id.isnot(None)  # 생성된 개별 TODO (원본 템플릿이 아님)
+                )
             )
         ).all()
         
@@ -507,12 +918,18 @@ class TodoService:
         """
         from app.models.todo import TodoCategory
         
-        # 전체 TODO 조회
+        # 전체 TODO 조회 (반복 일정 템플릿 제외)
         todos = db.query(Todo).filter(
             and_(
                 Todo.elderly_id == elderly_id,
                 Todo.due_date >= start_date,
-                Todo.due_date <= end_date
+                Todo.due_date <= end_date,
+                # 반복 일정 템플릿 제외
+                or_(
+                    Todo.is_recurring == False,
+                    Todo.is_recurring.is_(None),
+                    Todo.parent_recurring_id.isnot(None)  # 생성된 개별 TODO (원본 템플릿이 아님)
+                )
             )
         ).all()
         
@@ -615,6 +1032,7 @@ class TodoService:
                     is_confirmed=True,
                     is_recurring=False,  # 생성된 TODO는 반복 아님
                     parent_recurring_id=recurring_todo.todo_id,  # 원본 ID 연결
+                    is_shared_with_caregiver=recurring_todo.is_shared_with_caregiver,  # 공유 설정 복사
                 )
                 
                 db.add(new_todo)
@@ -647,7 +1065,10 @@ class TodoService:
         # 반복 유형별 로직
         if todo.recurring_type == RecurringType.DAILY:
             # 매일 또는 N일마다
-            days_diff = (target_date - todo.recurring_start_date).days
+            start_date = todo.recurring_start_date or todo.due_date  # None이면 due_date 사용
+            days_diff = (target_date - start_date).days
+            if days_diff < 0:
+                return False  # 시작일 이전이면 생성 안 함
             return days_diff % todo.recurring_interval == 0
         
         elif todo.recurring_type == RecurringType.WEEKLY:
