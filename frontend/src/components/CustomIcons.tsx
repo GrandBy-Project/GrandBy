@@ -15,6 +15,7 @@ export const CheckIcon = ({ size = 24, color = '#34B79F' }: { size?: number; col
       borderColor: color,
       alignItems: 'center',
       justifyContent: 'center',
+      transform: [{ scaleX: -1 }]
     }}>
       <View style={{
         width: size * 0.3,

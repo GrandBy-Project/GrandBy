@@ -770,6 +770,7 @@ export const DiaryListScreen = () => {
             <DiaryInsights
               month={month}
               diaries={monthlyDiaries}
+              allDiaries={allDiaries}
               onInsightPress={handleInsightPress}
               onMonthChange={setMonth}
               availableMonths={availableMonths}

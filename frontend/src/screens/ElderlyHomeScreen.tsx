@@ -594,8 +594,17 @@ export const ElderlyHomeScreen = () => {
               <View style={styles.reminderContent}>
                 <PillIcon size={fontSizeLevel >= 1 ? 20 : 16} color="#FFFFFF" />
                 <Text style={[styles.reminderText, fontSizeLevel >= 1 && styles.reminderTextLarge, fontSizeLevel >= 2 && { fontSize: 18 }]}>
-                  {upcomingTodo.due_time ? upcomingTodo.due_time.substring(0, 5) : '시간미정'}에 {upcomingTodo.title}
-                  {upcomingTodo.category && ` (${getCategoryName(upcomingTodo.category)})`}
+                  {upcomingTodo.due_time ? (
+                    <>
+                      {upcomingTodo.due_time.substring(0, 5)}에 {upcomingTodo.title}
+                      {upcomingTodo.category && ` (${getCategoryName(upcomingTodo.category)})`}
+                    </>
+                  ) : (
+                    <>
+                      <Text style={[fontSizeLevel >= 1 ? styles.reminderTimeTextSmallLarge : styles.reminderTimeTextSmall]}>시간미정</Text>에 {upcomingTodo.title}
+                      {upcomingTodo.category && ` (${getCategoryName(upcomingTodo.category)})`}
+                    </>
+                  )}
                 </Text>
               </View>
             ) : (
@@ -734,7 +743,11 @@ export const ElderlyHomeScreen = () => {
                     activeOpacity={0.7}
                   >
                     <View style={styles.scheduleTime}>
-                      <Text style={[styles.scheduleTimeText, fontSizeLevel >= 1 && styles.scheduleTimeTextLarge]}>
+                      <Text style={[
+                        styles.scheduleTimeText, 
+                        fontSizeLevel >= 1 && styles.scheduleTimeTextLarge,
+                        !todo.due_time && (fontSizeLevel >= 1 ? styles.scheduleTimeTextSmallLarge : styles.scheduleTimeTextSmall)
+                      ]}>
                         {todo.due_time ? todo.due_time.substring(0, 5) : '시간미정'}
                       </Text>
                     </View>
@@ -804,7 +817,12 @@ export const ElderlyHomeScreen = () => {
                     activeOpacity={0.7}
                   >
                     <View style={styles.scheduleTime}>
-                      <Text style={[styles.scheduleTimeText, styles.completedTimeText, fontSizeLevel >= 1 && styles.scheduleTimeTextLarge]}>
+                      <Text style={[
+                        styles.scheduleTimeText, 
+                        styles.completedTimeText, 
+                        fontSizeLevel >= 1 && styles.scheduleTimeTextLarge,
+                        !todo.due_time && (fontSizeLevel >= 1 ? styles.scheduleTimeTextSmallLarge : styles.scheduleTimeTextSmall)
+                      ]}>
                         {todo.due_time ? todo.due_time.substring(0, 5) : '시간미정'}
                       </Text>
                     </View>

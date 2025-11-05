@@ -62,13 +62,49 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
     - **name**: 이름
     - **role**: elderly (어르신) 또는 caregiver (보호자)
     """
+    # 전화번호를 국제 형식으로 변환 (중복 체크를 위해 먼저 정규화)
+    normalized_phone = None
+    if user_data.phone_number:
+        normalized_phone = normalize_phone_number(user_data.phone_number)
+    
     # 이메일 중복 체크
     existing_user = db.query(User).filter(User.email == user_data.email).first()
     if existing_user:
+        # 비활성화된 계정인지 확인
+        if not existing_user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="INACTIVE_EMAIL:이 이메일은 비활성화된 계정에 사용 중입니다. 계정 복구를 원하시면 고객센터로 문의해주세요."
+            )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="이미 등록된 이메일입니다."
         )
+    
+    # 전화번호 중복 체크 (전화번호가 제공된 경우)
+    if normalized_phone:
+        # 전화번호에서 숫자만 추출 (정규화된 형식과 다양한 형식 모두 비교)
+        phone_digits = ''.join(filter(str.isdigit, normalized_phone))
+        
+        # 모든 사용자의 전화번호와 숫자만 비교
+        all_users = db.query(User).filter(
+            User.phone_number.isnot(None)
+        ).all()
+        
+        for user in all_users:
+            if user.phone_number:
+                existing_phone_digits = ''.join(filter(str.isdigit, user.phone_number))
+                if existing_phone_digits == phone_digits:
+                    # 비활성화된 계정인지 확인
+                    if not user.is_active:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="INACTIVE_PHONE:이 전화번호는 비활성화된 계정에 사용 중입니다. 계정 복구를 원하시면 고객센터로 문의해주세요."
+                        )
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="이미 등록된 전화번호입니다."
+                    )
     
     # 비밀번호 길이 체크 및 해싱 (bcrypt는 72바이트 제한)
     password_bytes = user_data.password.encode('utf-8')
@@ -79,9 +115,6 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
     
     hashed_password = pwd_context.hash(password_to_hash)
     
-    # 전화번호를 국제 형식으로 변환
-    normalized_phone = normalize_phone_number(user_data.phone_number)
-    
     # 사용자 생성
     new_user = User(
         user_id=str(uuid.uuid4()),
@@ -89,7 +122,7 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
         password_hash=hashed_password,
         name=user_data.name,
         role=user_data.role,
-        phone_number=user_data.phone_number,
+        phone_number=normalized_phone if normalized_phone else user_data.phone_number,
         birth_date=user_data.birth_date,
         gender=user_data.gender,
         auth_provider=user_data.auth_provider,
@@ -164,10 +197,10 @@ async def login(user_data: UserLogin, db: Session = Depends(get_db)):
             
             # 10회 실패 시 15분 잠금
             if attempt_data["attempts"] >= 10:
-                attempt_data["locked_until"] = datetime.utcnow() + timedelta(minutes=15)
+                attempt_data["locked_until"] = datetime.utcnow() + timedelta(minutes=1)
                 raise HTTPException(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                    detail="로그인 시도 횟수를 초과했습니다. 15분 후 다시 시도해주세요."
+                    detail="로그인 시도 횟수를 초과했습니다. 1분 후 다시 시도해주세요."
                 )
         
         raise HTTPException(
@@ -338,6 +371,12 @@ async def check_email_availability(
     existing_user = db.query(User).filter(User.email == email).first()
     
     if existing_user:
+        # 비활성화된 계정인지 확인
+        if not existing_user.is_active:
+            return {
+                "available": False,
+                "message": "INACTIVE_EMAIL:이 이메일은 비활성화된 계정에 사용 중입니다. 계정 복구를 원하시면 고객센터로 문의해주세요."
+            }
         return {
             "available": False,
             "message": "이미 사용 중인 이메일입니다."
@@ -385,6 +424,12 @@ async def send_verification_code(
     # 이메일 중복 확인
     existing_user = db.query(User).filter(User.email == request.email).first()
     if existing_user:
+        # 비활성화된 계정인지 확인
+        if not existing_user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="INACTIVE_EMAIL:이 이메일은 비활성화된 계정에 사용 중입니다. 계정 복구를 원하시면 고객센터로 문의해주세요."
+            )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="이미 등록된 이메일입니다."
@@ -508,8 +553,7 @@ async def find_email(
         and_(
             User.name == request.name,
             User.phone_number == phone,
-            User.is_active == True,
-            User.deleted_at == None
+            User.is_active == True
         )
     ).first()
     
@@ -566,8 +610,7 @@ async def reset_password_request(
     user = db.query(User).filter(
         and_(
             User.email == request.email,
-            User.is_active == True,
-            User.deleted_at == None
+            User.is_active == True
         )
     ).first()
     
