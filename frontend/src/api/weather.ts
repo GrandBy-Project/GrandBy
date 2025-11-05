@@ -54,6 +54,7 @@ export interface WeatherData {
   location?: string; // 시/구 수준 위치
   cityName?: string; // 도시 이름
   countryCode?: string; // 국가 코드
+  hasPermission?: boolean; // 위치 권한 여부
 }
 
 /**
@@ -61,7 +62,7 @@ export interface WeatherData {
  * - 실제 기기: GPS 사용
  * - Emulator: Mock 좌표 사용
  */
-export const getLocation = async (): Promise<{ latitude: number; longitude: number } | null> => {
+export const getLocation = async (): Promise<{ latitude: number; longitude: number; hasPermission: boolean } | null> => {
   try {
     // 개발 환경(Emulator)에서는 Mock 좌표 사용
     if (USE_MOCK_LOCATION) {
@@ -69,37 +70,68 @@ export const getLocation = async (): Promise<{ latitude: number; longitude: numb
       return {
         latitude: 37.5665,
         longitude: 126.9780,
+        hasPermission: true, // Emulator에서는 권한 있음으로 처리
       };
     }
 
-    // 1. 위치 권한 요청
-    const { status } = await Location.requestForegroundPermissionsAsync();
+    // 1. 위치 권한 확인
+    const { status } = await Location.getForegroundPermissionsAsync();
+    console.log(`🔐 현재 위치 권한 상태: ${status}`);
     
+    // 권한이 없으면 요청
     if (status !== 'granted') {
-      console.log('⚠️ 위치 권한 거부');
-      return null;
+      console.log('🔐 위치 권한 요청 중...');
+      const requestResult = await Location.requestForegroundPermissionsAsync();
+      if (requestResult.status !== 'granted') {
+        console.log('⚠️ 위치 권한 거부됨');
+        console.log('📍 Fallback 좌표 사용: 서울 시청');
+        return {
+          latitude: 37.5665,
+          longitude: 126.9780,
+          hasPermission: false,
+        };
+      }
+      console.log('✅ 위치 권한 허용됨');
+    } else {
+      console.log('✅ 위치 권한 이미 허용됨');
     }
     
     // 2. 현재 위치 가져오기 (타임아웃 10초)
-    const location = await Promise.race([
-      Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced, // 배터리 효율적
-      }),
-      new Promise<never>((_, reject) => 
-        setTimeout(() => {
-          console.log('⏱️ GPS 타임아웃 (10초 초과)');
-          reject(new Error('GPS timeout after 10 seconds'));
-        }, 10000)
-      )
-    ]);
+    try {
+      const location = await Promise.race([
+        Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced, // 배터리 효율적
+        }),
+        new Promise<never>((_, reject) => 
+          setTimeout(() => {
+            console.log('⏱️ GPS 타임아웃 (10초 초과)');
+            reject(new Error('GPS timeout after 10 seconds'));
+          }, 10000)
+        )
+      ]);
 
-    const { latitude, longitude } = location.coords;
-    console.log(`📍 GPS 좌표: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
+      const { latitude, longitude } = location.coords;
+      console.log(`📍 GPS 좌표: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
 
-    return { latitude, longitude };
+      return { latitude, longitude, hasPermission: true };
+    } catch (timeoutError) {
+      // GPS 타임아웃 시 fallback 좌표 사용 (권한은 있지만 GPS 실패)
+      console.log('⚠️ GPS 타임아웃, 서울 시청 좌표 사용 (Fallback)');
+      return {
+        latitude: 37.5665,
+        longitude: 126.9780,
+        hasPermission: true, // 권한은 있지만 GPS 실패
+      };
+    }
   } catch (error: any) {
     console.error('❌ GPS 오류:', error.message || error);
-    return null;
+    // GPS 오류 시 fallback 좌표 사용
+    console.log('⚠️ GPS 오류, 서울 시청 좌표 사용 (Fallback)');
+    return {
+      latitude: 37.5665,
+      longitude: 126.9780,
+      hasPermission: false, // 오류 발생 시 권한 없음으로 간주
+    };
   }
 };
 
@@ -272,6 +304,8 @@ export const getLocationBasedWeather = async (): Promise<WeatherData | null> => 
 
     // 2. 날씨 정보 가져오기
     const weather = await getCurrentWeather(location.latitude, location.longitude);
+    // 위치 권한 정보 추가
+    weather.hasPermission = location.hasPermission;
     return weather;
   } catch (error) {
     console.error('❌ 위치 기반 날씨 로딩 실패:', error);

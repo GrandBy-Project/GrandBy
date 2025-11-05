@@ -2,7 +2,7 @@
  * 공통 입력 필드 컴포넌트
  */
 import React, { useState, forwardRef } from 'react';
-import { View, TextInput, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, TextInput, Text, StyleSheet, TouchableOpacity, TextStyle } from 'react-native';
 import { Colors } from '../constants/Colors';
 
 export interface InputProps {
@@ -19,6 +19,7 @@ export interface InputProps {
   maxLength?: number;
   returnKeyType?: 'done' | 'next' | 'go' | 'search' | 'send';
   onSubmitEditing?: () => void;
+  inputStyle?: TextStyle;
 }
 
 export const Input = forwardRef<TextInput, InputProps>(({
@@ -35,6 +36,7 @@ export const Input = forwardRef<TextInput, InputProps>(({
   maxLength,
   returnKeyType = 'next',
   onSubmitEditing,
+  inputStyle,
 }, ref) => {
   const [isFocused, setIsFocused] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -50,6 +52,7 @@ export const Input = forwardRef<TextInput, InputProps>(({
             isFocused && styles.inputFocused,
             error && styles.inputError,
             !editable && styles.inputDisabled,
+            inputStyle,
           ]}
           value={value}
           onChangeText={onChangeText}

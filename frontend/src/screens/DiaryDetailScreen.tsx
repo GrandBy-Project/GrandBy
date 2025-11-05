@@ -3,7 +3,7 @@
  * 일기 내용 전체 보기
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -13,8 +13,12 @@ import {
   Alert,
   ScrollView,
   TextInput,
+  Modal,
+  Platform,
   Keyboard,
-  KeyboardEvent,
+  Dimensions,
+  Pressable,
+  Image,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -22,8 +26,11 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { getDiary, deleteDiary, Diary, getComments, createComment, deleteComment, DiaryComment } from '../api/diary';
 import { useAuthStore } from '../store/authStore';
 import { Colors } from '../constants/Colors';
+import { BottomNavigationBar, Header } from '../components';
+import { API_BASE_URL } from '../api/client';
 
 export const DiaryDetailScreen = () => {
+  const inputRef = useRef<TextInput>(null);
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
@@ -35,48 +42,88 @@ export const DiaryDetailScreen = () => {
   const [commentText, setCommentText] = useState('');
   const [isSubmittingComment, setIsSubmittingComment] = useState(false);
   const [isLoadingComments, setIsLoadingComments] = useState(false);
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [showCommentModal, setShowCommentModal] = useState(false);
+  const commentScrollViewRef = useRef<ScrollView>(null);
+  const [footerHeight, setFooterHeight] = useState(0);
+  const [kbHeight, setKbHeight] = useState(0);
+
+  // 이미지 확대 모달 상태
+  const [showImageModal, setShowImageModal] = useState(false);
+  const [selectedImageIndex, setSelectedImageIndex] = useState(0);
+  const imageScrollViewRef = useRef<ScrollView>(null);
+  const windowWidth = Dimensions.get('window').width;
+  const windowHeight = Dimensions.get('window').height;
+
+  // 확인 모달 상태
+  const [confirmModal, setConfirmModal] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    confirmText?: string;
+    cancelText?: string;
+    onConfirm?: () => void;
+    onCancel?: () => void;
+  }>({
+    visible: false,
+    title: '',
+    message: '',
+    confirmText: '확인',
+    cancelText: '취소',
+  });
+
+  useEffect(() => {
+    const showEvt = Platform.OS === 'android' ? 'keyboardDidShow' : 'keyboardWillShow';
+    const hideEvt = Platform.OS === 'android' ? 'keyboardDidHide' : 'keyboardWillHide';
+
+    const showSub = Keyboard.addListener(showEvt, (e) => {
+      const winH = Dimensions.get('window').height;
+      const screenY = e?.endCoordinates?.screenY ?? winH;
+      const inset = Math.max(0, winH - screenY);
+      setKbHeight(inset);
+    });
+    const hideSub = Keyboard.addListener(hideEvt, () => setKbHeight(0));
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
 
   /**
    * 다이어리 상세 로드
    */
   const loadDiary = async () => {
     if (!diaryId) {
-      Alert.alert('오류', '일기 ID가 없습니다.');
-      router.back();
+      setConfirmModal({
+        visible: true,
+        title: '오류',
+        message: '일기 ID가 없습니다.',
+        confirmText: '확인',
+        onConfirm: () => {
+          setConfirmModal(prev => ({ ...prev, visible: false }));
+          router.back();
+        },
+      });
       return;
     }
 
     try {
       setIsLoading(true);
       const data = await getDiary(diaryId);
-      
-      // 임시저장 상태면 바로 작성 페이지로 이동
-      if (data.status === 'draft') {
-        router.replace({
-          pathname: '/diary-write',
-          params: { 
-            diaryId: data.diary_id,
-            callSid: data.call_id || '',
-            fromCall: 'true'
-          },
-        });
-        return;
-      }
-      
       setDiary(data);
     } catch (error: any) {
       console.error('다이어리 로드 실패:', error);
-      Alert.alert(
-        '오류',
-        error.response?.data?.detail || '일기를 불러오는데 실패했습니다.',
-        [
-          {
-            text: '확인',
-            onPress: () => router.back(),
-          },
-        ]
-      );
+      setConfirmModal({
+        visible: true,
+        title: '오류',
+        message: error.response?.data?.detail || '일기를 불러오는데 실패했습니다.',
+        confirmText: '확인',
+        onConfirm: () => {
+          setConfirmModal(prev => ({ ...prev, visible: false }));
+          router.back();
+        },
+      });
     } finally {
       setIsLoading(false);
     }
@@ -86,36 +133,43 @@ export const DiaryDetailScreen = () => {
    * 일기 삭제
    */
   const handleDelete = () => {
-    Alert.alert(
-      '일기 삭제',
-      '정말 이 일기를 삭제하시겠습니까?',
-      [
-        { text: '취소', style: 'cancel' },
-        {
-          text: '삭제',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteDiary(diaryId);
-              Alert.alert('삭제 완료', '일기가 삭제되었습니다.', [
-                {
-                  text: '확인',
-                  onPress: () => {
-                    router.back();
-                  },
-                },
-              ]);
-            } catch (error: any) {
-              console.error('삭제 실패:', error);
-              Alert.alert(
-                '오류',
-                error.response?.data?.detail || '삭제에 실패했습니다.'
-              );
-            }
-          },
-        },
-      ]
-    );
+    setConfirmModal({
+      visible: true,
+      title: '일기 삭제',
+      message: '정말 이 일기를 삭제하시겠습니까?',
+      confirmText: '삭제',
+      cancelText: '취소',
+      onCancel: () => {
+        setConfirmModal(prev => ({ ...prev, visible: false }));
+      },
+      onConfirm: async () => {
+        setConfirmModal(prev => ({ ...prev, visible: false }));
+        try {
+          await deleteDiary(diaryId);
+          setConfirmModal({
+            visible: true,
+            title: '삭제 완료',
+            message: '일기가 삭제되었습니다.',
+            confirmText: '확인',
+            onConfirm: () => {
+              setConfirmModal(prev => ({ ...prev, visible: false }));
+              router.back();
+            },
+          });
+        } catch (error: any) {
+          console.error('삭제 실패:', error);
+          setConfirmModal({
+            visible: true,
+            title: '오류',
+            message: error.response?.data?.detail || '삭제에 실패했습니다.',
+            confirmText: '확인',
+            onConfirm: () => {
+              setConfirmModal(prev => ({ ...prev, visible: false }));
+            },
+          });
+        }
+      },
+    });
   };
 
   /**
@@ -140,20 +194,46 @@ export const DiaryDetailScreen = () => {
    */
   const handleSubmitComment = async () => {
     if (!commentText.trim()) {
-      Alert.alert('알림', '댓글 내용을 입력해주세요.');
+      setConfirmModal({
+        visible: true,
+        title: '알림',
+        message: '댓글 내용을 입력해주세요.',
+        confirmText: '확인',
+        onConfirm: () => {
+          setConfirmModal(prev => ({ ...prev, visible: false }));
+        },
+      });
       return;
     }
-
     if (!diaryId) return;
-
     try {
       setIsSubmittingComment(true);
+  
+      // 1) 우선 포커스 해제 + 키보드 닫기 (깜빡임/재포커스 방지)
+      inputRef.current?.blur();
+      Keyboard.dismiss();
+  
+      // 2) 서버 요청
       await createComment(diaryId, { content: commentText.trim() });
+  
+      // 3) 입력값 초기화
       setCommentText('');
+  
+      // 4) 목록 리로드 + 맨 아래로 스크롤
       await loadComments();
-      Alert.alert('완료', '댓글이 작성되었습니다.');
+      setTimeout(() => {
+        commentScrollViewRef.current?.scrollToEnd({ animated: true });
+      }, 200);
     } catch (error: any) {
-      Alert.alert('오류', error.response?.data?.detail || '댓글 작성에 실패했습니다.');
+      setConfirmModal({
+        visible: true,
+        title: '오류',
+        message: error.response?.data?.detail || '댓글 작성에 실패했습니다.',
+        confirmText: '확인',
+        onConfirm: () => {
+          setConfirmModal(prev => ({ ...prev, visible: false }));
+        },
+      });
     } finally {
       setIsSubmittingComment(false);
     }
@@ -165,45 +245,43 @@ export const DiaryDetailScreen = () => {
   const handleDeleteComment = async (commentId: string) => {
     if (!diaryId) return;
 
-    Alert.alert(
-      '댓글 삭제',
-      '이 댓글을 삭제하시겠습니까?',
-      [
-        { text: '취소', style: 'cancel' },
-        {
-          text: '삭제',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteComment(diaryId, commentId);
-              await loadComments();
-              Alert.alert('완료', '댓글이 삭제되었습니다.');
-            } catch (error: any) {
-              Alert.alert('오류', error.response?.data?.detail || '댓글 삭제에 실패했습니다.');
-            }
-          },
-        },
-      ]
-    );
+    setConfirmModal({
+      visible: true,
+      title: '댓글 삭제',
+      message: '이 댓글을 삭제하시겠습니까?',
+      confirmText: '삭제',
+      cancelText: '취소',
+      onCancel: () => {
+        setConfirmModal(prev => ({ ...prev, visible: false }));
+      },
+      onConfirm: async () => {
+        setConfirmModal(prev => ({ ...prev, visible: false }));
+        try {
+          await deleteComment(diaryId, commentId);
+          await loadComments();
+          setConfirmModal({
+            visible: true,
+            title: '완료',
+            message: '댓글이 삭제되었습니다.',
+            confirmText: '확인',
+            onConfirm: () => {
+              setConfirmModal(prev => ({ ...prev, visible: false }));
+            },
+          });
+        } catch (error: any) {
+          setConfirmModal({
+            visible: true,
+            title: '오류',
+            message: error.response?.data?.detail || '댓글 삭제에 실패했습니다.',
+            confirmText: '확인',
+            onConfirm: () => {
+              setConfirmModal(prev => ({ ...prev, visible: false }));
+            },
+          });
+        }
+      },
+    });
   };
-
-  /**
-   * 키보드 이벤트 리스너
-   */
-  useEffect(() => {
-    const keyboardDidShowListener = Keyboard.addListener('keyboardDidShow', (e: KeyboardEvent) => {
-      setKeyboardHeight(e.endCoordinates.height);
-    });
-    
-    const keyboardDidHideListener = Keyboard.addListener('keyboardDidHide', () => {
-      setKeyboardHeight(0);
-    });
-
-    return () => {
-      keyboardDidShowListener.remove();
-      keyboardDidHideListener.remove();
-    };
-  }, []);
 
   /**
    * 초기 데이터 로드
@@ -227,7 +305,7 @@ export const DiaryDetailScreen = () => {
   };
 
   /**
-   * 타임스탬프 포맷팅
+   * 타임스탬프 포맷팅 (상대적 시간)
    */
   const formatTimestamp = (dateString: string): string => {
     const date = new Date(dateString);
@@ -245,6 +323,17 @@ export const DiaryDetailScreen = () => {
     const month = (date.getMonth() + 1).toString().padStart(2, '0');
     const day = date.getDate().toString().padStart(2, '0');
     return `${month}월 ${day}일`;
+  };
+
+  /**
+   * 작성시간 포맷팅
+   */
+  const formatCreatedTime = (dateString: string): string => {
+    const date = new Date(dateString);
+    return date.toLocaleString('ko-KR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
   };
 
   /**
@@ -306,23 +395,18 @@ export const DiaryDetailScreen = () => {
 
   return (
     <View style={styles.container}>
-      <View style={[styles.container, { paddingTop: insets.top }]}>
-        {/* 헤더 */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-            <Ionicons name="chevron-back" size={28} color="#333333" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>일기 상세</Text>
-          
-          {/* 삭제 버튼 - 본인이 작성한 경우만 표시 */}
-          {canDelete ? (
+      {/* 헤더 */}
+      <Header
+        title="일기 상세"
+        showMenuButton={true}
+        rightButton={
+          canDelete ? (
             <TouchableOpacity onPress={handleDelete} style={styles.deleteButton}>
               <Ionicons name="trash-outline" size={24} color="#FF3B30" />
             </TouchableOpacity>
-          ) : (
-            <View style={styles.placeholder} />
-          )}
-        </View>
+          ) : undefined
+        }
+      />
 
       {/* 내용 */}
       <ScrollView
@@ -330,13 +414,17 @@ export const DiaryDetailScreen = () => {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        {/* 날짜 */}
-        <Text style={styles.dateText}>{formatDate(diary.date)}</Text>
-
         {/* 제목 */}
         {diary.title && (
           <Text style={styles.titleText}>{diary.title}</Text>
         )}
+
+        {/* 날짜와 작성시간을 한 줄로 */}
+        <View style={styles.dateTimeRow}>
+          <Text style={styles.timestampText}>
+            {formatDate(diary.date)} {formatCreatedTime(diary.created_at)}
+          </Text>
+        </View>
 
         {/* 기분 */}
         {diary.mood && getMoodDisplay(diary.mood) && (
@@ -363,11 +451,7 @@ export const DiaryDetailScreen = () => {
               {getAuthorTypeText(diary.author_type)}
             </Text>
           </View>
-          {diary.status === 'draft' && (
-            <View style={styles.draftBadge}>
-              <Text style={styles.draftText}>임시저장</Text>
-            </View>
-          )}
+
         </View>
 
         {/* 구분선 */}
@@ -376,36 +460,124 @@ export const DiaryDetailScreen = () => {
         {/* 일기 내용 */}
         <Text style={styles.contentText}>{diary.content}</Text>
 
-        {/* 댓글 섹션 */}
-        <View style={styles.commentsSection}>
-          <View style={styles.commentsSectionHeader}>
-            <Ionicons name="chatbubbles" size={24} color={Colors.primary} />
-            <Text style={styles.commentsSectionTitle}>댓글 {comments.length}</Text>
+        {/* 사진 갤러리 */}
+        {diary.photos && diary.photos.length > 0 && (
+          <View style={styles.photosSection}>
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.photosContainer}
+            >
+              {diary.photos.map((photo, index) => {
+                const photoUrl = photo.photo_url.startsWith('http') 
+                  ? photo.photo_url 
+                  : `${API_BASE_URL}${photo.photo_url}`;
+                
+                return (
+                  <TouchableOpacity
+                    key={photo.photo_id}
+                    style={styles.photoItem}
+                    activeOpacity={0.9}
+                    onPress={() => {
+                      setSelectedImageIndex(index);
+                      setShowImageModal(true);
+                    }}
+                  >
+                    <Image
+                      source={{ uri: photoUrl }}
+                      style={styles.photoImage}
+                      resizeMode="cover"
+                    />
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
           </View>
+        )}
 
-          {/* 댓글 목록 */}
+        {/* 댓글 버튼 */}
+        <TouchableOpacity
+          style={styles.commentButton}
+          onPress={() => setShowCommentModal(true)}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="chatbubble-ellipses" size={20} color={Colors.textWhite} />
+          <Text style={styles.commentButtonText}>
+            댓글 {comments.length}
+          </Text>
+        </TouchableOpacity>
+      </ScrollView>
+
+{/* 댓글 모달 */}
+<Modal
+  visible={showCommentModal}
+  transparent
+  animationType="slide"
+  onRequestClose={() => setShowCommentModal(false)}
+  presentationStyle="overFullScreen"
+>
+  <View style={styles.modalOverlay}>
+    <TouchableOpacity
+      style={styles.modalBackdrop}
+      activeOpacity={1}
+      onPress={() => setShowCommentModal(false)}
+    />
+    <View style={styles.modalContentWrapper} /* onStartShouldSetResponder={() => true} */>
+      <View style={styles.modalContent}>
+        {/* 헤더 */}
+        <View style={styles.modalHeader}>
+          <Text style={styles.modalTitle}>댓글 {comments.length}</Text>
+          <TouchableOpacity
+            onPress={() => setShowCommentModal(false)}
+            style={styles.closeButton}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="close" size={22} color={Colors.text} />
+          </TouchableOpacity>
+        </View>
+
+        {/* 댓글 목록: 입력창 높이만큼 하단 패딩을 줘서 가려지지 않게 */}
+        <ScrollView
+          ref={commentScrollViewRef}
+          style={styles.modalBody}
+          contentContainerStyle={[
+            styles.modalBodyContent,
+            { 
+              paddingBottom: 
+              footerHeight + Math.max(insets.bottom, kbHeight) +8 
+            },
+          ]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator
+          onContentSizeChange={() => {
+            setTimeout(() => {
+              commentScrollViewRef.current?.scrollToEnd({ animated: true });
+            }, 100);
+          }}
+        >
           {isLoadingComments ? (
             <ActivityIndicator size="small" color={Colors.primary} style={{ marginVertical: 20 }} />
           ) : comments.length > 0 ? (
             comments.map((comment) => (
               <View key={comment.comment_id} style={styles.commentItem}>
-                <View style={styles.commentHeader}>
-                  <View style={styles.commentAuthor}>
-                    <Ionicons name="person-circle" size={32} color={Colors.primary} />
-                    <Text style={styles.commentAuthorName}>
-                      {comment.user_name}
-                    </Text>
+                <Ionicons name="person-circle" size={40} color={Colors.primary} style={styles.commentAvatar} />
+                <View style={styles.commentContentWrapper}>
+                  <View style={styles.commentHeaderRow}>
+                    <Text style={styles.commentAuthorName}>{comment.user_name}</Text>
+                    <Text style={styles.commentContent}>{comment.content}</Text>
                   </View>
-                  {comment.user_id === user?.user_id && (
-                    <TouchableOpacity onPress={() => handleDeleteComment(comment.comment_id)}>
-                      <Ionicons name="trash" size={20} color={Colors.error} />
-                    </TouchableOpacity>
-                  )}
+                  <View style={styles.commentFooterRow}>
+                    <Text style={styles.commentDate}>{formatTimestamp(comment.created_at)}</Text>
+                    {comment.user_id === user?.user_id && (
+                      <TouchableOpacity
+                        onPress={() => handleDeleteComment(comment.comment_id)}
+                        style={styles.commentDeleteButton}
+                      >
+                        <Text style={styles.commentDeleteText}>삭제</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
                 </View>
-                <Text style={styles.commentContent}>{comment.content}</Text>
-                <Text style={styles.commentDate}>
-                  {formatTimestamp(comment.created_at)}
-                </Text>
               </View>
             ))
           ) : (
@@ -414,46 +586,208 @@ export const DiaryDetailScreen = () => {
               <Text style={styles.emptyCommentsText}>아직 댓글이 없습니다</Text>
             </View>
           )}
-        </View>
-      </ScrollView>
+        </ScrollView>
 
-      {/* 댓글 작성 입력창 - 하단 고정 */}
-      <View style={[
-        styles.commentInputContainer, 
-        { 
-          paddingBottom: insets.bottom,
-          bottom: keyboardHeight > 0 ? keyboardHeight - 0 : 0
-        }
-      ]}>
-        <View style={styles.commentInputWrapper}>
-          <Ionicons name="chatbubble-ellipses" size={18} color={Colors.primary} style={{ marginRight: 6 }} />
-          <TextInput
-            style={styles.commentInput}
-            value={commentText}
-            onChangeText={setCommentText}
-            placeholder="댓글을 입력하세요"
-            multiline
-            maxLength={100}
-            returnKeyType="default"
-            blurOnSubmit={false}
-          />
-        </View>
-        <TouchableOpacity
-          style={[
-            styles.commentSubmitButton,
-            (!commentText.trim() || isSubmittingComment) && styles.commentSubmitButtonDisabled
-          ]}
-          onPress={handleSubmitComment}
-          disabled={!commentText.trim() || isSubmittingComment}
-        >
-          {isSubmittingComment ? (
-            <ActivityIndicator size="small" color={Colors.textWhite} />
-          ) : (
-            <Ionicons name="send" size={18} color={Colors.textWhite} />
+        {/* ✅ 하단 입력창만 키보드에 반응하도록: 모달은 그대로, footer만 위로 이동 */}
+          <View
+            style={[
+              styles.modalFooterFloating,
+              {
+                bottom: Math.max(insets.bottom, kbHeight),
+              },
+            ]}
+            onLayout={(e) => setFooterHeight(e.nativeEvent.layout.height)}
+          >
+            <View style={styles.commentInputContainer}>
+              {/* 말풍선 아이콘 */}
+              <Ionicons 
+                name="chatbubble-outline" 
+                size={24} 
+                color={Colors.textSecondary}
+                style={{ marginRight: 8 }}
+              />
+              <TextInput
+                ref={inputRef}
+                style={styles.commentInput}
+                value={commentText}
+                onChangeText={setCommentText}
+                placeholder="댓글 추가..."
+                placeholderTextColor={Colors.textSecondary}
+                multiline
+                maxLength={100}
+                returnKeyType="default"
+                blurOnSubmit={false}
+              />
+              <TouchableOpacity
+                style={[
+                  styles.commentSubmitButton,
+                  (!commentText.trim() || isSubmittingComment) && styles.commentSubmitButtonDisabled,
+                ]}
+                onPress={handleSubmitComment}
+                disabled={!commentText.trim() || isSubmittingComment}
+                activeOpacity={0.7}
+              >
+                {isSubmittingComment ? (
+                  <ActivityIndicator size="small" color={Colors.primary} />
+                ) : (
+                  <Ionicons
+                    name="send"
+                    size={24}
+                    color={commentText.trim() ? Colors.primary : Colors.textSecondary}
+                  />
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+      </View>
+    </View>
+  </View>
+</Modal>
+
+      {/* 이미지 확대 모달 */}
+      <Modal
+        visible={showImageModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowImageModal(false)}
+      >
+        <View style={styles.imageModalContainer}>
+          {/* 닫기 버튼 */}
+          <TouchableOpacity
+            style={[styles.imageModalCloseButton, { top: insets.top + 16 }]}
+            onPress={() => setShowImageModal(false)}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="close" size={32} color="#FFFFFF" />
+          </TouchableOpacity>
+
+          {/* 이미지 인덱스 표시 (여러 장일 때만) */}
+          {diary.photos && diary.photos.length > 1 && (
+            <View style={[styles.imageModalCounter, { top: insets.top + 16 }]}>
+              <Text style={styles.imageModalCounterText}>
+                {selectedImageIndex + 1} / {diary.photos.length}
+              </Text>
+            </View>
           )}
-        </TouchableOpacity>
-      </View>
-      </View>
+
+          {/* 이미지 스크롤 뷰 */}
+          <ScrollView
+            ref={imageScrollViewRef}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            onMomentumScrollEnd={(event) => {
+              const offsetX = event.nativeEvent.contentOffset.x;
+              const width = event.nativeEvent.layoutMeasurement.width;
+              const index = Math.round(offsetX / width);
+              setSelectedImageIndex(index);
+            }}
+            contentOffset={{ x: selectedImageIndex * windowWidth, y: 0 }}
+            scrollEnabled={diary.photos && diary.photos.length > 1}
+          >
+            {diary.photos?.map((photo) => {
+              const photoUrl = photo.photo_url.startsWith('http') 
+                ? photo.photo_url 
+                : `${API_BASE_URL}${photo.photo_url}`;
+              
+              return (
+                <View key={photo.photo_id} style={[styles.imageModalImageContainer, { width: windowWidth, height: windowHeight }]}>
+                  <Image
+                    source={{ uri: photoUrl }}
+                    style={[styles.imageModalImage, { width: windowWidth, height: windowHeight }]}
+                    resizeMode="contain"
+                  />
+                </View>
+              );
+            })}
+          </ScrollView>
+
+          {/* 이전/다음 버튼 (여러 장일 때만) */}
+          {diary.photos && diary.photos.length > 1 && (
+            <>
+              {selectedImageIndex > 0 && (
+                <TouchableOpacity
+                  style={[styles.imageModalNavButton, styles.imageModalNavButtonLeft]}
+                  onPress={() => {
+                    const newIndex = selectedImageIndex - 1;
+                    setSelectedImageIndex(newIndex);
+                    imageScrollViewRef.current?.scrollTo({
+                      x: newIndex * windowWidth,
+                      animated: true,
+                    });
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="chevron-back" size={32} color="#FFFFFF" />
+                </TouchableOpacity>
+              )}
+              {selectedImageIndex < diary.photos.length - 1 && (
+                <TouchableOpacity
+                  style={[styles.imageModalNavButton, styles.imageModalNavButtonRight]}
+                  onPress={() => {
+                    const newIndex = selectedImageIndex + 1;
+                    setSelectedImageIndex(newIndex);
+                    imageScrollViewRef.current?.scrollTo({
+                      x: newIndex * windowWidth,
+                      animated: true,
+                    });
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="chevron-forward" size={32} color="#FFFFFF" />
+                </TouchableOpacity>
+              )}
+            </>
+          )}
+        </View>
+      </Modal>
+
+      {/* 확인 모달 */}
+      <Modal
+        visible={confirmModal.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setConfirmModal(prev => ({ ...prev, visible: false }))}
+      >
+        <Pressable 
+          style={styles.commonModalBackdrop} 
+          onPress={() => setConfirmModal(prev => ({ ...prev, visible: false }))}
+        >
+          <Pressable style={styles.commonModalContainer} onPress={() => {}}>
+            <Text style={styles.commonModalTitle}>
+              {confirmModal.title}
+            </Text>
+            <Text style={styles.commonModalText}>
+              {confirmModal.message}
+            </Text>
+            <View style={styles.confirmModalActions}>
+              {confirmModal.onCancel && (
+                <TouchableOpacity
+                  style={[styles.confirmModalButton, styles.confirmModalCancelButton]}
+                  onPress={confirmModal.onCancel}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.confirmModalCancelButtonText}>
+                    {confirmModal.cancelText || '취소'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity
+                style={[styles.confirmModalButton, styles.confirmModalConfirmButton]}
+                onPress={confirmModal.onConfirm}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.confirmModalConfirmButtonText}>
+                  {confirmModal.confirmText || '확인'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* 하단 네비게이션 바 */}
+      <BottomNavigationBar />
     </View>
   );
 };
@@ -488,53 +822,39 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#FFFFFF',
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E8E8E8',
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#333333',
-  },
   deleteButton: {
     width: 40,
     height: 40,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  placeholder: {
-    width: 40,
-  },
   scrollView: {
     flex: 1,
   },
   content: {
     padding: 24,
-    paddingBottom: 100,
+    paddingBottom: 0,
   },
   dateText: {
     fontSize: 24,
-    fontWeight: '700',
+    fontWeight: '600',
     color: '#333333',
-    marginBottom: 16,
+    marginBottom: 8,
+  },
+  timestampText: {
+    fontSize: 14,
+    fontWeight: '400',
+    color: '#999999',
+    marginBottom: 8,
   },
   titleText: {
     fontSize: 22,
     fontWeight: '600',
     color: '#333333',
-    marginBottom: 16,
+    marginBottom: 8,
+  },
+  dateTimeRow: {
+    marginBottom: 8,
   },
   moodContainer: {
     flexDirection: 'row',
@@ -554,7 +874,7 @@ const styles = StyleSheet.create({
   metaInfo: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 16,
   },
   authorTypeContainer: {
     flexDirection: 'row',
@@ -565,17 +885,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#666666',
   },
-  draftBadge: {
-    backgroundColor: '#FFF3E0',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 12,
-  },
-  draftText: {
-    fontSize: 13,
-    color: '#F57C00',
-    fontWeight: '600',
-  },
+
   divider: {
     height: 1,
     backgroundColor: '#E8E8E8',
@@ -592,9 +902,115 @@ const styles = StyleSheet.create({
     color: '#999999',
     marginBottom: 4,
   },
-  // 댓글 섹션
-  commentsSection: {
+  // 사진 갤러리 스타일
+  photosSection: {
+    marginBottom: 24,
+  },
+  photosSectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333333',
+    marginBottom: 12,
+  },
+  photosContainer: {
+    paddingRight: 24,
+    gap: 12,
+  },
+  photoItem: {
+    width: 200,
+    height: 200,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: '#F0F0F0',
+    marginRight: 12,
+  },
+  photoImage: {
+    width: '100%',
+    height: '100%',
+  },
+  // 댓글 버튼 (스크롤뷰 안)
+  commentButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.primary,
+    borderRadius: 20,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
     marginTop: 32,
+    marginBottom: 20,
+    gap: 8,
+  },
+  commentButtonText: {
+    color: Colors.textWhite,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  // 모달 스타일
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  modalBackdrop: {
+    // position: 'absolute',
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 0,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  modalContentWrapper: {
+    height: '70%',
+    width: '100%',
+    zIndex: 1,
+  },
+  modalContent: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    height: '100%',
+    flexDirection: 'column',
+  },
+  modalContentContainer: {
+    flexGrow: 1,
+    flexDirection: 'column',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 0.5,
+    borderBottomColor: '#E0E0E0',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#000000',
+  },
+  closeButton: {
+    padding: 4,
+  },
+  modalBody: {
+    flex: 1,
+  },
+  modalBodyContent: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    paddingBottom: 8,
+  },
+  modalFooter: {
+    paddingTop: 8,
+    paddingHorizontal: 16,
+    borderTopWidth: 0.5,
+    borderTopColor: '#E0E0E0',
+    backgroundColor: '#FFFFFF',
+  },
+  // 댓글 섹션 (모달 내부에서 사용)
+  commentsSection: {
     paddingTop: 24,
     borderTopWidth: 1,
     borderTopColor: '#E0E0E0',
@@ -612,36 +1028,51 @@ const styles = StyleSheet.create({
     color: Colors.text,
   },
   commentItem: {
-    backgroundColor: Colors.backgroundLight,
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-  },
-  commentHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 0,
   },
-  commentAuthor: {
+  commentAvatar: {
+    marginRight: 12,
+  },
+  commentContentWrapper: {
+    flex: 1,
+  },
+  commentHeaderRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+    flexWrap: 'wrap',
+    marginBottom: 4,
   },
   commentAuthorName: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
-    color: Colors.text,
+    color: '#000000',
+    marginRight: 8,
   },
   commentContent: {
-    fontSize: 16,
-    lineHeight: 22,
-    color: Colors.text,
-    marginBottom: 8,
+    fontSize: 14,
+    lineHeight: 20,
+    color: '#000000',
+    flex: 1,
+  },
+  commentFooterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+    gap: 12,
   },
   commentDate: {
-    fontSize: 13,
+    fontSize: 12,
     color: Colors.textSecondary,
+  },
+  commentDeleteButton: {
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+  },
+  commentDeleteText: {
+    fontSize: 12,
+    color: Colors.error,
+    fontWeight: '500',
   },
   emptyComments: {
     alignItems: 'center',
@@ -653,51 +1084,153 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   commentInputContainer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    gap: 8,
-    backgroundColor: Colors.background,
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  commentInputWrapper: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.backgroundLight,
-    borderRadius: 20,
-    paddingHorizontal: 12,
     paddingVertical: 8,
-    minHeight: 40,
   },
   commentInput: {
     flex: 1,
     fontSize: 14,
-    color: Colors.text,
-    maxHeight: 80,
-    paddingVertical: 4,
+    color: '#000000',
+    maxHeight: 100,
+    paddingVertical: 8,
+    paddingRight: 8,
   },
   commentSubmitButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: Colors.primary,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
     justifyContent: 'center',
     alignItems: 'center',
   },
   commentSubmitButtonDisabled: {
-    backgroundColor: Colors.textSecondary,
     opacity: 0.5,
+  },
+  modalFooterFloating: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    paddingHorizontal: 16,
+    paddingTop: 0,
+    paddingBottom: 0,
+    backgroundColor: '#FFFFFF',
+    borderTopWidth: 0.5,
+    borderTopColor: '#E0E0E0',
+  },
+  // 공통 모달 스타일 (GlobalAlertProvider 디자인 참고)
+  commonModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  commonModalContainer: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 12,
+  },
+  commonModalTitle: {
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 8,
+    fontSize: 18,
+  },
+  commonModalText: {
+    color: '#374151',
+    lineHeight: 22,
+    marginBottom: 16,
+    fontSize: 15,
+  },
+  confirmModalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 4,
+    gap: 8,
+  },
+  confirmModalButton: {
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    minWidth: 70,
+    alignItems: 'center',
+  },
+  confirmModalCancelButton: {
+    backgroundColor: '#F3F4F6',
+  },
+  confirmModalConfirmButton: {
+    backgroundColor: Colors.primary,
+  },
+  confirmModalCancelButtonText: {
+    color: '#374151',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  confirmModalConfirmButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  // 이미지 확대 모달 스타일
+  imageModalContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.95)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imageModalCloseButton: {
+    position: 'absolute',
+    right: 16,
+    zIndex: 10,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imageModalCounter: {
+    position: 'absolute',
+    left: 16,
+    zIndex: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  imageModalCounterText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  imageModalImageContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imageModalImage: {
+    maxWidth: '100%',
+    maxHeight: '100%',
+  },
+  imageModalNavButton: {
+    position: 'absolute',
+    top: '50%',
+    transform: [{ translateY: -22 }],
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  imageModalNavButtonLeft: {
+    left: 16,
+  },
+  imageModalNavButtonRight: {
+    right: 16,
   },
 });
 

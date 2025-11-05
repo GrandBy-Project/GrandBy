@@ -6,12 +6,13 @@ Firebase Admin SDK를 사용한 푸시 알림 전송
 import logging
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
+from sqlalchemy import and_
 from datetime import datetime
 
 import firebase_admin
 from firebase_admin import credentials, messaging
 
-from app.models.user import User, UserSettings
+from app.models.user import User, UserSettings, UserConnection, ConnectionStatus
 from app.models.notification import Notification, NotificationType
 
 logger = logging.getLogger(__name__)
@@ -144,12 +145,20 @@ class NotificationService:
             for fcm_token in valid_tokens:
                 try:
                     # 메시지 구성
+                    # data 값은 모두 문자열이어야 하며 None이 포함되면 안 됨
+                    safe_data = {}
+                    if data:
+                        for k, v in data.items():
+                            if v is None:
+                                continue
+                            # Firebase data payload는 문자열만 허용됨
+                            safe_data[str(k)] = str(v)
                     message = messaging.Message(
                         notification=messaging.Notification(
                             title=title,
                             body=body
                         ),
-                        data=data or {},
+                        data=safe_data,
                         token=fcm_token,
                         android=messaging.AndroidConfig(
                             priority="high" if priority == "high" else "normal"
@@ -340,7 +349,7 @@ class NotificationService:
         creator_name: str
     ) -> bool:
         """
-        새로운 TODO 생성 알림
+        새로운 TODO 생성 알림 (보호자가 어르신에게 일정 추가 시)
         
         Args:
             db: DB 세션
@@ -358,6 +367,55 @@ class NotificationService:
             related_id=todo_id,
             notification_type_key='todo_created'
         )
+    
+    @staticmethod
+    async def notify_todo_created_by_elderly(
+        db: Session,
+        elderly_id: str,
+        todo_title: str,
+        todo_id: str,
+        elderly_name: str
+    ) -> bool:
+        """
+        어르신이 직접 생성한 TODO 알림 (연결된 보호자들에게만 전송, 어르신 본인에게는 전송하지 않음)
+        
+        Args:
+            db: DB 세션
+            elderly_id: 어르신 ID
+            todo_title: TODO 제목
+            todo_id: TODO ID
+            elderly_name: 어르신 이름
+        """
+        from app.models.user import UserConnection, ConnectionStatus
+        
+        # 연결된 보호자 목록 조회
+        connections = db.query(UserConnection).filter(
+            and_(
+                UserConnection.elderly_id == elderly_id,
+                UserConnection.status == ConnectionStatus.ACTIVE
+            )
+        ).all()
+        
+        if not connections:
+            logger.info(f"연결된 보호자가 없어 알림을 전송하지 않습니다: {elderly_id}")
+            return True
+        
+        # 보호자들에게만 알림 전송 (어르신 본인에게는 전송하지 않음)
+        success = True
+        for connection in connections:
+            result = await NotificationService.create_and_send_notification(
+                db=db,
+                user_id=connection.caregiver_id,
+                notification_type=NotificationType.DIARY_CREATED,  # TODO_CREATED 타입이 없어서 임시로 사용
+                title="📝 새로운 일정이 추가되었어요",
+                message=f"{elderly_name}님이 '{todo_title}' 일정을 추가했습니다.",
+                related_id=todo_id,
+                notification_type_key='todo_created'
+            )
+            if not result:
+                success = False
+        
+        return success
     
     @staticmethod
     async def notify_diary_created(
@@ -385,6 +443,73 @@ class NotificationService:
                 message=f"{elderly_name}님의 오늘 일기가 자동으로 작성되었습니다.",
                 related_id=diary_id,
                 notification_type_key='diary_created'
+            )
+            if not result:
+                success = False
+        
+        return success
+    
+    @staticmethod
+    async def notify_diary_comment_created(
+        db: Session,
+        diary_id: str,
+        comment_author_id: str,
+        comment_author_name: str,
+        diary_title: Optional[str] = None
+    ) -> bool:
+        """
+        일기 댓글 작성 알림 (본인을 제외한 연결 대상들에게 전송)
+        
+        Args:
+            db: DB 세션
+            diary_id: 일기 ID
+            comment_author_id: 댓글 작성자 ID (알림 제외 대상)
+            comment_author_name: 댓글 작성자 이름
+            diary_title: 일기 제목 (선택사항)
+        """
+        from app.models.diary import Diary
+        
+        # 일기 정보 조회
+        diary = db.query(Diary).filter(Diary.diary_id == diary_id).first()
+        if not diary:
+            logger.error(f"일기를 찾을 수 없습니다: {diary_id}")
+            return False
+        
+        # 알림을 받을 대상 리스트 (댓글 작성자 제외)
+        notification_targets = []
+        
+        # 1. 일기를 작성한 어르신 (댓글 작성자가 아닌 경우만)
+        if diary.user_id != comment_author_id:
+            notification_targets.append(diary.user_id)
+        
+        # 2. 연결된 보호자들 (댓글 작성자가 아닌 경우만)
+        connections = db.query(UserConnection).filter(
+            and_(
+                UserConnection.elderly_id == diary.user_id,
+                UserConnection.status == ConnectionStatus.ACTIVE
+            )
+        ).all()
+        
+        for connection in connections:
+            if connection.caregiver_id != comment_author_id:
+                notification_targets.append(connection.caregiver_id)
+        
+        if not notification_targets:
+            logger.info(f"알림을 받을 대상이 없습니다 (댓글 작성자만 포함): {diary_id}")
+            return True
+        
+        # 알림 전송
+        diary_title_text = diary_title or diary.title or "일기"
+        success = True
+        for target_id in notification_targets:
+            result = await NotificationService.create_and_send_notification(
+                db=db,
+                user_id=target_id,
+                notification_type=NotificationType.DIARY_CREATED,  # TODO: DIARY_COMMENT 타입 추가 시 변경
+                title="💬 새로운 댓글이 달렸어요",
+                message=f"{comment_author_name}님이 '{diary_title_text}' 일기에 댓글을 남겼습니다.",
+                related_id=diary_id,
+                notification_type_key='diary_comment'
             )
             if not result:
                 success = False

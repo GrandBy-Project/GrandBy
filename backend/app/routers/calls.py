@@ -5,8 +5,9 @@ AI 통화 API 라우터
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from typing import List, Optional
-from datetime import time as dt_time, datetime
+from datetime import time as dt_time, datetime, date
 from app.database import get_db
 from app.schemas.call import (
     CallLogResponse, 
@@ -15,8 +16,10 @@ from app.schemas.call import (
     CallSettingsResponse,
     CallTranscriptResponse
 )
-from app.models.call import CallSettings, CallLog, CallTranscript, CallFrequency
+from app.models.call import CallSettings, CallLog, CallTranscript, CallFrequency, CallStatus
 from app.models.user import User
+from app.models.diary import Diary, DiaryStatus
+from app.routers.auth import get_current_user
 import logging
 
 logger = logging.getLogger(__name__)
@@ -52,6 +55,46 @@ async def get_call_logs(
         
     except Exception as e:
         logger.error(f"❌ 통화 기록 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/diary-reminder")
+async def check_diary_reminder(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    다이어리 작성 안내 배너 표시 여부 확인
+    - 오늘 완료된 통화가 있고, 오늘 다이어리가 없으면 배너 표시
+    """
+    try:
+        today = date.today()
+        
+        # 오늘 완료된 통화 확인
+        today_calls = db.query(CallLog).filter(
+            CallLog.elderly_id == current_user.user_id,
+            CallLog.call_status == CallStatus.COMPLETED,
+            func.date(CallLog.created_at) == today
+        ).count()
+        
+        # 오늘 발행된 다이어리 확인
+        today_diary = db.query(Diary).filter(
+            Diary.user_id == current_user.user_id,
+            Diary.date == today,
+            Diary.status == DiaryStatus.PUBLISHED
+        ).first()
+        
+        # 오늘 통화가 있고 오늘 다이어리가 없으면 배너 표시
+        should_show_banner = today_calls > 0 and today_diary is None
+        
+        logger.info(f"📝 다이어리 안내 배너 확인: {should_show_banner} (통화: {today_calls}건, 다이어리: {'있음' if today_diary else '없음'})")
+        
+        return {
+            "should_show_banner": should_show_banner
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ 다이어리 안내 배너 확인 실패: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

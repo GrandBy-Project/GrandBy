@@ -20,7 +20,7 @@ bcrypt==4.0.1
 python-dotenv==1.0.1
 
 # ==================== HTTP Clients ====================
-httpx==0.27.2
+httpx[http2]==0.27.2
 aiohttp==3.10.5
 requests==2.32.5
 
@@ -28,14 +28,16 @@ requests==2.32.5
 openai==1.51.0
 tiktoken==0.7.0
 
-# ==================== Google Cloud STT ====================
-google-cloud-speech==2.26.0
+# (Deprecated) Google Cloud STT removed in favor of RTZR
 
 # ==================== Firebase Admin SDK ====================
 firebase-admin==6.4.0
 
 # ==================== Twilio (Voice Calls) ====================
 twilio==9.3.0
+
+# ==================== RTZR STT (Korean Speech Recognition) ====================
+websockets==13.1
 
 # ==================== Audio Processing ====================
 pydub==0.25.1

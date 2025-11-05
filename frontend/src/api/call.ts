@@ -155,3 +155,20 @@ export const getExtractedTodos = async (callId: string): Promise<ExtractedTodo[]
   }
 };
 
+// ==================== 다이어리 작성 안내 ====================
+
+/**
+ * 다이어리 작성 안내 배너 표시 여부 확인
+ * 
+ * @returns 배너 표시 여부
+ */
+export const checkDiaryReminder = async (): Promise<{ should_show_banner: boolean }> => {
+  try {
+    const response = await apiClient.get<{ should_show_banner: boolean }>('/api/calls/diary-reminder');
+    return response.data;
+  } catch (error) {
+    console.error('다이어리 안내 배너 확인 실패:', error);
+    return { should_show_banner: false };
+  }
+};
+

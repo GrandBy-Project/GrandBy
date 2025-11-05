@@ -11,17 +11,22 @@ import {
   TouchableOpacity,
   TextInput,
   ScrollView,
-  Alert,
   ActivityIndicator,
   Switch,
+  Modal,
+  Pressable,
+  Image,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { createDiary, getDiary, updateDiary, Diary } from '../api/diary';
+import * as ImagePicker from 'expo-image-picker';
+import { createDiary } from '../api/diary';
 import { getCallLog, getExtractedTodos, ExtractedTodo } from '../api/call';
 import { createTodo } from '../api/todo';
 import { useAuthStore } from '../store/authStore';
+import { BottomNavigationBar, Header } from '../components';
+import { Colors } from '../constants/Colors';
+import apiClient from '../api/client';
 
 // 기분 옵션
 const MOOD_OPTIONS = [
@@ -35,7 +40,6 @@ const MOOD_OPTIONS = [
 
 export const DiaryWriteScreen = () => {
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
   
   // URL 파라미터에서 정보 가져오기
@@ -43,9 +47,6 @@ export const DiaryWriteScreen = () => {
   const fromCall = searchParams.fromCall === 'true';
   const callSid = searchParams.callSid as string | undefined;
   const fromBanner = searchParams.fromBanner === 'true'; // 상단 배너에서 온 경우 파라미터 추가
-  const diaryId = searchParams.diaryId as string | undefined; // 수정 모드용
-  const givenDiaryId = searchParams.givenDiaryId as string | undefined; // 기존 다이어리 ID
-  const isEditMode = !!(diaryId || givenDiaryId); // 수정 모드 여부
 
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]); // YYYY-MM-DD
   const [title, setTitle] = useState('');
@@ -53,7 +54,6 @@ export const DiaryWriteScreen = () => {
   const [selectedMood, setSelectedMood] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingSummary, setIsLoadingSummary] = useState(false);
-  const [existingDiary, setExistingDiary] = useState<Diary | null>(null);
   
   // TODO 관련 state
   const [suggestedTodos, setSuggestedTodos] = useState<ExtractedTodo[]>([]);
@@ -63,6 +63,87 @@ export const DiaryWriteScreen = () => {
     description: string;
     isShared: boolean;
   } | null>(null);
+
+  // 이미지 업로드 관련 state
+  const [selectedImages, setSelectedImages] = useState<string[]>([]);
+  const [isUploadingImages, setIsUploadingImages] = useState(false);
+
+  // 확인 모달 상태
+  const [confirmModal, setConfirmModal] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    confirmText?: string;
+    cancelText?: string;
+    onConfirm?: () => void;
+    onCancel?: () => void;
+  }>({
+    visible: false,
+    title: '',
+    message: '',
+    confirmText: '확인',
+    cancelText: '취소',
+  });
+
+  /**
+   * 확인 모달 표시 헬퍼 함수
+   */
+  const showConfirmModal = (config: {
+    title: string;
+    message: string;
+    confirmText?: string;
+    cancelText?: string;
+    onConfirm?: () => void;
+    onCancel?: () => void;
+  }) => {
+    setConfirmModal({
+      visible: true,
+      confirmText: '확인',
+      cancelText: '취소',
+      ...config,
+    });
+  };
+
+  /**
+   * 확인 모달 닫기 헬퍼 함수
+   */
+  const hideConfirmModal = () => {
+    setConfirmModal(prev => ({ ...prev, visible: false }));
+  };
+
+  /**
+   * 유효성 검사 및 에러 표시
+   */
+  const validateAndShowError = (): boolean => {
+    if (!title.trim()) {
+      showConfirmModal({
+        title: '알림',
+        message: '제목을 입력해주세요.',
+        onConfirm: hideConfirmModal,
+      });
+      return false;
+    }
+
+    if (!selectedMood) {
+      showConfirmModal({
+        title: '알림',
+        message: '오늘의 기분을 선택해주세요.',
+        onConfirm: hideConfirmModal,
+      });
+      return false;
+    }
+
+    if (!content.trim()) {
+      showConfirmModal({
+        title: '알림',
+        message: '일기 내용을 입력해주세요.',
+        onConfirm: hideConfirmModal,
+      });
+      return false;
+    }
+
+    return true;
+  };
 
   /**
    * 날짜 포맷팅
@@ -77,38 +158,7 @@ export const DiaryWriteScreen = () => {
     return `${year}년 ${month}월 ${day}일 (${dayOfWeek})`;
   };
 
-  /**
-   * 수정 모드: 기존 다이어리 불러오기
-   */
-  useEffect(() => {
-    const loadDiary = async () => {
-      if (isEditMode && (diaryId || givenDiaryId)) {
-        try {
-          setIsLoadingSummary(true);
-          const diary = await getDiary(diaryId || givenDiaryId!);
-          setExistingDiary(diary);
-          
-          // 폼에 기존 데이터 채우기
-          setDate(diary.date);
-          setTitle(diary.title || '');
-          setContent(diary.content);
-          setSelectedMood(diary.mood || '');
-          
-        } catch (error) {
-          console.error('다이어리 로드 실패:', error);
-          Alert.alert(
-            '오류',
-            '일기를 불러올 수 없습니다.',
-            [{ text: '확인', onPress: () => router.back() }]
-          );
-        } finally {
-          setIsLoadingSummary(false);
-        }
-      }
-    };
 
-    loadDiary();
-  }, [isEditMode, diaryId, givenDiaryId]);
 
   /**
    * 통화 요약 및 TODO 불러오기 (컴포넌트 마운트 시)
@@ -123,24 +173,24 @@ export const DiaryWriteScreen = () => {
           
           let callSidToUse = callSid;
           
-          // ✅ callSid가 없으면 최근 통화 기록에서 찾기 (상단 배너에서 온 경우)
+          // ✅ callSid가 없으면 오늘의 통화 기록에서 찾기 (상단 배너에서 온 경우)
           if (!callSidToUse) {
-            console.log('📞 최근 통화 기록에서 callSid 찾기');
+            console.log('📞 오늘의 통화 기록에서 callSid 찾기');
             const { getCallLogs } = await import('../api/call');
             const calls = await getCallLogs({ limit: 10 });
             
-            // 최근 24시간 내 완료된 통화 기록 찾기
-            const now = new Date();
-            const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+            // 오늘 완료된 통화 기록 찾기
+            const today = new Date().toISOString().split('T')[0];
             
-            const recentCall = calls.find((call: any) => {
+            const todayCalls = calls.find((call: any) => {
               const callDate = new Date(call.created_at);
-              return callDate > oneDayAgo && call.call_status === 'completed';
+              const callDateString = callDate.toISOString().split('T')[0];
+              return callDateString === today && call.call_status === 'completed';
             });
             
-            if (recentCall) {
-              callSidToUse = recentCall.call_id;
-              console.log('✅ 최근 통화 기록 발견:', callSidToUse);
+            if (todayCalls) {
+              callSidToUse = todayCalls.call_id;
+              console.log('✅ 오늘의 통화 기록 발견:', callSidToUse);
             }
           }
           
@@ -164,27 +214,33 @@ export const DiaryWriteScreen = () => {
               setSuggestedTodos(extractedTodos);
               
               // 사용자에게 피드백
-              Alert.alert(
-                '💡 일정 발견!',
-                `대화에서 ${extractedTodos.length}개의 일정을 발견했습니다.\n아래에서 등록할 일정을 선택해주세요!`,
-                [{ text: '확인' }]
-              );
+              showConfirmModal({
+                title: '💡 일정 발견!',
+                message: `대화에서 ${extractedTodos.length}개의 일정을 발견했습니다.\n아래에서 등록할 일정을 선택해주세요!`,
+                onConfirm: () => {
+                  hideConfirmModal();
+                },
+              });
             } else if (callLog.conversation_summary) {
               // TODO는 없지만 일기는 있는 경우
-              Alert.alert(
-                '자동 완성',
-                'AI와의 대화 내용이 자동으로 입력되었습니다.\n수정 후 저장해주세요!',
-                [{ text: '확인' }]
-              );
+              showConfirmModal({
+                title: '자동 완성',
+                message: 'AI와의 대화 내용이 자동으로 입력되었습니다.\n수정 후 저장해주세요!',
+                onConfirm: () => {
+                  hideConfirmModal();
+                },
+              });
             }
           }
         } catch (error) {
           console.error('❌ 통화 데이터 로딩 실패:', error);
-          Alert.alert(
-            '오류',
-            '통화 데이터를 불러올 수 없습니다.',
-            [{ text: '확인' }]
-          );
+          showConfirmModal({
+            title: '오류',
+            message: '통화 데이터를 불러올 수 없습니다.',
+            onConfirm: () => {
+              hideConfirmModal();
+            },
+          });
         } finally {
           setIsLoadingSummary(false);
         }
@@ -244,6 +300,77 @@ export const DiaryWriteScreen = () => {
   };
 
   /**
+   * 이미지 선택 핸들러
+   */
+  const handleImagePick = async () => {
+    // 최대 5장 제한 확인
+    if (selectedImages.length >= 5) {
+      showConfirmModal({
+        title: '알림',
+        message: '사진은 최대 5장까지 업로드 가능합니다.',
+        onConfirm: hideConfirmModal,
+      });
+      return;
+    }
+
+    try {
+      // 권한 요청
+      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      
+      if (!permissionResult.granted) {
+        showConfirmModal({
+          title: '권한 필요',
+          message: '사진 라이브러리 접근 권한이 필요합니다.',
+          onConfirm: hideConfirmModal,
+        });
+        return;
+      }
+
+      // 이미지 선택
+      const remainingSlots = 5 - selectedImages.length;
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: 'images',
+        allowsEditing: false,
+        quality: 0.8,
+        allowsMultipleSelection: true,
+      });
+
+      if (result.canceled) {
+        return;
+      }
+
+      // 선택된 이미지 URI 추가 (최대 5장까지)
+      const newImageUris = result.assets
+        .slice(0, remainingSlots)
+        .map(asset => asset.uri);
+      
+      if (result.assets.length > remainingSlots) {
+        showConfirmModal({
+          title: '알림',
+          message: `사진은 최대 5장까지 업로드 가능합니다.\n${remainingSlots}장만 선택되었습니다.`,
+          onConfirm: hideConfirmModal,
+        });
+      }
+      
+      setSelectedImages(prev => [...prev, ...newImageUris]);
+    } catch (error) {
+      console.error('이미지 선택 오류:', error);
+      showConfirmModal({
+        title: '오류',
+        message: '이미지를 선택하는 중 오류가 발생했습니다.',
+        onConfirm: hideConfirmModal,
+      });
+    }
+  };
+
+  /**
+   * 이미지 삭제 핸들러
+   */
+  const handleRemoveImage = (index: number) => {
+    setSelectedImages(prev => prev.filter((_, i) => i !== index));
+  };
+
+  /**
    * TODO 등록 확인
    */
   const handleConfirmTodo = async (index: number, originalTodo: ExtractedTodo) => {
@@ -261,7 +388,13 @@ export const DiaryWriteScreen = () => {
       });
       
       // 성공 피드백
-      Alert.alert('✅ 등록 완료', '일정이 등록되었습니다!');
+      showConfirmModal({
+        title: '✅ 등록 완료',
+        message: '일정이 등록되었습니다!',
+        onConfirm: () => {
+          hideConfirmModal();
+        },
+      });
       
       // 등록된 TODO 제거
       setSuggestedTodos(prev => prev.filter((_, i) => i !== index));
@@ -270,7 +403,13 @@ export const DiaryWriteScreen = () => {
       
     } catch (error) {
       console.error('TODO 등록 실패:', error);
-      Alert.alert('오류', '일정 등록에 실패했습니다.');
+      showConfirmModal({
+        title: '오류',
+        message: '일정 등록에 실패했습니다.',
+        onConfirm: () => {
+          hideConfirmModal();
+        },
+      });
     }
   };
 
@@ -279,106 +418,95 @@ export const DiaryWriteScreen = () => {
    */
   const handleSubmit = async () => {
     // 유효성 검사
-    if (!title.trim()) {
-      Alert.alert('알림', '제목을 입력해주세요.');
-      return;
-    }
-
-    if (!selectedMood) {
-      Alert.alert('알림', '오늘의 기분을 선택해주세요.');
-      return;
-    }
-
-    if (!content.trim()) {
-      Alert.alert('알림', '일기 내용을 입력해주세요.');
+    if (!validateAndShowError()) {
       return;
     }
 
     try {
       setIsSubmitting(true);
 
-      if (isEditMode && (diaryId || givenDiaryId)) {
-        // 수정 모드
-        await updateDiary(diaryId || givenDiaryId!, {
-          title: title.trim() || undefined,
-          content: content.trim(),
-          mood: selectedMood || undefined,
-          status: 'published',
-        });
+      // 1. 일기 먼저 생성
+      const diaries = await createDiary({
+        date,
+        title: title.trim() || undefined,
+        content: content.trim(),
+        mood: selectedMood || undefined,
+        status: 'published',
+      });
 
-        Alert.alert(
-          '완료',
-          '일기가 수정되었습니다!',
-          [
-            {
-              text: '확인',
-              onPress: () => {
-                router.back();
-              },
-            },
-          ]
-        );
-      } else {
-        // 작성 모드
-        await createDiary({
-          date,
-          title: title.trim() || undefined,
-          content: content.trim(),
-          mood: selectedMood || undefined,
-          status: 'published',
-        });
+      // 2. 이미지가 있으면 업로드 (백엔드 API가 준비되면 활성화)
+      if (selectedImages.length > 0 && diaries.length > 0) {
+        const diaryId = diaries[0].diary_id;
+        setIsUploadingImages(true);
 
-        Alert.alert(
-          '완료',
-          '일기가 저장되었습니다!',
-          [
-            {
-              text: '확인',
-              onPress: () => {
-                // 통화에서 온 경우 메인 페이지로, 아니면 뒤로가기
-                if (fromCall) {
-                  router.replace('/home');
-                } else {
-                  router.back();
-                }
-              },
-            },
-          ]
-        );
+        try {
+          // 각 이미지를 순차적으로 업로드
+          for (const imageUri of selectedImages) {
+            const formData = new FormData();
+            const filename = imageUri.split('/').pop() || 'diary-image.jpg';
+            const match = /\.(\w+)$/.exec(filename);
+            const type = match ? `image/${match[1]}` : 'image/jpeg';
+
+            formData.append('file', {
+              uri: imageUri,
+              name: filename,
+              type,
+            } as any);
+
+            // 일기 사진 업로드 API 호출
+            try {
+              const response = await apiClient.post(`/api/diaries/${diaryId}/photos`, formData, {
+                headers: {
+                  'Content-Type': 'multipart/form-data',
+                },
+              });
+              console.log('✅ 이미지 업로드 성공:', response.data);
+            } catch (imageError: any) {
+              console.warn('이미지 업로드 실패 (계속 진행):', imageError);
+              // 이미지 업로드 실패해도 일기는 저장되었으므로 계속 진행
+            }
+          }
+        } catch (error) {
+          console.error('이미지 업로드 처리 오류:', error);
+        } finally {
+          setIsUploadingImages(false);
+        }
       }
+
+      showConfirmModal({
+        title: '완료',
+        message: '일기가 저장되었습니다!',
+        onConfirm: () => {
+          hideConfirmModal();
+          // 통화에서 온 경우 메인 페이지로, 아니면 뒤로가기
+          if (fromCall) {
+            router.replace('/home');
+          } else {
+            router.back();
+          }
+        },
+      });
 
     } catch (error: any) {
       console.error('일기 저장 실패:', error);
-      Alert.alert(
-        '오류',
-        error.response?.data?.detail || '일기 저장에 실패했습니다.'
-      );
+      showConfirmModal({
+        title: '오류',
+        message: error.response?.data?.detail || '일기 저장에 실패했습니다.',
+        onConfirm: hideConfirmModal,
+      });
     } finally {
       setIsSubmitting(false);
+      setIsUploadingImages(false);
     }
   };
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
+    <View style={styles.container}>
       {/* 헤더 */}
-      <View style={styles.header}>
-        <TouchableOpacity
-          onPress={() => {
-            // 통화에서 온 경우 메인으로, 아니면 뒤로가기
-            if (fromCall) {
-              router.replace('/home');
-            } else {
-              router.back();
-            }
-          }}
-          style={styles.backButton}
-          disabled={isSubmitting}
-        >
-          <Text style={styles.backButtonText}>←</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>{isEditMode ? '일기 수정' : '일기 작성'}</Text>
-        <View style={styles.placeholder} />
-      </View>
+      <Header
+        title="일기 작성"
+        showMenuButton={true}
+      />
 
       <ScrollView
         style={styles.scrollView}
@@ -462,8 +590,68 @@ export const DiaryWriteScreen = () => {
           <Text style={styles.charCount}>{content.length}자</Text>
         </View>
 
-        {/* TODO 제안 섹션 (작성 모드일 때만) */}
-        {!isEditMode && suggestedTodos.length > 0 && (
+        {/* 사진 업로드 섹션 */}
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>사진(선택)</Text>
+          
+          {/* 선택된 이미지 미리보기 */}
+          {selectedImages.length > 0 && (
+            <View style={styles.imagePreviewContainer}>
+              {selectedImages.map((uri, index) => (
+                <View key={index} style={styles.imagePreviewWrapper}>
+                  <Image source={{ uri }} style={styles.imagePreview} />
+                  <TouchableOpacity
+                    style={styles.removeImageButton}
+                    onPress={() => handleRemoveImage(index)}
+                    disabled={isSubmitting || isUploadingImages}
+                  >
+                    <Ionicons name="close-circle" size={24} color="#FF3B30" />
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {/* 사진 추가 버튼 (점선 테두리) */}
+          <TouchableOpacity
+            style={[
+              styles.imageUploadButton,
+              selectedImages.length >= 5 && styles.imageUploadButtonDisabled
+            ]}
+            onPress={handleImagePick}
+            disabled={isSubmitting || isUploadingImages || selectedImages.length >= 5}
+            activeOpacity={0.7}
+          >
+            <Ionicons 
+              name="camera-outline" 
+              size={32} 
+              color={selectedImages.length >= 5 ? "#CCCCCC" : "#34B79F"} 
+            />
+            <Text style={[
+              styles.imageUploadButtonText,
+              selectedImages.length >= 5 && styles.imageUploadButtonTextDisabled
+            ]}>
+              {selectedImages.length >= 5 
+                ? '최대 5장까지 업로드 가능'
+                : selectedImages.length > 0 
+                ? '사진 추가' 
+                : '사진 추가하기'}
+            </Text>
+            <Text style={[
+              styles.imageUploadButtonHint,
+              selectedImages.length >= 5 && styles.imageUploadButtonHintDisabled
+            ]}>
+              {selectedImages.length >= 5 
+                ? `현재 ${selectedImages.length}장 선택됨 (최대 5장)`
+                : selectedImages.length > 0 
+                ? `${selectedImages.length}/5장 선택됨`
+                : '최대 5장까지 선택 가능'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* TODO 제안 섹션 */}
+        {suggestedTodos.length > 0 && (
           <View style={styles.todoSection}>
             <Text style={styles.todoSectionTitle}>
               💡 대화에서 발견된 일정 ({suggestedTodos.length}개)
@@ -590,26 +778,73 @@ export const DiaryWriteScreen = () => {
         {/* 저장 버튼 */}
         <TouchableOpacity
           onPress={handleSubmit}
-          style={[styles.submitButton, isSubmitting && styles.submitButtonDisabled]}
-          disabled={isSubmitting}
+          style={[styles.submitButton, (isSubmitting || isUploadingImages) && styles.submitButtonDisabled]}
+          disabled={isSubmitting || isUploadingImages}
         >
-          {isSubmitting ? (
+          {(isSubmitting || isUploadingImages) ? (
             <ActivityIndicator size="small" color="#FFFFFF" />
           ) : (
             <View style={styles.submitButtonContent}>
               <Ionicons 
-                name={isEditMode ? "checkmark-circle" : "pencil"} 
+                name="pencil" 
                 size={20} 
                 color="#FFFFFF" 
                 style={{ marginRight: 8 }} 
               />
               <Text style={styles.submitButtonText}>
-                {isEditMode ? '수정 완료' : '작성하기'}
+                작성하기
               </Text>
             </View>
           )}
         </TouchableOpacity>
       </ScrollView>
+
+      {/* 확인 모달 */}
+      <Modal
+        visible={confirmModal.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={hideConfirmModal}
+      >
+        <Pressable 
+          style={styles.commonModalBackdrop} 
+          onPress={hideConfirmModal}
+        >
+          <Pressable style={styles.commonModalContainer} onPress={() => {}}>
+            <Text style={styles.commonModalTitle}>
+              {confirmModal.title}
+            </Text>
+            <Text style={styles.commonModalText}>
+              {confirmModal.message}
+            </Text>
+            <View style={styles.confirmModalActions}>
+              {confirmModal.onCancel && (
+                <TouchableOpacity
+                  style={[styles.confirmModalButton, styles.confirmModalCancelButton]}
+                  onPress={confirmModal.onCancel}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.confirmModalCancelButtonText}>
+                    {confirmModal.cancelText || '취소'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity
+                style={[styles.confirmModalButton, styles.confirmModalConfirmButton]}
+                onPress={confirmModal.onConfirm}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.confirmModalConfirmButtonText}>
+                  {confirmModal.confirmText || '확인'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* 하단 네비게이션 바 */}
+      <BottomNavigationBar />
     </View>
   );
 };
@@ -619,39 +854,11 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#FFFFFF',
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E8E8E8',
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  backButtonText: {
-    fontSize: 28,
-    color: '#333333',
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#333333',
-  },
-  placeholder: {
-    width: 40,
-  },
   scrollView: {
     flex: 1,
   },
   content: {
     padding: 20,
-    paddingBottom: 100,
   },
   section: {
     marginBottom: 24,
@@ -920,6 +1127,135 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     color: '#FFFFFF',
+  },
+  // 공통 모달 스타일 (GlobalAlertProvider 디자인 참고)
+  commonModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  commonModalContainer: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 12,
+  },
+  commonModalTitle: {
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 8,
+    fontSize: 18,
+  },
+  commonModalText: {
+    color: '#374151',
+    lineHeight: 22,
+    marginBottom: 16,
+    fontSize: 15,
+  },
+  confirmModalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 4,
+    gap: 8,
+  },
+  confirmModalButton: {
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    minWidth: 70,
+    alignItems: 'center',
+  },
+  confirmModalCancelButton: {
+    backgroundColor: '#F3F4F6',
+  },
+  confirmModalConfirmButton: {
+    backgroundColor: Colors.primary,
+  },
+  confirmModalCancelButtonText: {
+    color: '#374151',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  confirmModalConfirmButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  // 이미지 업로드 관련 스타일
+  imagePreviewContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    marginBottom: 12,
+    paddingRight: 8, // 오른쪽 패딩 추가하여 X 버튼이 잘리지 않도록
+  },
+  imagePreviewWrapper: {
+    position: 'relative',
+    width: 100,
+    height: 100,
+    borderRadius: 12,
+    overflow: 'visible', // overflow를 visible로 변경하여 X 버튼이 잘리지 않도록
+  },
+  imagePreview: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 12,
+  },
+  removeImageButton: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    width: 28,
+    height: 28,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+    zIndex: 10, // 다른 요소 위에 표시되도록
+  },
+  imageUploadButton: {
+    width: '100%',
+    minHeight: 120,
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    borderColor: '#34B79F',
+    borderRadius: 12,
+    backgroundColor: '#F8F9FA',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 24,
+    paddingHorizontal: 16,
+  },
+  imageUploadButtonDisabled: {
+    borderColor: '#CCCCCC',
+    backgroundColor: '#F5F5F5',
+  },
+  imageUploadButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#34B79F',
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  imageUploadButtonTextDisabled: {
+    color: '#CCCCCC',
+  },
+  imageUploadButtonHint: {
+    fontSize: 13,
+    color: '#999999',
+  },
+  imageUploadButtonHintDisabled: {
+    color: '#CCCCCC',
   },
 });
 

@@ -17,6 +17,7 @@
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
+import { useErrorStore } from '../store/errorStore';
 
 // ==================== API Base URL 설정 ====================
 const getApiBaseUrl = () => {
@@ -155,6 +156,17 @@ apiClient.interceptors.response.use(
     // 네트워크 연결 실패
     if (!error.response) {
       console.error('❌ 네트워크 연결 실패:', error.message);
+      
+      // 전역 팝업 표시 (diary, ai-call 제외)
+      const { getState } = useErrorStore;
+      const currentPath = getState().currentPath;
+      const shouldShowAlert = !currentPath.includes('diary') && !currentPath.includes('ai-call');
+      
+      if (shouldShowAlert) {
+        const { setError } = useErrorStore.getState();
+        setError('네트워크 오류', '서버에 연결할 수 없습니다. 네트워크 연결을 확인해주세요.');
+      }
+      
       return Promise.reject({
         message: '서버에 연결할 수 없습니다. 네트워크 연결을 확인해주세요.'
       });
@@ -212,16 +224,28 @@ apiClient.interceptors.response.use(
         isRefreshing = false;
         
         return Promise.reject({
-          message: '로그인이 만료되었습니다. 다시 로그인해주세요.',
+          message: '아이디 또는 비밀번호가 일치하지 않습니다.',
           shouldLogout: true
         });
       }
     }
     
+    // 경로 체크: diary, ai-call 경로는 제외
+    const { getState } = useErrorStore;
+    const currentPath = getState().currentPath;
+    const shouldShowAlert = !currentPath.includes('diary') && !currentPath.includes('ai-call');
+    
     // 403: 권한 없음
     if (status === 403) {
       const detail = error.response.data?.detail || '접근 권한이 없습니다.';
       console.error('❌ 403 에러 상세:', error.response.data);
+      
+      // 전역 팝업 표시 (diary, ai-call 제외)
+      if (shouldShowAlert) {
+        const { setError } = useErrorStore.getState();
+        setError('권한 없음', detail);
+      }
+      
       return Promise.reject({
         message: detail
       });
@@ -229,6 +253,11 @@ apiClient.interceptors.response.use(
     
     // 404: 찾을 수 없음
     if (status === 404) {
+      if (shouldShowAlert) {
+        const { setError } = useErrorStore.getState();
+        setError('오류', '요청하신 리소스를 찾을 수 없습니다.');
+      }
+      
       return Promise.reject({
         message: '요청하신 리소스를 찾을 수 없습니다.'
       });
@@ -236,14 +265,27 @@ apiClient.interceptors.response.use(
     
     // 429: Too Many Requests
     if (status === 429) {
+      const message = error.response.data?.detail || '요청이 너무 많습니다. 잠시 후 다시 시도해주세요.';
+      
+      if (shouldShowAlert) {
+        const { setError } = useErrorStore.getState();
+        setError('요청 과다', message);
+      }
+      
       return Promise.reject({
-        message: error.response.data?.detail || '요청이 너무 많습니다. 잠시 후 다시 시도해주세요.'
+        message
       });
     }
     
     // 500: 서버 오류
     if (status >= 500) {
       console.error('❌ 서버 오류:', error.response.data);
+      
+      if (shouldShowAlert) {
+        const { setError } = useErrorStore.getState();
+        setError('서버 오류', '서버에 문제가 발생했습니다. 잠시 후 다시 시도해주세요.');
+      }
+      
       return Promise.reject({
         message: '서버에 문제가 발생했습니다. 잠시 후 다시 시도해주세요.'
       });

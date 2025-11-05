@@ -8,12 +8,13 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Alert,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Header, BottomNavigationBar } from '../components';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../constants/Colors';
+import { useFontSizeStore } from '../store/fontSizeStore';
+import { useAlert } from '../components/GlobalAlertProvider';
 
 interface TodoItem {
   id: string;
@@ -103,6 +104,8 @@ export const TodoDetailScreen = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams();
+  const { fontSizeLevel } = useFontSizeStore();
+  const { show } = useAlert();
 
   // 목업 데이터 (실제로는 API에서 받아올 데이터)
   const todo: TodoItem = {
@@ -118,7 +121,7 @@ export const TodoDetailScreen = () => {
 
 
   const handleComplete = () => {
-    Alert.alert(
+    show(
       '할일 완료',
       '이 할일을 완료하시겠습니까?',
       [
@@ -127,7 +130,7 @@ export const TodoDetailScreen = () => {
           text: '완료',
           onPress: () => {
             // 실제로는 API 호출
-            Alert.alert('완료', '할일이 완료되었습니다!');
+            show('완료', '할일이 완료되었습니다!');
             router.back();
           },
         },
@@ -138,7 +141,10 @@ export const TodoDetailScreen = () => {
   return (
     <View style={styles.container}>
       {/* 공통 헤더 */}
-      <Header title="할일 상세" showBackButton />
+      <Header 
+        title="할일 상세" 
+        showMenuButton={true}
+      />
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* 할일 정보 카드 */}
@@ -206,7 +212,7 @@ export const TodoDetailScreen = () => {
         </View>
 
         {/* 하단 여백 (네비게이션 바 공간 확보) */}
-        <View style={[styles.bottomSpacer, { height: 100 + Math.max(insets.bottom, 10) }]} />
+        <View style={{ height: 20 }} />
       </ScrollView>
 
       {/* 하단 네비게이션 바 */}

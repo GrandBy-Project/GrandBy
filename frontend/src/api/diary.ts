@@ -5,6 +5,12 @@
 
 import apiClient from './client';
 
+export interface DiaryPhoto {
+  photo_id: string;
+  photo_url: string;
+  created_at: string;
+}
+
 export interface Diary {
   diary_id: string;
   user_id: string;
@@ -19,6 +25,8 @@ export interface Diary {
   status: 'draft' | 'published';
   created_at: string;
   updated_at: string;
+  comment_count?: number; // 댓글 개수
+  photos?: DiaryPhoto[]; // 사진 목록
 }
 
 export interface DiaryCreate {

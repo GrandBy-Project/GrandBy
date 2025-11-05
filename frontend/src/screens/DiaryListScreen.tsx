@@ -1,9 +1,9 @@
 /**
- * 다이어리 리스트 화면
- * 날짜별로 작성된 일기 목록 표시 + 캘린더 뷰
+ * 다이어리 허브 화면
+ * 필터, 인사이트, 일기 목록을 한 화면에 통합
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -11,36 +11,58 @@ import {
   FlatList,
   TouchableOpacity,
   ActivityIndicator,
-  Alert,
   RefreshControl,
-  ScrollView,
   Modal,
+  Pressable,
+  ScrollView,
+  Animated,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Calendar, DateData } from 'react-native-calendars';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { getDiaries, Diary } from '../api/diary';
 import { useAuthStore } from '../store/authStore';
 import * as connectionsApi from '../api/connections';
+import { BottomNavigationBar, Header } from '../components';
+import { DiaryFilters } from '../components/DiaryFilters';
+import { DiaryInsights } from '../components/DiaryInsights';
+import { Colors } from '../constants/Colors';
+import { useAlert } from '../components/GlobalAlertProvider';
 
 export const DiaryListScreen = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
+  const { show } = useAlert();
 
   const [activeTab, setActiveTab] = useState<'list' | 'calendar'>('list');
   const [diaries, setDiaries] = useState<Diary[]>([]);
+  const [allDiaries, setAllDiaries] = useState<Diary[]>([]); // 모든 다이어리 (월 필터 없이)
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [selectedDate, setSelectedDate] = useState<string>('');
+
+  // 필터 상태
+  const currentDate = new Date();
+  const [month, setMonth] = useState(
+    `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`
+  );
+  const [selectedMoods, setSelectedMoods] = useState<string[]>([]);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [selectedElderlyIds, setSelectedElderlyIds] = useState<string[]>([]);
 
   // 보호자용 상태
   const [connectedElderly, setConnectedElderly] = useState<any[]>([]);
   const [selectedElderlyId, setSelectedElderlyId] = useState<string | null>(null);
   const [selectedElderlyName, setSelectedElderlyName] = useState<string>('');
   const [showElderlySelector, setShowElderlySelector] = useState(false);
+
+  const flatListRef = useRef<FlatList<Diary>>(null);
+
+  // 무한 스크롤
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const limit = 20;
 
   /**
    * 연결된 어르신 목록 로드
@@ -61,40 +83,205 @@ export const DiaryListScreen = () => {
   };
 
   /**
-   * 다이어리 목록 로드
+   * 모든 다이어리 로드 
    */
-  const loadDiaries = async () => {
+  const loadAllDiaries = async () => {
     try {
-      setIsLoading(true);
-      
-      // 보호자인 경우 선택된 어르신의 다이어리 조회
-      const params: any = { limit: 100 };
+      const params: any = {
+        limit: 1000, // 충분히 큰 수
+        skip: 0,
+      };
       if (user?.role === 'caregiver' && selectedElderlyId) {
         params.elderly_id = selectedElderlyId;
       }
       
       const data = await getDiaries(params);
-      setDiaries(data);
+      const sortedData = [...data].sort((a, b) => {
+        return new Date(b.date).getTime() - new Date(a.date).getTime();
+      });
+      
+      setAllDiaries(sortedData);
     } catch (error: any) {
-      console.error('다이어리 로드 실패:', error);
-      Alert.alert(
-        '오류',
-        error.response?.data?.detail || '일기를 불러오는데 실패했습니다.',
-        [{ text: '확인' }]
-      );
-    } finally {
-      setIsLoading(false);
+      console.error('전체 다이어리 로드 실패:', error);
     }
   };
+
+  /**
+   * 다이어리 목록 로드 (선택된 월만)
+   */
+  const loadDiaries = async (reset = false) => {
+    try {
+      if (reset) {
+        setIsLoading(true);
+        setPage(0);
+        setHasMore(true);
+      }
+      
+      // 월 필터 적용
+      const [year, monthNum] = month.split('-');
+      const startDate = `${year}-${monthNum}-01`;
+      const endDate = `${year}-${monthNum}-${new Date(parseInt(year), parseInt(monthNum), 0).getDate()}`;
+      
+      // 보호자인 경우 선택된 어르신의 다이어리 조회
+      const params: any = {
+        start_date: startDate,
+        end_date: endDate,
+        limit: reset ? 100 : limit * (page + 1), // 월별 조회 시 최대 100개까지 가져오기
+        skip: 0,
+      };
+      if (user?.role === 'caregiver' && selectedElderlyId) {
+        params.elderly_id = selectedElderlyId;
+      }
+      
+      const data = await getDiaries(params);
+      
+      // 최신순 정렬 (날짜 내림차순)
+      const sortedData = [...data].sort((a, b) => {
+        return new Date(b.date).getTime() - new Date(a.date).getTime();
+      });
+      
+      if (reset) {
+        setDiaries(sortedData);
+      } else {
+        setDiaries(prev => [...prev, ...sortedData].sort((a, b) => {
+          return new Date(b.date).getTime() - new Date(a.date).getTime();
+        }));
+      }
+      
+      if (data.length < limit) {
+        setHasMore(false);
+      }
+    } catch (error: any) {
+      console.error('다이어리 로드 실패:', error);
+      show('오류', error.response?.data?.detail || '일기를 불러오는데 실패했습니다.');
+    } finally {
+      setIsLoading(false);
+      setIsRefreshing(false);
+    }
+  };
+
+  /**
+   * 필터링된 다이어리 목록 (리스트 탭용)
+   */
+  const filteredListDiaries = useMemo(() => {
+    let filtered = [...diaries];
+
+    // 월 필터 적용
+    // if (month) {
+    //   filtered = filtered.filter(diary => {
+    //     const diaryMonth = diary.date.substring(0, 7); // YYYY-MM
+    //     return diaryMonth === month;
+    //   });
+    // }
+
+    // 감정 필터
+    if (selectedMoods.length > 0) {
+      filtered = filtered.filter(diary => diary.mood && selectedMoods.includes(diary.mood));
+    }
+
+    // 어르신 필터 (보호자용)
+    if (selectedElderlyIds.length > 0 && user?.role === 'caregiver') {
+      filtered = filtered.filter(diary => selectedElderlyIds.includes(diary.author_id));
+    }
+
+    // 최신순 정렬 (날짜 내림차순)
+    filtered.sort((a, b) => {
+      return new Date(b.date).getTime() - new Date(a.date).getTime();
+    });
+
+    return filtered;
+  }, [diaries, selectedMoods, selectedElderlyIds, user?.role]);
+
+  /**
+   * 월별로 그룹화된 데이터 생성 (캘린더 탭용)
+   */
+  const groupedDiaries = useMemo(() => {
+    let filtered = [...diaries];
+
+    // // 월 필터 적용
+    // if (month) {
+    //   filtered = filtered.filter(diary => {
+    //     const diaryMonth = diary.date.substring(0, 7); // YYYY-MM
+    //     return diaryMonth === month;
+    //   });
+    // }
+
+    // 감정 필터
+    if (selectedMoods.length > 0) {
+      filtered = filtered.filter(diary => diary.mood && selectedMoods.includes(diary.mood));
+    }
+
+    // 어르신 필터 (보호자용)
+    if (selectedElderlyIds.length > 0 && user?.role === 'caregiver') {
+      filtered = filtered.filter(diary => selectedElderlyIds.includes(diary.author_id));
+    }
+
+    // 최신순 정렬 (날짜 내림차순)
+    filtered.sort((a, b) => {
+      return new Date(b.date).getTime() - new Date(a.date).getTime();
+    });
+
+    // 월별 그룹화
+    const grouped: Record<string, Diary[]> = {};
+    filtered.forEach(diary => {
+      const monthKey = diary.date.substring(0, 7); // YYYY-MM
+      if (!grouped[monthKey]) {
+        grouped[monthKey] = [];
+      }
+      grouped[monthKey].push(diary);
+    });
+
+    // 섹션 배열로 변환 (최신 월부터)
+    const sections = Object.keys(grouped)
+      .sort((a, b) => b.localeCompare(a)) // 최신 월부터
+      .map(monthKey => {
+        const [year, month] = monthKey.split('-');
+        return {
+          title: `${year}년 ${parseInt(month)}월`,
+          data: grouped[monthKey],
+          monthKey,
+        };
+      });
+
+    return sections;
+  }, [diaries, selectedMoods, selectedElderlyIds, user?.role]);
+
+  /**
+   * 월 변경 시 다이어리 다시 로드
+   */
+  useEffect(() => {
+    if (activeTab === 'list') {
+      loadDiaries(true);
+    } else if (activeTab === 'calendar') {
+      // 월간 리포트 탭에서도 월 변경 시 데이터 다시 로드
+      setIsReportLoading(true);
+      loadDiaries(true).finally(() => {
+        // 약간의 지연을 두어 로딩 상태를 명확히 표시
+        setTimeout(() => {
+          setIsReportLoading(false);
+        }, 300);
+      });
+    }
+  }, [month, selectedElderlyId, activeTab]);
 
   /**
    * 새로고침
    */
   const handleRefresh = async () => {
     setIsRefreshing(true);
-    await loadDiaries();
-    setIsRefreshing(false);
+    await loadDiaries(true);
   };
+
+  /**
+   * 더 불러오기
+   */
+  const loadMore = () => {
+    if (!isLoading && hasMore) {
+      setPage(prev => prev + 1);
+      loadDiaries(false);
+    }
+  };
+
 
   /**
    * 보호자인 경우 연결된 어르신 목록 로드
@@ -106,22 +293,26 @@ export const DiaryListScreen = () => {
   }, [user]);
 
   /**
-   * 선택된 어르신이 변경되면 다이어리 새로고침
+   * 어르신 선택 변경 시 전체 다이어리 다시 로드
    */
   useEffect(() => {
-    if (user?.role === 'caregiver' && selectedElderlyId) {
-      loadDiaries();
+    if (selectedElderlyId) {
+      loadAllDiaries();
     }
   }, [selectedElderlyId]);
 
   /**
    * 화면 포커스 시 데이터 새로고침
    * 일기 작성/삭제 후 돌아왔을 때 자동으로 목록 갱신
+   * 월 필터는 캘린더와 독립적으로 관리됨
    */
   useFocusEffect(
     useCallback(() => {
-      loadDiaries();
-    }, [selectedElderlyId, user])
+      // 전체 다이어리 로드 (availableMonths 계산용)
+      loadAllDiaries();
+      // 선택된 월의 다이어리 로드
+      loadDiaries(true);
+    }, [selectedElderlyId, user, month])
   );
 
   /**
@@ -131,6 +322,21 @@ export const DiaryListScreen = () => {
     setSelectedElderlyId(elderly.user_id);
     setSelectedElderlyName(elderly.name);
     setShowElderlySelector(false);
+  };
+
+  /**
+   * 기분 아이콘 정보 가져오기
+   */
+  const getMoodIcon = (mood?: string | null): { name: string; color: string } | null => {
+    const moodMap: Record<string, { name: string; color: string }> = {
+      happy: { name: 'happy', color: '#FFD700' },
+      excited: { name: 'sparkles', color: '#FF6B6B' },
+      calm: { name: 'leaf', color: '#4ECDC4' },
+      sad: { name: 'sad', color: '#5499C7' },
+      angry: { name: 'thunderstorm', color: '#E74C3C' },
+      tired: { name: 'moon', color: '#9B59B6' },
+    };
+    return mood && moodMap[mood] ? moodMap[mood] : null;
   };
 
   /**
@@ -151,37 +357,6 @@ export const DiaryListScreen = () => {
     const date = new Date(dateString);
     const days = ['일', '월', '화', '수', '목', '금', '토'];
     return days[date.getDay()];
-  };
-
-  /**
-   * 작성자 타입 한글 표시
-   */
-  const getAuthorTypeText = (authorType: string): string => {
-    switch (authorType) {
-      case 'elderly':
-        return '어르신 작성';
-      case 'caregiver':
-        return '보호자 작성';
-      case 'ai':
-        return 'AI 자동 생성';
-      default:
-        return '';
-    }
-  };
-
-  /**
-   * 기분 아이콘 정보 가져오기
-   */
-  const getMoodIcon = (mood?: string | null): { name: string; color: string } | null => {
-    const moodMap: Record<string, { name: string; color: string }> = {
-      happy: { name: 'happy', color: '#FFD700' },
-      excited: { name: 'sparkles', color: '#FF6B6B' },
-      calm: { name: 'leaf', color: '#4ECDC4' },
-      sad: { name: 'sad', color: '#5499C7' },
-      angry: { name: 'thunderstorm', color: '#E74C3C' },
-      tired: { name: 'moon', color: '#9B59B6' },
-    };
-    return mood && moodMap[mood] ? moodMap[mood] : null;
   };
 
   /**
@@ -230,10 +405,25 @@ export const DiaryListScreen = () => {
       : item.content;
 
     const authorBadge = getAuthorBadgeInfo(item);
+    const moodInfo = getMoodIcon(item.mood);
+    const borderColor = moodInfo ? moodInfo.color : '#9C27B0';
+    
+    // 디버깅용 (개발 중에만)
+    if (__DEV__) {
+      console.log('Diary item:', {
+        diary_id: item.diary_id,
+        photos: item.photos,
+        photosLength: item.photos?.length,
+        comment_count: item.comment_count,
+      });
+    }
 
     return (
       <TouchableOpacity
-        style={styles.diaryCard}
+        style={[
+          styles.diaryCard,
+          { borderLeftColor: borderColor }
+        ]}
         onPress={() => router.push(`/diary-detail?diaryId=${item.diary_id}`)}
       >
         {/* 날짜 헤더 */}
@@ -262,13 +452,13 @@ export const DiaryListScreen = () => {
             <View style={[styles.authorBadge, { backgroundColor: authorBadge.bgColor }]}>
               {authorBadge.iconFamily === 'MaterialCommunityIcons' ? (
                 <MaterialCommunityIcons 
-                  name={authorBadge.icon} 
+                  name={authorBadge.icon as any} 
                   size={14} 
                   color={authorBadge.color} 
                 />
               ) : (
                 <Ionicons 
-                  name={authorBadge.icon} 
+                  name={authorBadge.icon as any} 
                   size={14} 
                   color={authorBadge.color} 
                 />
@@ -289,15 +479,81 @@ export const DiaryListScreen = () => {
         {/* 내용 미리보기 */}
         <Text style={styles.contentPreview}>{contentPreview}</Text>
 
-        {/* 작성 시간 */}
-        <Text style={styles.timestamp}>
-          {new Date(item.created_at).toLocaleString('ko-KR', {
-            month: 'long',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-          })}
-        </Text>
+        {/* 작성 시간 및 댓글 개수, 사진 개수 */}
+        <View style={styles.footerRow}>
+          <Text style={styles.timestamp}>
+            {new Date(item.created_at).toLocaleString('ko-KR', {
+              month: 'long',
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+            })}
+          </Text>
+          {(item.photos && item.photos.length > 0) || (item.comment_count !== undefined && item.comment_count > 0) ? (
+            <View style={styles.badgeContainer}>
+              {/* 사진 배지 */}
+              {item.photos && item.photos.length > 0 && (
+                <View style={styles.photoCountBadge}>
+                  <Ionicons name="camera-outline" size={14} color="#FF9500" />
+                  <Text style={styles.photoCountText}>{item.photos.length}</Text>
+                </View>
+              )}
+              {/* 댓글 배지 */}
+              {item.comment_count !== undefined && item.comment_count > 0 && (
+                <View style={styles.commentCountBadge}>
+                  <Ionicons name="chatbubble-outline" size={14} color={Colors.primary} />
+                  <Text style={styles.commentCountText}>{item.comment_count}</Text>
+                </View>
+              )}
+            </View>
+          ) : null}
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  /**
+   * 섹션 헤더 렌더링 (캘린더 탭용)
+   */
+  const renderSectionHeader = ({ section }: { section: { title: string; data: Diary[] } }) => (
+    <View style={styles.sectionHeader}>
+      <Text style={styles.sectionHeaderText}>{section.title}</Text>
+      <Text style={styles.sectionHeaderCount}>{section.data.length}개</Text>
+    </View>
+  );
+
+  /**
+   * 캘린더 탭용 다이어리 아이템 렌더링 (간소화: 제목, 감정 도트, 작성일)
+   */
+  const renderCalendarDiaryItem = ({ item }: { item: Diary }) => {
+    const moodInfo = getMoodIcon(item.mood);
+    const dateObj = new Date(item.date);
+    const day = dateObj.getDate();
+
+    return (
+      <TouchableOpacity
+        style={styles.diaryItem}
+        onPress={() => router.push(`/diary-detail?diaryId=${item.diary_id}`)}
+        activeOpacity={0.7}
+      >
+        {/* 감정 도트 */}
+        <View style={[
+          styles.moodDot,
+          moodInfo && { backgroundColor: moodInfo.color }
+        ]} />
+
+        {/* 제목 및 작성일 */}
+        <View style={styles.diaryItemContent}>
+          <Text style={styles.diaryItemTitle} numberOfLines={1}>
+            {item.title || '제목 없음'}
+          </Text>
+          <Text style={styles.diaryItemDate}>
+            {day}일
+          </Text>
+        </View>
+
+        {/* 화살표 */}
+        <Ionicons name="chevron-forward" size={20} color={Colors.textDisabled} />
       </TouchableOpacity>
     );
   };
@@ -317,192 +573,64 @@ export const DiaryListScreen = () => {
   );
 
   /**
-   * 캘린더에 표시할 마커 데이터 생성
+   * 인사이트 클릭 핸들러 (월간리포트 탭용 - 필터 적용 안함)
    */
-  const getMarkedDates = () => {
-    const marked: any = {};
-    
-    // 일기가 있는 날짜는 녹색 점으로만 표시
-    diaries.forEach((diary) => {
-      const dateKey = diary.date;
-      
-      marked[dateKey] = {
-        marked: true,
-        dotColor: '#34B79F',
-      };
+  const handleInsightPress = (type: string) => {
+    // 월간리포트에서는 필터 적용하지 않음
+  };
+
+  // 월간 일기 목록 (인사이트용)
+  const monthlyDiaries = diaries.filter(diary => {
+    const diaryMonth = diary.date.substring(0, 7);
+    return diaryMonth === month;
+  });
+
+  // 월간 리포트 탭에서 월 변경 시 로딩 상태
+  const [isReportLoading, setIsReportLoading] = useState(false);
+
+  /**
+   * 다이어리가 있는 월 목록 계산 (YYYY-MM 형식)
+   * allDiaries에서 계산 (전체 다이어리 기준)
+   */
+  const availableMonths = useMemo(() => {
+    const monthSet = new Set<string>();
+    allDiaries.forEach(diary => {
+      const diaryMonth = diary.date.substring(0, 7); // YYYY-MM
+      monthSet.add(diaryMonth);
     });
+    return Array.from(monthSet).sort((a, b) => b.localeCompare(a)); // 최신 월부터
+  }, [allDiaries]);
 
-    // 선택된 날짜에 녹색 배경 표시
-    if (selectedDate) {
-      if (marked[selectedDate]) {
-        // 이미 일기가 있는 날짜를 선택한 경우 (점 + 배경)
-        marked[selectedDate] = {
-          ...marked[selectedDate],
-          selected: true,
-          selectedColor: '#34B79F',
-          selectedTextColor: '#FFFFFF',
-        };
-      } else {
-        // 일기가 없는 날짜를 선택한 경우 (배경만)
-        marked[selectedDate] = {
-          selected: true,
-          selectedColor: '#34B79F',
-          selectedTextColor: '#FFFFFF',
-        };
-      }
-    }
-
-    return marked;
-  };
-
-  /**
-   * 캘린더에서 날짜 선택 시
-   */
-  const handleDayPress = (day: DateData) => {
-    setSelectedDate(day.dateString);
-  };
-
-  /**
-   * 캘린더 뷰 렌더링
-   */
-  const renderCalendarView = () => {
-    return (
-      <ScrollView 
-        style={styles.calendarContainer}
-        refreshControl={
-          <RefreshControl
-            refreshing={isRefreshing}
-            onRefresh={handleRefresh}
-            colors={['#34B79F']}
-            tintColor="#34B79F"
-          />
-        }
-      >
-        <Calendar
-          markedDates={getMarkedDates()}
-          onDayPress={handleDayPress}
-          monthFormat={'yyyy년 M월'}
-          theme={{
-            backgroundColor: '#FFFFFF',
-            calendarBackground: '#FFFFFF',
-            textSectionTitleColor: '#666666',
-            selectedDayBackgroundColor: '#34B79F',
-            selectedDayTextColor: '#FFFFFF',
-            todayTextColor: '#34B79F',
-            dayTextColor: '#333333',
-            textDisabledColor: '#CCCCCC',
-            dotColor: '#34B79F',
-            selectedDotColor: '#FFFFFF',
-            arrowColor: '#34B79F',
-            monthTextColor: '#333333',
-            textDayFontWeight: '500',
-            textMonthFontWeight: '700',
-            textDayHeaderFontWeight: '600',
-            textDayFontSize: 16,
-            textMonthFontSize: 18,
-            textDayHeaderFontSize: 14,
-          }}
-          style={styles.calendar}
-        />
-
-        {/* 선택한 날짜의 일기 */}
-        <View style={styles.recentDiariesSection}>
-          {selectedDate ? (
-            <>
-              <View style={styles.sectionTitleContainer}>
-                <Ionicons name="calendar-outline" size={20} color="#333333" />
-                <Text style={styles.sectionTitle}>
-                  {formatDate(selectedDate)} ({formatDayOfWeek(selectedDate)})
-                </Text>
-              </View>
-              {diaries.filter(diary => diary.date === selectedDate).length > 0 ? (
-                diaries
-                  .filter(diary => diary.date === selectedDate)
-                  .map((diary) => (
-                    <TouchableOpacity
-                      key={diary.diary_id}
-                      style={styles.miniDiaryCard}
-                      onPress={() => router.push(`/diary-detail?diaryId=${diary.diary_id}`)}
-                    >
-                      <View style={styles.miniDiaryHeader}>
-                        <Text style={styles.miniDiaryDate}>
-                          {formatDate(diary.date)} ({formatDayOfWeek(diary.date)})
-                        </Text>
-                        {diary.mood && getMoodIcon(diary.mood) && (
-                          <Ionicons 
-                            name={getMoodIcon(diary.mood)!.name as any} 
-                            size={20} 
-                            color={getMoodIcon(diary.mood)!.color} 
-                          />
-                        )}
-                      </View>
-                      {diary.title && (
-                        <Text style={styles.miniDiaryTitle} numberOfLines={1}>
-                          {diary.title}
-                        </Text>
-                      )}
-                      <Text style={styles.miniDiaryContent} numberOfLines={2}>
-                        {diary.content}
-                      </Text>
-                    </TouchableOpacity>
-                  ))
-              ) : (
-                <View style={styles.emptySelectedDate}>
-                  <Ionicons name="book-outline" size={48} color="#CCCCCC" style={{ marginBottom: 12 }} />
-                  <Text style={styles.emptySelectedDateText}>
-                    작성된 일기가 없습니다
-                  </Text>
-                </View>
-              )}
-            </>
-          ) : (
-            <View style={styles.selectDatePrompt}>
-              <Ionicons name="hand-left-outline" size={48} color="#CCCCCC" style={{ marginBottom: 16 }} />
-              <Text style={styles.selectDateText}>
-                캘린더에서 날짜를 선택하면{'\n'}해당 날짜의 일기를 확인할 수 있습니다
-              </Text>
-            </View>
-          )}
-        </View>
-      </ScrollView>
-    );
-  };
-
-  if (isLoading && !isRefreshing) {
+  if (isLoading && !isRefreshing && diaries.length === 0) {
     return (
       <View style={[styles.container, styles.loadingContainer, { paddingTop: insets.top }]}>
-        <ActivityIndicator size="large" color="#34B79F" />
+        <ActivityIndicator size="large" color={Colors.primary} />
         <Text style={styles.loadingText}>일기를 불러오는 중...</Text>
       </View>
     );
   }
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
+    <View style={styles.container}>
       {/* 헤더 */}
-      <View style={styles.header}>
-        <TouchableOpacity 
-          onPress={() => router.back()}
-          style={styles.backButton}
-        >
-          <Text style={styles.backButtonText}>←</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>
-          {user?.role === 'caregiver' && selectedElderlyName
+      <Header
+        title={
+          user?.role === 'caregiver' && selectedElderlyName
             ? `${selectedElderlyName}님의 일기장`
-            : '나의 일기장'}
-        </Text>
-        {user?.role === 'caregiver' && connectedElderly.length > 0 ? (
-          <TouchableOpacity 
-            onPress={() => setShowElderlySelector(true)}
-            style={styles.elderlySelectButton}
-          >
-            <Ionicons name="person-outline" size={20} color="#333333" />
-          </TouchableOpacity>
-        ) : (
-          <View style={styles.placeholder} />
-        )}
-      </View>
+            : '나의 일기장'
+        }
+        showMenuButton={true}
+        rightButton={
+          user?.role === 'caregiver' && connectedElderly.length > 0 ? (
+            <TouchableOpacity
+              onPress={() => setShowElderlySelector(true)}
+              style={styles.elderlySelectButton}
+            >
+              <Ionicons name="person-outline" size={20} color="#333333" />
+            </TouchableOpacity>
+          ) : undefined
+        }
+      />
 
       {/* 어르신 선택 모달 */}
       <Modal
@@ -567,46 +695,101 @@ export const DiaryListScreen = () => {
           onPress={() => setActiveTab('calendar')}
         >
           <Ionicons 
-            name="calendar-outline" 
+            name="stats-chart-outline" 
             size={20} 
             color={activeTab === 'calendar' ? '#FFFFFF' : '#666666'} 
             style={{ marginRight: 6 }}
           />
           <Text style={[styles.tabText, activeTab === 'calendar' && styles.activeTabText]}>
-            캘린더
+            월간리포트
           </Text>
         </TouchableOpacity>
       </View>
 
       {/* 컨텐츠 영역 */}
       {activeTab === 'list' ? (
+        /* 리스트 탭: 필터 + 다이어리 목록 */
         <FlatList
-          data={diaries}
+          ref={flatListRef}
+          data={filteredListDiaries}
           renderItem={renderDiaryItem}
           keyExtractor={(item) => item.diary_id}
           contentContainerStyle={styles.listContent}
+          ListHeaderComponent={
+            <DiaryFilters
+              month={month}
+              selectedMoods={selectedMoods}
+              selectedTags={selectedTags}
+              selectedElderlyIds={selectedElderlyIds}
+              onMonthChange={setMonth}
+              onMoodsChange={setSelectedMoods}
+              onTagsChange={setSelectedTags}
+              onElderlyIdsChange={setSelectedElderlyIds}
+              connectedElderly={connectedElderly}
+              availableMonths={availableMonths}
+            />
+          }
           ListEmptyComponent={renderEmptyState}
           refreshControl={
             <RefreshControl
               refreshing={isRefreshing}
               onRefresh={handleRefresh}
-              colors={['#34B79F']}
-              tintColor="#34B79F"
+              colors={[Colors.primary]}
+              tintColor={Colors.primary}
             />
           }
           showsVerticalScrollIndicator={false}
+          // 콘텐츠가 부족해도 스크롤 허용 (bounce 효과)
+          bounces={true}
+          alwaysBounceVertical={false}
         />
       ) : (
-        renderCalendarView()
+        /* 월간리포트 탭: 인사이트만 표시 */
+        <ScrollView
+          contentContainerStyle={
+            isReportLoading 
+              ? styles.reportLoadingContent 
+              : styles.reportContent
+          }
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefreshing}
+              onRefresh={handleRefresh}
+              colors={[Colors.primary]}
+              tintColor={Colors.primary}
+            />
+          }
+        >
+          {isReportLoading ? (
+            <View style={styles.reportLoadingContainer}>
+              <ActivityIndicator size="large" color={Colors.primary} />
+              <Text style={styles.loadingText}>월간 리포트를 불러오는 중...</Text>
+            </View>
+          ) : (
+            <DiaryInsights
+              month={month}
+              diaries={monthlyDiaries}
+              onInsightPress={handleInsightPress}
+              onMonthChange={setMonth}
+              availableMonths={availableMonths}
+            />
+          )}
+        </ScrollView>
       )}
 
-      {/* 일기 작성 플로팅 버튼 */}
-      <TouchableOpacity
-        style={[styles.floatingButton, { bottom: insets.bottom + 24 }]}
-        onPress={() => router.push('/diary-write')}
-      >
-        <Ionicons name="create" size={28} color="#FFFFFF" />
-      </TouchableOpacity>
+      {/* 하단 네비게이션 바 */}
+      <BottomNavigationBar />
+
+      {/* 일기 작성 플로팅 버튼 (리스트 탭만) */}
+      {activeTab === 'list' && (
+        <TouchableOpacity
+          style={[styles.floatingButton, { bottom: insets.bottom + 90 }]}
+          onPress={() => router.push('/diary-write')}
+        >
+          <Ionicons name="create" size={28} color="#FFFFFF" />
+        </TouchableOpacity>
+      )}
     </View>
   );
 };
@@ -620,37 +803,50 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  reportLoadingContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    minHeight: '100%',
+  },
+  reportLoadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    minHeight: 400,
+  },
   loadingText: {
     marginTop: 16,
     fontSize: 16,
     color: '#666666',
   },
-  header: {
+  tabContainer: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    backgroundColor: '#F5F5F5',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 8,
     borderBottomWidth: 1,
     borderBottomColor: '#E8E8E8',
   },
-  backButton: {
-    width: 40,
-    height: 40,
+  tab: {
+    flex: 1,
+    flexDirection: 'row',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
     alignItems: 'center',
     justifyContent: 'center',
+    borderRadius: 12,
+    marginHorizontal: 4,
   },
-  backButtonText: {
-    fontSize: 28,
-    color: '#333333',
+  activeTab: {
+    backgroundColor: '#34B79F',
   },
-  headerTitle: {
-    fontSize: 20,
+  tabText: {
+    fontSize: 16,
     fontWeight: '600',
-    color: '#333333',
+    color: '#666666',
   },
-  placeholder: {
-    width: 40,
+  activeTabText: {
+    color: '#FFFFFF',
   },
   elderlySelectButton: {
     width: 40,
@@ -717,114 +913,76 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#333333',
   },
-  tabContainer: {
-    flexDirection: 'row',
-    backgroundColor: '#F5F5F5',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E8E8E8',
-  },
-  tab: {
-    flex: 1,
-    flexDirection: 'row',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 12,
-    marginHorizontal: 4,
-  },
-  activeTab: {
-    backgroundColor: '#34B79F',
-  },
-  tabText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#666666',
-  },
-  activeTabText: {
-    color: '#FFFFFF',
-  },
-  calendarContainer: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-  },
-  calendar: {
-    marginTop: 8,
-    paddingHorizontal: 16,
-  },
-  recentDiariesSection: {
-    padding: 16,
-    paddingBottom: 100,
-  },
-  sectionTitleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 16,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#333333',
-  },
-  miniDiaryCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#E8E8E8',
-  },
-  miniDiaryHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  miniDiaryDate: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#34B79F',
-  },
-  miniDiaryTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#333333',
-    marginBottom: 4,
-  },
-  miniDiaryContent: {
-    fontSize: 14,
-    color: '#666666',
-    lineHeight: 20,
-  },
-  floatingButton: {
-    position: 'absolute',
-    right: 24,
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: '#34B79F',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
   listContent: {
     padding: 16,
-    paddingBottom: 100,
+    paddingBottom: 0,
+  },
+  reportContent: {
+    flexGrow: 1,
+    paddingBottom: 20,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: Colors.background,
+    marginTop: 8,
+    marginBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.borderLight,
+  },
+  sectionHeaderText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: Colors.text,
+  },
+  sectionHeaderCount: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: Colors.textSecondary,
+  },
+  diaryItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.background,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 8,
+    marginHorizontal: 16,
+    borderWidth: 1,
+    borderColor: Colors.borderLight,
+    gap: 12,
+  },
+  moodDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: Colors.textDisabled,
+  },
+  diaryItemContent: {
+    flex: 1,
+  },
+  diaryItemTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.text,
+    marginBottom: 4,
+  },
+  diaryItemDate: {
+    fontSize: 13,
+    color: Colors.textSecondary,
   },
   diaryCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#FFF9F5',
     borderRadius: 16,
     padding: 20,
     marginBottom: 16,
     borderWidth: 1,
     borderColor: '#E8E8E8',
+    borderLeftWidth: 4,
+    borderLeftColor: '#9C27B0',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
@@ -844,18 +1002,18 @@ const styles = StyleSheet.create({
   dateText: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#333333',
+    color: Colors.text,
     marginRight: 8,
   },
   dayText: {
     fontSize: 16,
     fontWeight: '500',
-    color: '#34B79F',
+    color: Colors.primary,
   },
   titleText: {
     fontSize: 17,
     fontWeight: '600',
-    color: '#333333',
+    color: Colors.text,
     marginBottom: 8,
   },
   authorInfo: {
@@ -893,12 +1051,65 @@ const styles = StyleSheet.create({
   contentPreview: {
     fontSize: 16,
     lineHeight: 24,
-    color: '#333333',
+    color: Colors.text,
     marginBottom: 12,
   },
   timestamp: {
     fontSize: 13,
-    color: '#999999',
+    color: Colors.textLight,
+  },
+  footerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  badgeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  photoCountBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: '#FFF4E6',
+    borderRadius: 12,
+  },
+  photoCountText: {
+    fontSize: 13,
+    color: '#FF9500',
+    fontWeight: '600',
+  },
+  commentCountBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: '#F0F8FF',
+    borderRadius: 12,
+  },
+  commentCountText: {
+    fontSize: 13,
+    color: Colors.primary,
+    fontWeight: '600',
+  },
+  floatingButton: {
+    position: 'absolute',
+    right: 24,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#34B79F',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
   },
   emptyContainer: {
     flex: 1,
@@ -909,40 +1120,14 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 20,
     fontWeight: '600',
-    color: '#333333',
+    color: Colors.text,
     marginBottom: 8,
   },
   emptyDescription: {
     fontSize: 15,
-    color: '#666666',
+    color: Colors.textSecondary,
     textAlign: 'center',
     lineHeight: 22,
-  },
-  emptySelectedDate: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 40,
-    paddingHorizontal: 20,
-    backgroundColor: '#F9F9F9',
-    borderRadius: 12,
-    marginTop: 8,
-  },
-  emptySelectedDateText: {
-    fontSize: 16,
-    color: '#666666',
-    textAlign: 'center',
-  },
-  selectDatePrompt: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 60,
-    paddingHorizontal: 20,
-  },
-  selectDateText: {
-    fontSize: 16,
-    color: '#999999',
-    textAlign: 'center',
-    lineHeight: 24,
   },
 });
 

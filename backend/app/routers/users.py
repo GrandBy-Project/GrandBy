@@ -555,9 +555,52 @@ async def delete_connection(
             detail="활성 연결만 해제할 수 있습니다."
         )
     
+    # 상대방 정보 저장 (알림 전송용)
+    other_user_id = connection.caregiver_id if current_user.user_id == connection.elderly_id else connection.elderly_id
+    other_user = db.query(User).filter(User.user_id == other_user_id).first()
+    current_user_name = current_user.name
+    
     # 연결 해제
     db.delete(connection)
+    
+    # 관련 알림 삭제
+    db.query(Notification).filter(
+        Notification.related_id == connection_id
+    ).delete()
+    
     db.commit()
+    
+    # 🔔 연결 해제 알림 생성 및 전송 (비동기)
+    if other_user:
+        try:
+            notification = Notification(
+                notification_id=str(uuid.uuid4()),
+                user_id=other_user_id,
+                type=NotificationType.CONNECTION_ACCEPTED,  # 임시로 사용 (CONNECTION_DISCONNECTED 타입이 없음)
+                title="연결 해제",
+                message=f"{current_user_name}님이 연결을 해제했습니다.",
+                related_id=connection_id,
+                is_pushed=False
+            )
+            db.add(notification)
+            db.commit()
+            
+            # 푸시 알림 전송 (비동기)
+            try:
+                from app.services.notification_service import NotificationService
+                await NotificationService.create_and_send_notification(
+                    db=db,
+                    user_id=other_user_id,
+                    notification_type=NotificationType.CONNECTION_ACCEPTED,
+                    title="연결 해제",
+                    message=f"{current_user_name}님이 연결을 해제했습니다.",
+                    related_id=connection_id,
+                    notification_type_key='connection_enabled'  # 임시로 사용
+                )
+            except Exception as notify_error:
+                logger.error(f"⚠️ 연결 해제 알림 전송 실패 (연결은 해제됨): {str(notify_error)}")
+        except Exception as notification_error:
+            logger.error(f"⚠️ 연결 해제 알림 생성 실패: {str(notification_error)}")
     
     return {"message": "연결이 해제되었습니다."}
 
@@ -849,19 +892,15 @@ async def change_password(
     - 현재 비밀번호 확인 필수
     - 새 비밀번호 유효성 검증
     """
-    # 소셜 로그인 사용자는 비밀번호 변경 불가
-    if not current_user.password_hash:
-        raise HTTPException(
-            status_code=400,
-            detail="소셜 로그인 사용자는 비밀번호를 변경할 수 없습니다"
-        )
-    
-    # 현재 비밀번호 확인
-    if not pwd_context.verify(request.current_password, current_user.password_hash):
-        raise HTTPException(
-            status_code=400,
-            detail="현재 비밀번호가 일치하지 않습니다"
-        )
+    # 비밀번호가 있는 경우 현재 비밀번호 확인 필요
+    if current_user.password_hash:
+        # 현재 비밀번호 확인
+        if not pwd_context.verify(request.current_password, current_user.password_hash):
+            raise HTTPException(
+                status_code=400,
+                detail="현재 비밀번호가 일치하지 않습니다"
+            )
+    # 비밀번호가 없는 경우 (소셜 로그인 등) - 현재 비밀번호 확인 없이 새 비밀번호 설정 허용
     
     # 새 비밀번호 검증
     if len(request.new_password) < 6:
@@ -870,8 +909,8 @@ async def change_password(
             detail="비밀번호는 최소 6자 이상이어야 합니다"
         )
     
-    # 새 비밀번호가 현재 비밀번호와 동일한지 확인
-    if request.current_password == request.new_password:
+    # 새 비밀번호가 현재 비밀번호와 동일한지 확인 (비밀번호가 있는 경우만)
+    if current_user.password_hash and request.current_password == request.new_password:
         raise HTTPException(
             status_code=400,
             detail="새 비밀번호는 현재 비밀번호와 달라야 합니다"
@@ -958,6 +997,7 @@ async def update_push_token(
     
     - 앱 시작 시 자동으로 호출
     - Expo Push Token 저장
+    - 동일 토큰을 가진 다른 사용자의 토큰은 자동으로 정리 (중복 방지)
     """
     
     # FCM 토큰 또는 Expo Push Token 모두 허용
@@ -979,17 +1019,55 @@ async def update_push_token(
             detail="유효하지 않은 푸시 토큰 형식입니다."
         )
     
+    # 🔧 B. 중복 토큰 정리: 동일한 토큰을 가진 다른 사용자의 토큰 제거
+    other_users_with_same_token = db.query(User).filter(
+        and_(
+            User.push_token == token_data.push_token,
+            User.user_id != current_user.user_id
+        )
+    ).all()
+    
+    for other_user in other_users_with_same_token:
+        logger.info(f"🔄 중복 토큰 정리: {other_user.user_id}의 토큰 제거 (동일 기기)")
+        other_user.push_token = None
+        other_user.push_token_updated_at = None
+    
+    # 현재 사용자 토큰 업데이트
     current_user.push_token = token_data.push_token
     current_user.push_token_updated_at = datetime.utcnow()
     
     db.commit()
     
-    logger.info(f"✅ 푸시 토큰 업데이트 완료: {current_user.user_id}")
+    logger.info(f"✅ 푸시 토큰 업데이트 완료: {current_user.user_id} (중복 {len(other_users_with_same_token)}개 정리됨)")
     
     return {
         "success": True,
         "message": "푸시 토큰이 업데이트되었습니다.",
         "updated_at": current_user.push_token_updated_at.isoformat()
+    }
+
+
+# ==================== 푸시 토큰 삭제 ====================
+@router.delete("/push-token")
+async def delete_push_token(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    푸시 알림 토큰 삭제 (로그아웃 시 호출)
+    
+    - 로그아웃 시 서버에서 푸시 토큰을 제거하여 더 이상 알림이 전송되지 않도록 함
+    """
+    current_user.push_token = None
+    current_user.push_token_updated_at = None
+    
+    db.commit()
+    
+    logger.info(f"✅ 푸시 토큰 삭제 완료: {current_user.user_id}")
+    
+    return {
+        "success": True,
+        "message": "푸시 토큰이 삭제되었습니다."
     }
 
 

@@ -14,6 +14,7 @@ export const HomeScreen = () => {
   const router = useRouter();
 
   // 사용자가 로그인하지 않은 경우 로그인 화면으로 리다이렉트
+  
   useEffect(() => {
     if (!user) {
       router.replace('/login');

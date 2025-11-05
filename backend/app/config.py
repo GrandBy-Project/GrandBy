@@ -3,6 +3,7 @@
 Pydantic Settings를 사용한 타입 안전 환경 변수 관리
 """
 
+import os
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List
 
@@ -36,14 +37,22 @@ class Settings(BaseSettings):
     OPENAI_TTS_MODEL: str = "tts-1"
     OPENAI_TTS_VOICE: str = "nova"
     
-    # ==================== Speech-to-Text ====================
-    # STT 제공자 선택: "google" 또는 "openai"
-    STT_PROVIDER: str = "google"
+    # ==================== Cartesia TTS ====================
+    CARTESIA_API_KEY: str | None = None
+    CARTESIA_TTS_MODEL: str = "sonic-2"  # 공식 문서 기준 sonic-2 사용
+    CARTESIA_TTS_VOICE: str = "304fdbd8-65e6-40d6-ab78-f9d18b9efdf9"  # Jihyun - Anchorwoman
+    CARTESIA_ACCESS_TOKEN_EXPIRES_IN: int = 60  # Access Token 만료 시간 (초)
     
-    # Google Cloud STT 설정
-    GOOGLE_APPLICATION_CREDENTIALS: str = "credentials/google-cloud-stt.json"
-    GOOGLE_STT_LANGUAGE_CODE: str = "ko-KR"
-    GOOGLE_STT_MODEL: str = "latest_short"  # phone_call, latest_short, latest_long
+    # ==================== Speech-to-Text ====================
+    # STT 제공자 선택: "google", "openai", "rtzr"
+    STT_PROVIDER: str = "rtzr"
+    
+    # ==================== RTZR STT (Korean Speech Recognition) ====================
+    RTZR_CLIENT_ID: str = ""
+    RTZR_CLIENT_SECRET: str = ""
+    RTZR_API_HOST: str = "openapi.vito.ai"
+    RTZR_SAMPLE_RATE: int = 8000
+    RTZR_ENCODING: str = "LINEAR16"
     
     # ==================== Twilio ====================
     TWILIO_ACCOUNT_SID: str
@@ -100,6 +109,16 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = "uploads/profiles"
     MAX_IMAGE_SIZE: int = 5 * 1024 * 1024  # 5MB
     PROFILE_IMAGE_SIZE: tuple = (512, 512)  # 리사이징 크기
+    
+    # ==================== Naver Clova TTS ====================
+    NAVER_CLOVA_CLIENT_ID: str
+    NAVER_CLOVA_CLIENT_SECRET: str
+    NAVER_CLOVA_TTS_SPEAKER: str = "nara"  # mijin, jinho, clara, matt, shinji, meimei
+    NAVER_CLOVA_TTS_SPEED: int = -1  # -5 ~ 5
+    NAVER_CLOVA_TTS_PITCH: int = +1  # -5 ~ 5
+    NAVER_CLOVA_TTS_ALPHA: int = -1  # 0 ~ 2
+    NAVER_CLOVA_TTS_VOLUME: int = 0  # -5 ~ 5
+    NAVER_CLOVA_TTS_EMOTION: int = 2  # 0 ~ 2 (감정 강도)
     
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -6,6 +6,7 @@ Celery Beat에서 매일 자정에 실행
 from celery import shared_task
 from datetime import date, datetime
 from sqlalchemy.orm import Session
+from sqlalchemy import and_
 from app.database import SessionLocal
 from app.services.todo.todo_service import TodoService
 import logging
@@ -94,18 +95,35 @@ def send_todo_reminders():
             Todo.due_time.isnot(None)
         ).all()
         
-        # 시간 필터링 (현재 시간으로부터 10분 이내)
+        # 시간 필터링 (정확히 10분 전에 알림 전송)
+        from app.models.notification import Notification, NotificationType
         filtered_todos = []
         for todo in upcoming_todos:
             # due_date + due_time을 KST datetime으로 결합
             todo_datetime = kst.localize(datetime.combine(todo.due_date, todo.due_time))
             
-            # TODO 시간이 현재 시간으로부터 10분 이내에 있으면 리마인더 발송
+            # TODO 시간까지 남은 시간 계산
             time_diff = todo_datetime - now
             minutes_until_due = time_diff.total_seconds() / 60
             
-            if 0 <= minutes_until_due <= 10:
-                filtered_todos.append(todo)
+            # 정확히 10분 전에 알림 전송 (9.5분 ~ 10.5분 사이의 윈도우)
+            # 이미 알림을 보낸 TODO는 제외 (중복 방지)
+            if 9.5 <= minutes_until_due <= 10.5:
+                # 이미 이 TODO에 대한 리마인더 알림이 전송되었는지 확인
+                existing_notification = db.query(Notification).filter(
+                    and_(
+                        Notification.related_id == todo.todo_id,
+                        Notification.type == NotificationType.TODO_REMINDER,
+                        Notification.is_pushed == True
+                    )
+                ).first()
+                
+                # 알림을 아직 보내지 않은 TODO만 추가
+                if not existing_notification:
+                    filtered_todos.append(todo)
+                    logger.info(f"📋 리마인더 대상: {todo.title} (남은 시간: {minutes_until_due:.1f}분)")
+                else:
+                    logger.debug(f"⏭️ 이미 알림 전송됨: {todo.title}")
         
         upcoming_todos = filtered_todos
         

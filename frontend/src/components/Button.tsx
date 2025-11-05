@@ -2,7 +2,7 @@
  * 공통 버튼 컴포넌트
  */
 import React from 'react';
-import { TouchableOpacity, Text, StyleSheet, ActivityIndicator, ViewStyle } from 'react-native';
+import { TouchableOpacity, Text, StyleSheet, ActivityIndicator, ViewStyle, TextStyle } from 'react-native';
 import { Colors } from '../constants/Colors';
 
 interface ButtonProps {
@@ -13,6 +13,7 @@ interface ButtonProps {
   loading?: boolean;
   icon?: React.ReactNode;
   style?: ViewStyle;
+  textStyle?: TextStyle;
 }
 
 export const Button: React.FC<ButtonProps> = ({
@@ -23,6 +24,7 @@ export const Button: React.FC<ButtonProps> = ({
   loading = false,
   icon,
   style,
+  textStyle,
 }) => {
   const getSpinnerColor = () => {
     if (variant === 'outline') return Colors.primary;
@@ -58,7 +60,10 @@ export const Button: React.FC<ButtonProps> = ({
               variant === 'outline' && styles.outlineButtonText,
               variant === 'kakao' && styles.kakaoButtonText,
               icon ? styles.textWithIcon : null,
+              textStyle,
             ]}
+            numberOfLines={1}
+            ellipsizeMode="tail"
           >
             {title}
           </Text>

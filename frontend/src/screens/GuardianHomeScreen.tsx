@@ -8,7 +8,6 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Alert,
   ActivityIndicator,
   Modal,
   TextInput,
@@ -23,6 +22,7 @@ import { BottomNavigationBar, Header } from '../components';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as todoApi from '../api/todo';
 import * as connectionsApi from '../api/connections';
+import { useAlert } from '../components/GlobalAlertProvider';
 
 interface ElderlyProfile {
   id: string;
@@ -49,6 +49,7 @@ export const GuardianHomeScreen = () => {
   const router = useRouter();
   const { user, logout } = useAuthStore();
   const insets = useSafeAreaInsets();
+  const { show } = useAlert();
   const [currentElderlyIndex, setCurrentElderlyIndex] = useState(0);
   const [activeTab, setActiveTab] = useState<TabType>('family');
   const [todayTodos, setTodayTodos] = useState<todoApi.TodoItem[]>([]);
@@ -111,8 +112,30 @@ export const GuardianHomeScreen = () => {
     }
   };
 
+  // 안부전화: 전화 앱으로 연결 (Android)
+  const dialPhoneNumber = async (rawNumber?: string) => {
+    try {
+      if (!rawNumber) {
+        show('연락처 없음', '어르신의 전화번호가 등록되어 있지 않습니다.');
+        return;
+      }
+      const { Linking } = await import('react-native');
+      const sanitized = rawNumber.replace(/[^\d+]/g, '');
+      const url = `tel:${sanitized}`;
+      const supported = await Linking.canOpenURL(url);
+      if (!supported) {
+        show('실패', '이 기기에서 전화를 걸 수 없습니다.');
+        return;
+      }
+      await Linking.openURL(url);
+    } catch (error) {
+      console.error('전화 앱 열기 실패:', error);
+      show('오류', '전화 앱을 열 수 없습니다.');
+    }
+  };
+
   const handleLogout = async () => {
-    Alert.alert(
+    show(
       '로그아웃',
       '로그아웃 하시겠습니까?',
       [
@@ -178,9 +201,13 @@ export const GuardianHomeScreen = () => {
               <Text style={styles.elderlyStatLabel}>완료율</Text>
             </View>
             <View style={styles.elderlyStatDivider} />
-            <TouchableOpacity style={styles.elderlyStat}>
-              <Ionicons name="call" size={20} color="#FF3B30" />
-              <Text style={styles.elderlyStatLabel}>긴급연락</Text>
+            <TouchableOpacity 
+              style={styles.elderlyStat}
+              activeOpacity={0.7}
+              onPress={() => dialPhoneNumber(currentElderly.emergencyContact)}
+            >
+              <Ionicons name="call" size={20} color="#34B79F" />
+              <Text style={styles.elderlyStatLabel}>안부전화</Text>
             </TouchableOpacity>
           </View>
 
@@ -649,7 +676,7 @@ export const GuardianHomeScreen = () => {
       description: '어르신의 일기 확인',
       icon: 'book',
       color: '#FF9500',
-      onPress: () => Alert.alert('준비중', '일기 관리 기능은 개발 중입니다.'),
+      onPress: () => show('준비중', '일기 관리 기능은 개발 중입니다.'),
     },
     {
       id: 'calls',
@@ -657,7 +684,7 @@ export const GuardianHomeScreen = () => {
       description: '통화 기록 확인',
       icon: 'call',
       color: '#007AFF',
-      onPress: () => Alert.alert('준비중', 'AI 통화 내역 기능은 개발 중입니다.'),
+      onPress: () => show('준비중', 'AI 통화 내역 기능은 개발 중입니다.'),
     },
     {
       id: 'todos',
@@ -665,7 +692,7 @@ export const GuardianHomeScreen = () => {
       description: '할일 등록 및 관리',
       icon: 'checkmark-done',
       color: '#34C759',
-      onPress: () => Alert.alert('준비중', '할일 관리 기능은 개발 중입니다.'),
+      onPress: () => show('준비중', '할일 관리 기능은 개발 중입니다.'),
     },
     {
       id: 'connections',
@@ -673,7 +700,7 @@ export const GuardianHomeScreen = () => {
       description: '어르신과의 연결',
       icon: 'people',
       color: '#FF2D55',
-      onPress: () => Alert.alert('준비중', '연결 관리 기능은 개발 중입니다.'),
+      onPress: () => show('준비중', '연결 관리 기능은 개발 중입니다.'),
     },
     {
       id: 'notifications',
@@ -681,7 +708,7 @@ export const GuardianHomeScreen = () => {
       description: '알림 스케줄 관리',
       icon: 'notifications',
       color: '#5856D6',
-      onPress: () => Alert.alert('준비중', '알림 설정 기능은 개발 중입니다.'),
+      onPress: () => show('준비중', '알림 설정 기능은 개발 중입니다.'),
     },
     {
       id: 'dashboard',
@@ -689,7 +716,7 @@ export const GuardianHomeScreen = () => {
       description: '감정 분석 및 통계',
       icon: 'stats-chart',
       color: '#AF52DE',
-      onPress: () => Alert.alert('준비중', '대시보드 기능은 개발 중입니다.'),
+      onPress: () => show('준비중', '대시보드 기능은 개발 중입니다.'),
     },
   ];
 
@@ -1022,17 +1049,17 @@ export const GuardianHomeScreen = () => {
   // TODO 수정 저장
   const handleSaveEdit = async () => {
     if (!editedTodo.title.trim()) {
-      Alert.alert('알림', '제목을 입력해주세요.');
+      show('알림', '제목을 입력해주세요.');
       return;
     }
 
     if (!editedTodo.category) {
-      Alert.alert('알림', '카테고리를 선택해주세요.');
+      show('알림', '카테고리를 선택해주세요.');
       return;
     }
 
     if (!editedTodo.time) {
-      Alert.alert('알림', '시간을 선택해주세요.');
+      show('알림', '시간을 선택해주세요.');
       return;
     }
 
@@ -1047,7 +1074,7 @@ export const GuardianHomeScreen = () => {
 
       await todoApi.updateTodo(selectedTodo!.todo_id, updateData);
       
-      Alert.alert('수정 완료', '할 일이 수정되었습니다.', [
+      show('수정 완료', '할 일이 수정되었습니다.', [
         {
           text: '확인',
           onPress: async () => {
@@ -1065,7 +1092,7 @@ export const GuardianHomeScreen = () => {
       ]);
     } catch (error) {
       console.error('수정 실패:', error);
-      Alert.alert('수정 실패', '할 일 수정 중 오류가 발생했습니다.');
+      show('수정 실패', '할 일 수정 중 오류가 발생했습니다.');
     } finally {
       setIsSaving(false);
     }
@@ -1075,7 +1102,7 @@ export const GuardianHomeScreen = () => {
   const handleDeleteTodo = async (todoId: string, isRecurring: boolean) => {
     if (isRecurring) {
       // 반복 일정 삭제 옵션 선택
-      Alert.alert(
+      show(
         '반복 일정 삭제',
         '어떻게 삭제하시겠습니까?',
         [
@@ -1088,7 +1115,7 @@ export const GuardianHomeScreen = () => {
             onPress: async () => {
               try {
                 await todoApi.deleteTodo(todoId, false);
-                Alert.alert('삭제 완료', '할 일이 삭제되었습니다.');
+                show('삭제 완료', '할 일이 삭제되었습니다.');
                 setShowEditModal(false);
                 setSelectedTodo(null);
                 // TODO 목록 및 통계 새로고침
@@ -1099,7 +1126,7 @@ export const GuardianHomeScreen = () => {
                 }
               } catch (error) {
                 console.error('삭제 실패:', error);
-                Alert.alert('삭제 실패', '할 일 삭제 중 오류가 발생했습니다.');
+                show('삭제 실패', '할 일 삭제 중 오류가 발생했습니다.');
               }
             },
           },
@@ -1109,7 +1136,7 @@ export const GuardianHomeScreen = () => {
             onPress: async () => {
               try {
                 await todoApi.deleteTodo(todoId, true);
-                Alert.alert('삭제 완료', '반복 일정이 모두 삭제되었습니다.');
+                show('삭제 완료', '반복 일정이 모두 삭제되었습니다.');
                 setShowEditModal(false);
                 setSelectedTodo(null);
                 // TODO 목록 및 통계 새로고침
@@ -1120,7 +1147,7 @@ export const GuardianHomeScreen = () => {
                 }
               } catch (error) {
                 console.error('삭제 실패:', error);
-                Alert.alert('삭제 실패', '할 일 삭제 중 오류가 발생했습니다.');
+                show('삭제 실패', '할 일 삭제 중 오류가 발생했습니다.');
               }
             },
           },
@@ -1128,7 +1155,7 @@ export const GuardianHomeScreen = () => {
       );
     } else {
       // 일반 TODO 삭제
-      Alert.alert(
+      show(
         '할 일 삭제',
         '정말 삭제하시겠습니까?',
         [
@@ -1142,7 +1169,7 @@ export const GuardianHomeScreen = () => {
             onPress: async () => {
               try {
                 await todoApi.deleteTodo(todoId, false);
-                Alert.alert('삭제 완료', '할 일이 삭제되었습니다.');
+                show('삭제 완료', '할 일이 삭제되었습니다.');
                 setShowEditModal(false);
                 setSelectedTodo(null);
                 // TODO 목록 및 통계 새로고침
@@ -1153,7 +1180,7 @@ export const GuardianHomeScreen = () => {
                 }
               } catch (error) {
                 console.error('삭제 실패:', error);
-                Alert.alert('삭제 실패', '할 일 삭제 중 오류가 발생했습니다.');
+                show('삭제 실패', '할 일 삭제 중 오류가 발생했습니다.');
               }
             },
           },
@@ -1165,7 +1192,7 @@ export const GuardianHomeScreen = () => {
   // 어르신 검색
   const handleSearchElderly = async () => {
     if (!searchQuery.trim()) {
-      Alert.alert('알림', '이메일 또는 전화번호를 입력해주세요.');
+      show('알림', '이메일 또는 전화번호를 입력해주세요.');
       return;
     }
 
@@ -1175,11 +1202,11 @@ export const GuardianHomeScreen = () => {
       setSearchResults(results);
       
       if (results.length === 0) {
-        Alert.alert('알림', '검색 결과가 없습니다.');
+        show('알림', '검색 결과가 없습니다.');
       }
     } catch (error: any) {
       console.error('검색 실패:', error);
-      Alert.alert('오류', error.message || '검색에 실패했습니다.');
+      show('오류', error.message || '검색에 실패했습니다.');
     } finally {
       setIsSearching(false);
     }
@@ -1194,11 +1221,11 @@ export const GuardianHomeScreen = () => {
         elderly.connection_status === 'pending' ? '연결 수락 대기 중입니다.' :
         '이전 연결 요청이 거절되었습니다.';
       
-      Alert.alert('알림', statusText);
+      show('알림', statusText);
       return;
     }
 
-    Alert.alert(
+    show(
       '연결 요청',
       `${elderly.name}님에게 연결 요청을 보내시겠습니까?`,
       [
@@ -1210,7 +1237,7 @@ export const GuardianHomeScreen = () => {
             try {
               await connectionsApi.createConnection(elderly.email);
               
-               Alert.alert(
+               show(
                  '성공',
                  `${elderly.name}님에게 연결 요청을 보냈습니다.\n어르신이 수락하면 연결됩니다.`,
                  [
@@ -1228,7 +1255,7 @@ export const GuardianHomeScreen = () => {
                );
             } catch (error: any) {
               console.error('연결 요청 실패:', error);
-              Alert.alert('오류', error.message || '연결 요청에 실패했습니다.');
+              show('오류', error.message || '연결 요청에 실패했습니다.');
             } finally {
               setIsConnecting(false);
             }
@@ -1255,7 +1282,10 @@ export const GuardianHomeScreen = () => {
   return (
     <View style={styles.container}>
       {/* 공통 헤더 */}
-      <Header />
+      <Header 
+        title="그랜비"
+        showMenuButton={true} 
+      />
 
       {/* 탭 네비게이션 */}
       <View style={styles.tabNavigation}>
@@ -1303,7 +1333,7 @@ export const GuardianHomeScreen = () => {
         {activeTab === 'communication' && renderCommunicationTab()}
 
         {/* 하단 여백 (네비게이션 바 공간 확보) */}
-        <View style={[styles.bottomSpacer, { height: 100 + Math.max(insets.bottom, 10) }]} />
+        <View style={{ height: 20 }} />
       </ScrollView>
 
       {/* TODO 수정/삭제 모달 */}
@@ -1390,9 +1420,9 @@ export const GuardianHomeScreen = () => {
                       <View style={styles.todoDetailSection}>
                         <Text style={styles.todoDetailLabel}>반복 일정</Text>
                         <Text style={styles.todoDetailValue}>
-                          {selectedTodo.recurring_type === 'daily' ? '매일' :
-                           selectedTodo.recurring_type === 'weekly' ? '매주' :
-                           selectedTodo.recurring_type === 'monthly' ? '매월' : '-'}
+                          {selectedTodo.recurring_type === 'DAILY' ? '매일' :
+                           selectedTodo.recurring_type === 'WEEKLY' ? '매주' :
+                           selectedTodo.recurring_type === 'MONTHLY' ? '매월' : '-'}
                         </Text>
                       </View>
                     )}
@@ -1655,15 +1685,15 @@ export const GuardianHomeScreen = () => {
                     >
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                         <View style={{ flex: 1 }}>
-                          <Text style={{ fontSize: 18, fontWeight: '600', color: '#333', marginBottom: 4 }}>
-                            👵 {elderly.name}
+                          <Text style={{ fontSize: 14, fontWeight: '600', color: '#333', marginBottom: 4 }}>
+                            성함 : {elderly.name}
                           </Text>
                           <Text style={{ fontSize: 14, color: '#666', marginBottom: 2 }}>
-                            📧 {elderly.email}
+                            ID : {elderly.email}
                           </Text>
                           {elderly.phone_number && (
                             <Text style={{ fontSize: 14, color: '#666' }}>
-                              📞 {elderly.phone_number}
+                              번호 : {elderly.phone_number}
                             </Text>
                           )}
                         </View>

@@ -231,18 +231,32 @@ async def create_todo(
             creator_id=current_user.user_id
         )
         
-        logger.info(f"✅ TODO 생성 성공 - ID: {todo.todo_id}")
+        logger.info(f"✅ TODO 생성 성공 - ID: {todo.todo_id}, Creator Type: {todo.creator_type}")
         
         # 🔔 새 TODO 생성 알림 전송 (비동기)
         try:
-            await NotificationService.notify_todo_created(
-                db=db,
-                user_id=todo_data.elderly_id,
-                todo_title=todo_data.title,
-                todo_id=todo.todo_id,
-                creator_name=current_user.name
-            )
-            logger.info(f"📤 TODO 생성 알림 전송 완료")
+            from app.models.todo import CreatorType
+            
+            if todo.creator_type == CreatorType.ELDERLY:
+                # 어르신이 직접 생성한 경우: 연결된 보호자들에게 알림
+                await NotificationService.notify_todo_created_by_elderly(
+                    db=db,
+                    elderly_id=todo_data.elderly_id,
+                    todo_title=todo_data.title,
+                    todo_id=todo.todo_id,
+                    elderly_name=current_user.name
+                )
+                logger.info(f"📤 어르신이 생성한 TODO 알림을 보호자들에게 전송 완료")
+            else:
+                # 보호자가 생성한 경우: 어르신에게 알림
+                await NotificationService.notify_todo_created(
+                    db=db,
+                    user_id=todo_data.elderly_id,
+                    todo_title=todo_data.title,
+                    todo_id=todo.todo_id,
+                    creator_name=current_user.name
+                )
+                logger.info(f"📤 보호자가 생성한 TODO 알림을 어르신에게 전송 완료")
         except Exception as notify_error:
             logger.error(f"⚠️ TODO 생성 알림 전송 실패 (TODO는 생성됨): {str(notify_error)}")
         

@@ -9,11 +9,11 @@ import {
   ScrollView,
   TouchableOpacity,
   TextInput,
-  Alert,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { Header, BottomNavigationBar } from '../components';
+import { Header, BottomNavigationBar, useAlert } from '../components';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFontSizeStore } from '../store/fontSizeStore';
 
 interface TodoFormData {
   title: string;
@@ -25,6 +25,8 @@ export const TodoWriteScreen = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { id, mode } = useLocalSearchParams();
+  const { fontSizeLevel } = useFontSizeStore();
+  const { show } = useAlert();
   
   const isEdit = mode === 'edit';
   
@@ -44,16 +46,16 @@ export const TodoWriteScreen = () => {
 
   const handleSave = () => {
     if (!formData.title.trim()) {
-      Alert.alert('알림', '할일 제목을 입력해주세요.');
+      show('알림', '할일 제목을 입력해주세요.');
       return;
     }
     
     if (!formData.description.trim()) {
-      Alert.alert('알림', '할일 내용을 입력해주세요.');
+      show('알림', '할일 내용을 입력해주세요.');
       return;
     }
 
-    Alert.alert(
+    show(
       '저장',
       isEdit ? '할일을 수정하시겠습니까?' : '새 할일을 저장하시겠습니까?',
       [
@@ -62,7 +64,7 @@ export const TodoWriteScreen = () => {
           text: '저장',
           onPress: () => {
             // 실제로는 API 호출
-            Alert.alert(
+            show(
               '저장 완료',
               isEdit ? '할일이 수정되었습니다.' : '새 할일이 저장되었습니다.'
             );
@@ -74,7 +76,7 @@ export const TodoWriteScreen = () => {
   };
 
   const handleCancel = () => {
-    Alert.alert(
+    show(
       '취소',
       '작성 중인 내용이 사라집니다. 정말 취소하시겠습니까?',
       [
@@ -93,7 +95,7 @@ export const TodoWriteScreen = () => {
       {/* 공통 헤더 */}
       <Header 
         title={isEdit ? "일정 수정" : "일정 추가"} 
-        showBackButton 
+        showMenuButton={true}
         rightButton={
           <TouchableOpacity onPress={handleCancel} style={styles.cancelButton}>
             <Text style={styles.cancelText}>취소</Text>
@@ -169,7 +171,7 @@ export const TodoWriteScreen = () => {
         </View>
 
         {/* 하단 여백 (네비게이션 바 공간 확보) */}
-        <View style={[styles.bottomSpacer, { height: 100 + Math.max(insets.bottom, 10) }]} />
+        <View style={{ height: 20 }} />
       </ScrollView>
 
       {/* 하단 네비게이션 바 */}

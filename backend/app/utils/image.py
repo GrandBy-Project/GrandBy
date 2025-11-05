@@ -139,6 +139,92 @@ def _correct_image_orientation(image: Image.Image) -> Image.Image:
     return image
 
 
+async def save_diary_image(file: UploadFile, diary_id: str, user_id: str) -> str:
+    """
+    일기 사진 저장 및 리사이징
+    
+    Args:
+        file: 업로드된 파일
+        diary_id: 일기 ID
+        user_id: 사용자 ID
+    
+    Returns:
+        str: 저장된 이미지의 URL/경로
+        
+    Raises:
+        HTTPException: 파일 검증 실패 또는 처리 중 오류
+    """
+    # 파일 확장자 검증
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"지원하지 않는 이미지 형식입니다. {', '.join(ALLOWED_EXTENSIONS)} 형식만 지원합니다"
+        )
+    
+    # 파일 읽기
+    contents = await file.read()
+    
+    # 파일 크기 검증
+    if len(contents) > settings.MAX_IMAGE_SIZE:
+        max_size_mb = settings.MAX_IMAGE_SIZE / (1024 * 1024)
+        raise HTTPException(
+            status_code=400,
+            detail=f"이미지 크기는 {max_size_mb:.0f}MB를 초과할 수 없습니다"
+        )
+    
+    # 이미지 열기 및 검증
+    try:
+        image = Image.open(io.BytesIO(contents))
+        
+        # EXIF 방향 정보 처리
+        image = _correct_image_orientation(image)
+        
+        # RGB로 변환 (RGBA, P 등을 처리)
+        if image.mode in ('RGBA', 'LA', 'P'):
+            # 투명 배경을 흰색으로 변환
+            background = Image.new('RGB', image.size, (255, 255, 255))
+            if image.mode == 'P':
+                image = image.convert('RGBA')
+            if 'transparency' in image.info:
+                background.paste(image, mask=image.split()[-1] if image.mode == 'RGBA' else None)
+            else:
+                background.paste(image)
+            image = background
+        elif image.mode != 'RGB':
+            image = image.convert('RGB')
+        
+        # 일기 사진은 최대 너비/높이 1920px로 리사이징 (비율 유지)
+        max_size = (1920, 1920)
+        image.thumbnail(max_size, Image.Resampling.LANCZOS)
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"이미지 처리 중 오류가 발생했습니다: {str(e)}"
+        )
+    
+    # 저장 디렉토리 생성
+    upload_dir = Path(settings.UPLOAD_DIR) / "diaries"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    
+    # 고유 파일명 생성
+    filename = f"{diary_id}_{user_id}_{uuid.uuid4().hex[:8]}.jpg"
+    file_path = upload_dir / filename
+    
+    # 이미지 저장 (JPEG, 품질 90)
+    try:
+        image.save(file_path, 'JPEG', quality=90, optimize=True)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"이미지 저장 중 오류가 발생했습니다: {str(e)}"
+        )
+    
+    # URL 반환 (프론트엔드에서 접근 가능한 경로)
+    return f"/uploads/diaries/{filename}"
+
+
 async def delete_profile_image(image_url: str) -> None:
     """
     프로필 이미지 파일 삭제

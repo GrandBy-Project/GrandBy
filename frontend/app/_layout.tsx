@@ -2,10 +2,12 @@
  * Root Layout - Expo Router
  */
 import React, { useEffect } from 'react';
-import { Stack } from 'expo-router';
+import { Stack, useSegments } from 'expo-router';
 import * as Notifications from 'expo-notifications';
 import { registerPushToken } from '../src/api/auth';
 import { useAuthStore } from '../src/store/authStore';
+import { GlobalAlertProvider } from '../src/components/GlobalAlertProvider';
+import { useErrorStore } from '../src/store/errorStore';
 
 // 푸시 알림 설정
 Notifications.setNotificationHandler({
@@ -20,11 +22,19 @@ Notifications.setNotificationHandler({
 
 export default function RootLayout() {
   const { loadUser, user } = useAuthStore();
+  const { setCurrentPath } = useErrorStore();
+  const segments = useSegments();
 
   useEffect(() => {
     // 앱 시작 시 저장된 사용자 정보 로드
     loadUser();
   }, []);
+
+  useEffect(() => {
+    // 경로 변경 시 전역 store에 저장 (에러 팝업 표시 여부 판단용)
+    const currentPath = segments.join('/');
+    setCurrentPath(currentPath);
+  }, [segments, setCurrentPath]);
 
   useEffect(() => {
     // 사용자가 로그인되어 있을 때만 푸시 토큰 등록
@@ -69,23 +79,25 @@ export default function RootLayout() {
   };
 
   return (
-    <Stack
-      screenOptions={{
-        headerShown: false,
-        animation: 'slide_from_right',
-      }}
-    >
-      <Stack.Screen name="index" />
-      <Stack.Screen name="register" />
-      <Stack.Screen name="home" />
-      <Stack.Screen name="mypage" />
-      <Stack.Screen name="settings" />
-      <Stack.Screen name="todos" />
-      <Stack.Screen name="todo-detail" />
-      <Stack.Screen name="todo-write" />
-      <Stack.Screen name="calendar" />
-      <Stack.Screen name="ai-call" />
-    </Stack>
+    <GlobalAlertProvider>
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          animation: 'fade', // 페이드 전환으로 더 깔끔한 페이지 전환
+        }}
+      >
+        <Stack.Screen name="index" />
+        <Stack.Screen name="register" />
+        <Stack.Screen name="home" />
+        <Stack.Screen name="mypage" />
+        <Stack.Screen name="todos" />
+        <Stack.Screen name="todo-detail" />
+        <Stack.Screen name="todo-write" />
+        <Stack.Screen name="guardian-todo-add" />
+        <Stack.Screen name="calendar" />
+        <Stack.Screen name="ai-call" />
+      </Stack>
+    </GlobalAlertProvider>
   );
 }
 
