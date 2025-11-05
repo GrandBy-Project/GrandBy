@@ -3,16 +3,21 @@
 일기 CRUD, 댓글, 사진 업로드
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, File, UploadFile
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, func
 from typing import List, Optional
 from datetime import date as date_type
 from app.database import get_db
 from app.schemas.diary import DiaryCreate, DiaryUpdate, DiaryResponse, DiaryCommentCreate, DiaryCommentResponse
-from app.models.diary import Diary, AuthorType, DiaryComment
+from app.models.diary import Diary, AuthorType, DiaryComment, DiaryPhoto
 from app.routers.auth import get_current_user
 from app.models.user import User, UserRole, UserConnection, ConnectionStatus
+from app.utils.image import save_diary_image
+import logging
+import uuid
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -64,7 +69,7 @@ async def get_diaries(
     
     diaries = query.order_by(Diary.created_at.desc()).offset(skip).limit(limit).all()
     
-    # 댓글 개수 계산
+    # 댓글 개수 및 사진 목록 계산
     if diaries:
         diary_ids = [diary.diary_id for diary in diaries]
         
@@ -79,10 +84,36 @@ async def get_diaries(
         # 딕셔너리로 변환하여 빠른 조회
         count_dict = {diary_id: count for diary_id, count in comment_counts}
         
-        # 각 다이어리에 댓글 개수 추가하여 DiaryResponse 생성
+        # 각 다이어리의 사진 목록을 한 번에 조회
+        photos_list = db.query(DiaryPhoto).filter(
+            DiaryPhoto.diary_id.in_(diary_ids)
+        ).order_by(DiaryPhoto.created_at.asc()).all()
+        
+        # 다이어리별로 사진 그룹화
+        photos_dict: dict[str, list] = {}
+        for photo in photos_list:
+            if photo.diary_id not in photos_dict:
+                photos_dict[photo.diary_id] = []
+            photos_dict[photo.diary_id].append(photo)
+        
+        from app.schemas.diary import DiaryPhotoResponse
+        
+        # 각 다이어리에 댓글 개수 및 사진 목록 추가하여 DiaryResponse 생성
         result = []
         for diary in diaries:
             comment_count = count_dict.get(diary.diary_id, 0)
+            
+            # 사진 목록 생성
+            diary_photos = photos_dict.get(diary.diary_id, [])
+            photos_response = [
+                DiaryPhotoResponse(
+                    photo_id=photo.photo_id,
+                    photo_url=photo.photo_url,
+                    created_at=photo.created_at
+                )
+                for photo in diary_photos
+            ]
+            
             diary_dict = {
                 "diary_id": diary.diary_id,
                 "user_id": diary.user_id,
@@ -97,6 +128,7 @@ async def get_diaries(
                 "created_at": diary.created_at,
                 "updated_at": diary.updated_at,
                 "comment_count": comment_count,
+                "photos": photos_response,
             }
             result.append(DiaryResponse(**diary_dict))
         
@@ -170,7 +202,7 @@ async def create_diary(
     for diary in created_diaries:
         db.refresh(diary)
     
-    # DiaryResponse 생성 (새로 생성된 다이어리는 댓글이 없으므로 comment_count = 0)
+    # DiaryResponse 생성 (새로 생성된 다이어리는 댓글과 사진이 없으므로 comment_count = 0, photos = [])
     result = []
     for diary in created_diaries:
         diary_dict = {
@@ -186,7 +218,8 @@ async def create_diary(
             "status": diary.status,
             "created_at": diary.created_at,
             "updated_at": diary.updated_at,
-            "comment_count": 0,  # 새로 생성된 다이어리는 댓글이 없음
+            "comment_count": 0,  
+            "photos": [],  
         }
         result.append(DiaryResponse(**diary_dict))
     
@@ -237,6 +270,21 @@ async def get_diary(
         DiaryComment.diary_id == diary_id
     ).scalar() or 0
     
+    # 사진 목록 조회
+    photos = db.query(DiaryPhoto).filter(
+        DiaryPhoto.diary_id == diary_id
+    ).order_by(DiaryPhoto.created_at.asc()).all()
+    
+    from app.schemas.diary import DiaryPhotoResponse
+    photos_list = [
+        DiaryPhotoResponse(
+            photo_id=photo.photo_id,
+            photo_url=photo.photo_url,
+            created_at=photo.created_at
+        )
+        for photo in photos
+    ]
+    
     # DiaryResponse 생성
     diary_dict = {
         "diary_id": diary.diary_id,
@@ -252,6 +300,7 @@ async def get_diary(
         "created_at": diary.created_at,
         "updated_at": diary.updated_at,
         "comment_count": comment_count,
+        "photos": photos_list,
     }
     
     return DiaryResponse(**diary_dict)
@@ -285,14 +334,6 @@ async def update_diary(
     if diary_data.mood is not None:
         diary.mood = diary_data.mood
     if diary_data.status is not None:
-        # 임시 저장 상태에서 발행 상태로 변경 시 어르신 작성으로 변경
-        # is_auto_generated는 유지하여 AI 자동 생성 + 어르신 작성 배지 모두 표시
-        from app.models.diary import DiaryStatus
-        if (diary.status == DiaryStatus.DRAFT and 
-            diary_data.status == DiaryStatus.PUBLISHED and
-            current_user.role == UserRole.ELDERLY):
-            diary.author_type = AuthorType.ELDERLY
-            diary.author_id = current_user.user_id
         diary.status = diary_data.status
     
     db.commit()
@@ -302,6 +343,21 @@ async def update_diary(
     comment_count = db.query(func.count(DiaryComment.comment_id)).filter(
         DiaryComment.diary_id == diary_id
     ).scalar() or 0
+    
+    # 사진 목록 조회
+    photos = db.query(DiaryPhoto).filter(
+        DiaryPhoto.diary_id == diary_id
+    ).order_by(DiaryPhoto.created_at.asc()).all()
+    
+    from app.schemas.diary import DiaryPhotoResponse
+    photos_list = [
+        DiaryPhotoResponse(
+            photo_id=photo.photo_id,
+            photo_url=photo.photo_url,
+            created_at=photo.created_at
+        )
+        for photo in photos
+    ]
     
     # DiaryResponse 생성
     diary_dict = {
@@ -318,6 +374,7 @@ async def update_diary(
         "created_at": diary.created_at,
         "updated_at": diary.updated_at,
         "comment_count": comment_count,
+        "photos": photos_list,
     }
     
     return DiaryResponse(**diary_dict)
@@ -349,6 +406,85 @@ async def delete_diary(
     db.commit()
     
     return {"message": "일기가 삭제되었습니다."}
+
+
+@router.post("/{diary_id}/photos")
+async def upload_diary_photo(
+    diary_id: str,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    일기 사진 업로드
+    
+    - 본인이 작성했거나 본인 일기장에 있는 일기에만 사진 업로드 가능
+    - 최대 5MB
+    - JPG, PNG, WEBP 지원
+    - 자동 리사이징 (최대 1920px, 비율 유지)
+    """
+    # 일기 존재 여부 및 권한 확인
+    diary = db.query(Diary).filter(Diary.diary_id == diary_id).first()
+    
+    if not diary:
+        raise HTTPException(status_code=404, detail="일기를 찾을 수 없습니다.")
+    
+    # 권한 확인: 본인이 작성했거나 본인 일기장에 있는 일기만 사진 업로드 가능
+    has_permission = False
+    if diary.user_id == current_user.user_id:
+        # 본인의 일기
+        has_permission = True
+    elif current_user.role == UserRole.CAREGIVER:
+        # 보호자인 경우: 연결된 어르신의 일기인지 확인
+        connection = db.query(UserConnection).filter(
+            and_(
+                UserConnection.caregiver_id == current_user.user_id,
+                UserConnection.elderly_id == diary.user_id,
+                UserConnection.status == ConnectionStatus.ACTIVE
+            )
+        ).first()
+        if connection:
+            has_permission = True
+    
+    if not has_permission:
+        raise HTTPException(
+            status_code=403,
+            detail="해당 일기에 사진을 업로드할 권한이 없습니다."
+        )
+    
+    try:
+        # 이미지 저장
+        photo_url = await save_diary_image(file, diary_id, current_user.user_id)
+        
+        # DiaryPhoto 레코드 생성
+        new_photo = DiaryPhoto(
+            photo_id=str(uuid.uuid4()),
+            diary_id=diary_id,
+            uploaded_by=current_user.user_id,
+            photo_url=photo_url
+        )
+        db.add(new_photo)
+        db.commit()
+        db.refresh(new_photo)
+        
+        logger.info(f"✅ 일기 사진 업로드 완료: diary_id={diary_id}, photo_id={new_photo.photo_id}")
+        
+        return {
+            "photo_id": new_photo.photo_id,
+            "photo_url": photo_url,
+            "diary_id": diary_id,
+            "uploaded_by": current_user.user_id,
+            "created_at": new_photo.created_at.isoformat() if new_photo.created_at else None
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 일기 사진 업로드 실패: {e}")
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"사진 업로드 중 오류가 발생했습니다: {str(e)}"
+        )
 
 
 @router.get("/{diary_id}/comments", response_model=List[DiaryCommentResponse])

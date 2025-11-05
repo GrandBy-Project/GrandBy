@@ -48,7 +48,7 @@ class Diary(Base):
     is_auto_generated = Column(Boolean, default=False)
     
     # 상태
-    status = Column(SQLEnum(DiaryStatus), default=DiaryStatus.DRAFT)
+    status = Column(SQLEnum(DiaryStatus), default=DiaryStatus.PUBLISHED)
     
     # 타임스탬프
     created_at = Column(DateTime, default=datetime.utcnow)

@@ -67,6 +67,18 @@ async def get_todos(
             )
         target_elderly_id = elderly_id
     
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info(f"📥 get_todos API 호출:")
+    logger.info(f"   - current_user: {current_user.user_id} ({current_user.role})")
+    logger.info(f"   - elderly_id 파라미터: {elderly_id}")
+    logger.info(f"   - target_elderly_id: {target_elderly_id}")
+    logger.info(f"   - date_filter: {date_filter}")
+    logger.info(f"   - target_date: {target_date}")
+    logger.info(f"   - shared_only: {shared_only}")
+    logger.info(f"   - 최종 shared_only: {shared_only if current_user.role != UserRole.ELDERLY else False}")
+    
     todos = TodoService.get_todos_by_date(
         db=db,
         elderly_id=target_elderly_id,
@@ -74,6 +86,8 @@ async def get_todos(
         status_filter=status,
         shared_only=shared_only if current_user.role != UserRole.ELDERLY else False
     )
+    
+    logger.info(f"📤 get_todos API 응답: {len(todos)}개")
     
     return todos
 
@@ -120,14 +134,14 @@ async def get_todos_by_range(
 @router.get("/stats/detailed", response_model=TodoDetailedStatsResponse)
 async def get_detailed_todo_stats(
     elderly_id: Optional[str] = Query(None, description="어르신 ID (보호자용)"),
-    period: str = Query("week", description="week, month"),
+    period: str = Query("week", description="week, month, last_month"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
     TODO 상세 통계 조회 (카테고리별 포함)
     
-    - **period**: week (7일), month (30일)
+    - **period**: week (7일), month (이번 달), last_month (지난 달)
     """
     # 어르신인 경우 본인 ID 사용
     if current_user.role == UserRole.ELDERLY:
@@ -144,15 +158,40 @@ async def get_detailed_todo_stats(
     # 기간 계산
     today = date.today()
     if period == "week":
-        start_date = today - timedelta(days=7)
-    else:  # month
-        start_date = today - timedelta(days=30)
+        # 이번 주의 일요일 계산 (일요일 = 6)
+        days_since_sunday = (today.weekday() + 1) % 7  # 0=월요일 -> 1, 6=일요일 -> 0
+        if days_since_sunday == 0:
+            # 오늘이 일요일이면 이번 주 시작
+            start_date = today
+        else:
+            # 가장 가까운 일요일 찾기
+            start_date = today - timedelta(days=days_since_sunday)
+        end_date = today
+    elif period == "last_month":
+        # 지난 달의 1일부터 마지막 날까지
+        if today.month == 1:
+            # 1월이면 전년 12월
+            start_date = date(today.year - 1, 12, 1)
+            end_date = date(today.year - 1, 12, 31)
+        else:
+            # 지난 달의 1일
+            start_date = date(today.year, today.month - 1, 1)
+            # 지난 달의 마지막 날 계산
+            if today.month - 1 == 12:
+                end_date = date(today.year - 1, 12, 31)
+            else:
+                # 다음 달의 1일에서 1일 빼면 지난 달의 마지막 날
+                end_date = date(today.year, today.month, 1) - timedelta(days=1)
+    else:  # month (이번 달)
+        # 이번 달의 1일
+        start_date = date(today.year, today.month, 1)
+        end_date = today
     
     stats = TodoService.get_detailed_stats(
         db=db,
         elderly_id=target_elderly_id,
         start_date=start_date,
-        end_date=today
+        end_date=end_date
     )
     
     return stats
@@ -185,9 +224,17 @@ async def get_todo_stats(
     # 기간 계산
     today = date.today()
     if period == "week":
-        start_date = today - timedelta(days=7)
+        # 이번 주의 일요일 계산 (일요일 = 6)
+        days_since_sunday = (today.weekday() + 1) % 7  # 0=월요일 -> 1, 6=일요일 -> 0
+        if days_since_sunday == 0:
+            # 오늘이 일요일이면 이번 주 시작
+            start_date = today
+        else:
+            # 가장 가까운 일요일 찾기
+            start_date = today - timedelta(days=days_since_sunday)
     else:  # month
-        start_date = today - timedelta(days=30)
+        # 이번 달의 1일
+        start_date = date(today.year, today.month, 1)
     
     stats = TodoService.get_todo_stats(
         db=db,

@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request, WebSocket, Form, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.exceptions import RequestValidationError
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 import logging
@@ -16,6 +17,7 @@ import asyncio
 from typing import Dict
 from datetime import datetime
 from sqlalchemy.orm import Session
+from pathlib import Path
 import time
 import random
 from pytz import timezone
@@ -626,6 +628,18 @@ async def health_check():
         "database": db_status,
     }
 
+
+# ==================== Static Files (이미지 업로드) ====================
+# 업로드 디렉토리 생성
+upload_dir = Path(settings.UPLOAD_DIR)
+upload_dir.mkdir(parents=True, exist_ok=True)
+
+# 정적 파일 마운트
+try:
+    app.mount("/uploads", StaticFiles(directory=str(upload_dir)), name="uploads")
+    logger.info(f"✅ 정적 파일 서빙 활성화: /uploads -> {upload_dir}")
+except Exception as e:
+    logger.warning(f"⚠️ 정적 파일 마운트 실패: {e}")
 
 # ==================== API Routers ====================
 

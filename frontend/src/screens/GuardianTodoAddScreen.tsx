@@ -161,6 +161,13 @@ export const GuardianTodoAddScreen = () => {
 
       const result = await todoApi.createTodo(todoData);
       console.log('✅ TODO 생성 성공:', result.todo_id);
+      console.log('📊 생성된 할일 상세:', {
+        todo_id: result.todo_id,
+        title: result.title,
+        due_date: result.due_date,
+        is_recurring: result.is_recurring,
+        is_shared_with_caregiver: result.is_shared_with_caregiver
+      });
 
       show(
         '저장 완료',
@@ -168,7 +175,12 @@ export const GuardianTodoAddScreen = () => {
         [
           {
             text: '확인',
-            onPress: () => router.back(),
+            onPress: () => {
+              // 화면 이동 전에 약간의 지연을 두어 백엔드 처리 시간 확보
+              setTimeout(() => {
+                router.back();
+              }, 300);
+            },
           },
         ]
       );

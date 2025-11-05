@@ -62,7 +62,7 @@ def generate_diary_from_call(call_id: str):
             content=diary_content,
             author_type=AuthorType.ELDERLY,
             is_auto_generated=True,
-            status=DiaryStatus.DRAFT,
+            status=DiaryStatus.PUBLISHED,
         )
         db.add(new_diary)
         db.commit()

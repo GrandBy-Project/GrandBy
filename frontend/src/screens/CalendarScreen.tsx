@@ -18,7 +18,7 @@ import {
   TouchableWithoutFeedback,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Header, BottomNavigationBar } from '../components';
+import { Header, BottomNavigationBar, TimePicker } from '../components';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Calendar } from 'react-native-calendars';
@@ -655,6 +655,17 @@ export const CalendarScreen = () => {
 
   // 날짜 선택 핸들러 (일정 추가 모달용)
   const handleDateSelectInModal = (day: { dateString: string }) => {
+    // 과거 날짜 선택 방지
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const selectedDate = new Date(day.dateString);
+    selectedDate.setHours(0, 0, 0, 0);
+    
+    if (selectedDate < today) {
+      show('알림', '과거 날짜는 선택할 수 없습니다. 오늘 또는 미래 날짜를 선택해주세요.');
+      return;
+    }
+    
     setNewSchedule({ ...newSchedule, date: day.dateString });
     setShowDatePicker(false);
   };
@@ -1034,6 +1045,25 @@ export const CalendarScreen = () => {
                             <Text style={styles.diaryPreviewContent} numberOfLines={2}>
                               {diary.content}
                             </Text>
+                            {/* 댓글 및 사진 배지 */}
+                            {(diary.photos && diary.photos.length > 0) || (diary.comment_count !== undefined && diary.comment_count > 0) ? (
+                              <View style={styles.diaryBadgeContainer}>
+                                {/* 사진 배지 */}
+                                {diary.photos && diary.photos.length > 0 && (
+                                  <View style={styles.diaryPhotoCountBadge}>
+                                    <Ionicons name="camera-outline" size={14} color="#FF9500" />
+                                    <Text style={styles.diaryPhotoCountText}>{diary.photos.length}</Text>
+                                  </View>
+                                )}
+                                {/* 댓글 배지 */}
+                                {diary.comment_count !== undefined && diary.comment_count > 0 && (
+                                  <View style={styles.diaryCommentCountBadge}>
+                                    <Ionicons name="chatbubble-outline" size={14} color={Colors.primary} />
+                                    <Text style={styles.diaryCommentCountText}>{diary.comment_count}</Text>
+                                  </View>
+                                )}
+                              </View>
+                            ) : null}
                           </TouchableOpacity>
                         );
                       })}
@@ -1355,6 +1385,25 @@ export const CalendarScreen = () => {
                               <Text style={styles.scheduleDescription} numberOfLines={3}>
                                 {diary.content}
                               </Text>
+                              {/* 댓글 및 사진 배지 */}
+                              {(diary.photos && diary.photos.length > 0) || (diary.comment_count !== undefined && diary.comment_count > 0) ? (
+                                <View style={styles.diaryBadgeContainer}>
+                                  {/* 사진 배지 */}
+                                  {diary.photos && diary.photos.length > 0 && (
+                                    <View style={styles.diaryPhotoCountBadge}>
+                                      <Ionicons name="camera-outline" size={14} color="#FF9500" />
+                                      <Text style={styles.diaryPhotoCountText}>{diary.photos.length}</Text>
+                                    </View>
+                                  )}
+                                  {/* 댓글 배지 */}
+                                  {diary.comment_count !== undefined && diary.comment_count > 0 && (
+                                    <View style={styles.diaryCommentCountBadge}>
+                                      <Ionicons name="chatbubble-outline" size={14} color={Colors.primary} />
+                                      <Text style={styles.diaryCommentCountText}>{diary.comment_count}</Text>
+                                    </View>
+                                  )}
+                                </View>
+                              ) : null}
                             </View>
 
                             <View style={styles.scheduleArrow}>
@@ -1447,6 +1496,7 @@ export const CalendarScreen = () => {
                       onDayPress={handleDateSelectInModal}
                       monthFormat={'yyyy년 M월'}
                       hideExtraDays={true}
+                      minDate={new Date().toISOString().split('T')[0]}
                       theme={{
                         backgroundColor: '#FFFFFF',
                         calendarBackground: '#FFFFFF',
@@ -1506,167 +1556,18 @@ export const CalendarScreen = () => {
                 />
               </View>
 
-              {/* 시간 선택 - 시간/분 스크롤 휠 (항상 표시) */}
+              {/* 시간 선택 - AICallScreen과 동일한 TimePicker 사용 */}
               <View style={styles.inputSection}>
                 <Text style={styles.inputLabel}>시간</Text>
-                <Text style={styles.timeDisplayText}>
-                  {formatHHMMToDisplay(newSchedule.time || `${selectedHour.toString().padStart(2, '0')}:${selectedMinute.toString().padStart(2, '0')}`)}
-                </Text>
-                
-                {/* 시간/분 선택 스크롤 휠 */}
-                <View style={styles.timeWheelContainer}>
-                  <View style={styles.timeWheelMask} pointerEvents="none" />
-                  <View style={styles.timeWheelRow}>
-                    {/* 시간 선택 */}
-                    <View style={styles.timeWheelColumn}>
-                      <ScrollView
-                        ref={hourScrollRef}
-                        style={styles.timeWheelScroll}
-                        contentContainerStyle={styles.timeWheelContent}
-                        showsVerticalScrollIndicator={false}
-                        snapToInterval={isSmallScreen ? 40 : isMediumScreen ? 45 : 50}
-                        decelerationRate="fast"
-                        nestedScrollEnabled={true}
-                        scrollEnabled={true}
-                        onLayout={() => {
-                          if (hourScrollRef.current) {
-                            // selectedHour가 설정되어 있으면 사용, 없으면 12시 사용
-                            const hour = (selectedHour !== undefined && !isNaN(selectedHour)) 
-                              ? selectedHour 
-                              : 12;
-                            const itemHeight = isSmallScreen ? 40 : isMediumScreen ? 45 : 50;
-                            setTimeout(() => {
-                              hourScrollRef.current?.scrollTo({
-                                y: hour * itemHeight,
-                                animated: false,
-                              });
-                            }, 300);
-                          }
-                        }}
-                        onMomentumScrollEnd={(event) => {
-                          const itemHeight = isSmallScreen ? 40 : isMediumScreen ? 45 : 50;
-                          const offsetY = event.nativeEvent.contentOffset.y;
-                          const index = Math.round(offsetY / itemHeight);
-                          const clampedIndex = Math.max(0, Math.min(index, 23));
-                          setSelectedHour(clampedIndex);
-                          setNewSchedule({ 
-                            ...newSchedule, 
-                            time: formatTimeToHHMM(clampedIndex, selectedMinute) 
-                          });
-                        }}
-                      >
-                        <View style={{ height: 5 }} />
-                        {hourOptions.map((hour, index) => (
-                          <TouchableOpacity
-                            key={hour}
-                            style={[
-                              styles.timeWheelItem,
-                              selectedHour === hour && styles.timeWheelItemSelected,
-                            ]}
-                            onPress={() => {
-                              setSelectedHour(hour);
-                              setNewSchedule({ 
-                                ...newSchedule, 
-                                time: formatTimeToHHMM(hour, selectedMinute) 
-                              });
-                              const itemHeight = isSmallScreen ? 40 : isMediumScreen ? 45 : 50;
-                              hourScrollRef.current?.scrollTo({
-                                y: index * itemHeight,
-                                animated: true,
-                              });
-                            }}
-                            activeOpacity={0.7}
-                          >
-                            <Text style={[
-                              styles.timeWheelItemText,
-                              selectedHour === hour && styles.timeWheelItemTextSelected,
-                            ]}>
-                              {hour}
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
-                        <View style={{ height: 5 }} />
-                        </ScrollView>
-                      </View>
-
-                    {/* 구분선 */}
-                    <Text style={styles.timeWheelSeparator} pointerEvents="none">:</Text>
-
-                    {/* 분 선택 */}
-                    <View style={styles.timeWheelColumn}>
-                      <ScrollView
-                        ref={minuteScrollRef}
-                        style={styles.timeWheelScroll}
-                        contentContainerStyle={styles.timeWheelContent}
-                        showsVerticalScrollIndicator={false}
-                        snapToInterval={isSmallScreen ? 40 : isMediumScreen ? 45 : 50}
-                        decelerationRate="fast"
-                        nestedScrollEnabled={true}
-                        scrollEnabled={true}
-                        onLayout={() => {
-                          if (minuteScrollRef.current) {
-                            // selectedMinute가 설정되어 있으면 사용, 없으면 0분 사용
-                            const minute = (selectedMinute !== undefined && !isNaN(selectedMinute)) 
-                              ? selectedMinute 
-                              : 0;
-                            const itemHeight = isSmallScreen ? 40 : isMediumScreen ? 45 : 50;
-                            setTimeout(() => {
-                              minuteScrollRef.current?.scrollTo({
-                                y: Math.round(minute / 5) * itemHeight,
-                                animated: false,
-                              });
-                            }, 300);
-                          }
-                        }}
-                        onMomentumScrollEnd={(event) => {
-                          const itemHeight = isSmallScreen ? 40 : isMediumScreen ? 45 : 50;
-                          const offsetY = event.nativeEvent.contentOffset.y;
-                          const index = Math.round(offsetY / itemHeight);
-                          const clampedIndex = Math.max(0, Math.min(index, 11));
-                          const minuteValue = minuteOptions[clampedIndex];
-                          setSelectedMinute(minuteValue);
-                          setNewSchedule({ 
-                            ...newSchedule, 
-                            time: formatTimeToHHMM(selectedHour, minuteValue) 
-                          });
-                        }}
-                      >
-                        <View style={{ height: 5 }} />
-                        {minuteOptions.map((minute, index) => (
-                          <TouchableOpacity
-                            key={minute}
-                            style={[
-                              styles.timeWheelItem,
-                              selectedMinute === minute && styles.timeWheelItemSelected,
-                            ]}
-                            onPress={() => {
-                              setSelectedMinute(minute);
-                              setNewSchedule({ 
-                                ...newSchedule, 
-                                time: formatTimeToHHMM(selectedHour, minute) 
-                              });
-                              const itemHeight = isSmallScreen ? 40 : isMediumScreen ? 45 : 50;
-                              minuteScrollRef.current?.scrollTo({
-                                y: index * itemHeight,
-                                animated: true,
-                              });
-                            }}
-                            activeOpacity={0.7}
-                          >
-                            <Text style={[
-                              styles.timeWheelItemText,
-                              selectedMinute === minute && styles.timeWheelItemTextSelected,
-                            ]}>
-                              {minute.toString().padStart(2, '0')}
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
-                        <View style={{ height: 5 }} />
-                      </ScrollView>
-                    </View>
-
-                  </View>
-                </View>
+                <TimePicker
+                  value={newSchedule.time || '12:00'}
+                  onChange={(time: string) => {
+                    setNewSchedule({
+                      ...newSchedule,
+                      time,
+                    });
+                  }}
+                />
               </View>
             </ScrollView>
 
@@ -3146,6 +3047,41 @@ const styles = StyleSheet.create({
     gap: 8,
     flex: 1,
     marginRight: 8,
+  },
+  // 일기 배지 스타일
+  diaryBadgeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+  },
+  diaryPhotoCountBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: '#FFF4E6',
+    borderRadius: 12,
+  },
+  diaryPhotoCountText: {
+    fontSize: 12,
+    color: '#FF9500',
+    fontWeight: '600',
+  },
+  diaryCommentCountBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: '#F0F8FF',
+    borderRadius: 12,
+  },
+  diaryCommentCountText: {
+    fontSize: 12,
+    color: Colors.primary,
+    fontWeight: '600',
   },
 });
 

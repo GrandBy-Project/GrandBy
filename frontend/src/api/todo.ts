@@ -105,8 +105,18 @@ export const getTodos = async (
   if (elderly_id) params.elderly_id = elderly_id;
   if (status) params.status = status;
 
-  const response = await apiClient.get<TodoItem[]>('/api/todos/', { params });
-  return response.data;
+  console.log('📡 [API] getTodos 호출:', { date_filter, elderly_id, status });
+  
+  try {
+    const response = await apiClient.get<TodoItem[]>('/api/todos/', { params });
+    console.log('✅ [API] getTodos 성공:', response.data.length, '개');
+    console.log('📊 [API] 할일 목록:', response.data.map(t => ({ title: t.title, date: t.due_date, is_recurring: t.is_recurring })));
+    return response.data;
+  } catch (error: any) {
+    console.error('❌ [API] getTodos 실패:', error);
+    console.error('❌ [API] 에러 응답:', error.response?.data);
+    throw error;
+  }
 };
 
 /**
@@ -155,7 +165,7 @@ export const getTodoStats = async (
  * @param elderly_id - 어르신 ID (보호자용, optional)
  */
 export const getDetailedStats = async (
-  period: 'week' | 'month' = 'week',
+  period: 'week' | 'month' | 'last_month' = 'week',
   elderly_id?: string
 ): Promise<TodoDetailedStats> => {
   const params: any = { period };
@@ -169,8 +179,24 @@ export const getDetailedStats = async (
  * TODO 생성 (보호자 전용)
  */
 export const createTodo = async (data: TodoCreateRequest): Promise<TodoItem> => {
-  const response = await apiClient.post<TodoItem>('/api/todos/', data);
-  return response.data;
+  console.log('📡 [API] createTodo 호출:', JSON.stringify(data, null, 2));
+  
+  try {
+    const response = await apiClient.post<TodoItem>('/api/todos/', data);
+    console.log('✅ [API] createTodo 성공:', response.data);
+    console.log('📊 [API] 생성된 할일:', {
+      todo_id: response.data.todo_id,
+      title: response.data.title,
+      due_date: response.data.due_date,
+      is_recurring: response.data.is_recurring,
+      is_shared_with_caregiver: response.data.is_shared_with_caregiver
+    });
+    return response.data;
+  } catch (error: any) {
+    console.error('❌ [API] createTodo 실패:', error);
+    console.error('❌ [API] 에러 응답:', error.response?.data);
+    throw error;
+  }
 };
 
 /**
