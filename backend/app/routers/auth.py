@@ -164,10 +164,10 @@ async def login(user_data: UserLogin, db: Session = Depends(get_db)):
             
             # 10회 실패 시 15분 잠금
             if attempt_data["attempts"] >= 10:
-                attempt_data["locked_until"] = datetime.utcnow() + timedelta(minutes=15)
+                attempt_data["locked_until"] = datetime.utcnow() + timedelta(minutes=1)
                 raise HTTPException(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                    detail="로그인 시도 횟수를 초과했습니다. 15분 후 다시 시도해주세요."
+                    detail="로그인 시도 횟수를 초과했습니다. 1분 후 다시 시도해주세요."
                 )
         
         raise HTTPException(
