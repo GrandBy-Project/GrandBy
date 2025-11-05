@@ -190,6 +190,9 @@ class RTZRRealtimeSTT:
                         # 최종 결과
                         self.partial_buffer.set_final(text)
 
+                        # ✅ 리셋 전에 사용자 발화 시작 시간 저장 (메트릭 수집용)
+                        saved_streaming_start_time = self.streaming_start_time
+                        
                         # # 🔔 종료 판단 신호 업데이트
                         # current_time = time.time()
                         # self._signals.last_user_speech_time = current_time
@@ -203,7 +206,8 @@ class RTZRRealtimeSTT:
                         await self.results_queue.put({
                             'text': text,
                             'is_final': True,
-                            'partial_only': False
+                            'partial_only': False,
+                            'user_speech_start_time': saved_streaming_start_time  # 사용자 발화 시작 시간 포함
                         })
                         
                         # 발화 완료 - 버퍼 초기화 및 시간 리셋

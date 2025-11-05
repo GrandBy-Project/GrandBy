@@ -4,7 +4,7 @@
 """
 
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 from sqlalchemy import and_, func
 from typing import List, Optional
 from datetime import date as date_type
@@ -55,11 +55,34 @@ async def get_diaries(
                 detail="해당 어르신과 연결되어 있지 않습니다."
             )
         
-        # 연결된 어르신의 다이어리 조회
-        query = db.query(Diary).filter(Diary.user_id == elderly_id)
+        # 연결된 어르신의 다이어리 조회 (활성화된 사용자만)
+        # 일기 소유자(user_id)와 작성자(author_id) 모두 활성화되어 있어야 함
+        owner = aliased(User)
+        author = aliased(User)
+        query = db.query(Diary).join(
+            owner, Diary.user_id == owner.user_id
+        ).join(
+            author, Diary.author_id == author.user_id
+        ).filter(
+            and_(
+                Diary.user_id == elderly_id,
+                owner.is_active == True,
+                author.is_active == True
+            )
+        )
     else:
         # 기본: 본인의 다이어리 조회
-        query = db.query(Diary).filter(Diary.user_id == current_user.user_id)
+        # 소유자(user_id)는 current_user이므로 이미 get_current_user에서 활성화 체크 완료
+        # 작성자(author_id)만 활성화 체크 필요
+        author = aliased(User)
+        query = db.query(Diary).join(
+            author, Diary.author_id == author.user_id
+        ).filter(
+            and_(
+                Diary.user_id == current_user.user_id,
+                author.is_active == True
+            )
+        )
     
     # 날짜 필터링
     if start_date:
