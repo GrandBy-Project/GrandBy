@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  # Redis (캐싱 & Celery 브로커) - EC2 내부 컨테이너
+  # Redis (캐싱 & Celery 브로커) - EC2 내부컨테이너
   redis:
     image: redis:7-alpine
     container_name: grandby_redis
