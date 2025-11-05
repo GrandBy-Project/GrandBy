@@ -106,8 +106,6 @@ export const CalendarScreen = () => {
   const [connectedElderly, setConnectedElderly] = useState<any[]>([]);
   const [selectedElderlyId, setSelectedElderlyId] = useState<string | null>(null);
   
-  // 보호자용: 공유 필터 상태 (기본값: 공유된 일정만)
-  const [showSharedOnly, setShowSharedOnly] = useState(true);
 
   // 필터링된 일정 가져오기
   const getFilteredSchedules = (schedules: TodoItem[]) => {
@@ -310,15 +308,10 @@ export const CalendarScreen = () => {
       console.log(`  - 월간 뷰: ${isMonthlyView}`);
 
       // 보호자인 경우 어르신 ID 전달
-      // 보호자는 공유 필터 적용 (showSharedOnly가 true면 공유된 일정만)
       if (user.role === 'caregiver' && selectedElderlyId) {
-        // 보호자인 경우: 공유된 일정만 또는 전체 일정
+        // 보호자인 경우
         const todos = await getTodosByRange(startDateStr, endDateStr, selectedElderlyId);
-        // 클라이언트 측에서 필터링 (백엔드에 shared_only 파라미터 추가 필요하지만, 일단 클라이언트 필터링)
-        const filteredTodos = showSharedOnly 
-          ? todos.filter(todo => todo.is_shared_with_caregiver === true)
-          : todos;
-        setSchedules(filteredTodos);
+        setSchedules(todos);
       } else {
         // 어르신인 경우: 모든 일정 조회
         const todos = await getTodosByRange(startDateStr, endDateStr);
@@ -401,7 +394,7 @@ export const CalendarScreen = () => {
       loadSchedules();
       loadDiaries();
     }
-  }, [selectedElderlyId, showSharedOnly]);
+  }, [selectedElderlyId]);
 
   // 컴포넌트 마운트 시 & selectedDay 변경 시 일정 로딩
   useEffect(() => {
@@ -714,6 +707,16 @@ export const CalendarScreen = () => {
   };
 
   const handleAddSchedule = () => {
+    // 보호자인 경우 GuardianTodoAddScreen으로 이동
+    if (user?.role === 'caregiver' && selectedElderlyId) {
+      // 연결된 어르신 목록에서 이름 찾기
+      const elderly = connectedElderly.find(e => e.user_id === selectedElderlyId);
+      const elderlyName = elderly?.name || '어르신';
+      router.push(`/guardian-todo-add?elderlyId=${selectedElderlyId}&elderlyName=${encodeURIComponent(elderlyName)}`);
+      return;
+    }
+    
+    // 어르신인 경우 기존 모달 방식 사용
     // 선택된 날짜 또는 오늘 날짜로 일정 추가 모달 열기
     const targetDate = selectedDay || new Date();
     // 기본 시간 12:00으로 설정
@@ -982,40 +985,6 @@ export const CalendarScreen = () => {
       )}
 
       {/* 보호자용 공유 필터 */}
-      {user?.role === 'caregiver' && selectedElderlyId && (
-        <View style={styles.sharedFilterContainer}>
-          <TouchableOpacity
-            style={[
-              styles.sharedFilterButton,
-              showSharedOnly && styles.sharedFilterButtonActive
-            ]}
-            onPress={() => setShowSharedOnly(true)}
-            activeOpacity={0.7}
-          >
-            <Text style={[
-              styles.sharedFilterButtonText,
-              showSharedOnly && styles.sharedFilterButtonTextActive
-            ]}>
-              공유된 일정만
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.sharedFilterButton,
-              !showSharedOnly && styles.sharedFilterButtonActive
-            ]}
-            onPress={() => setShowSharedOnly(false)}
-            activeOpacity={0.7}
-          >
-            <Text style={[
-              styles.sharedFilterButtonText,
-              !showSharedOnly && styles.sharedFilterButtonTextActive
-            ]}>
-              전체 일정
-            </Text>
-          </TouchableOpacity>
-        </View>
-      )}
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* 필터 탭 */}

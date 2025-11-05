@@ -375,7 +375,7 @@ class TodoService:
                 and_(
                     Todo.elderly_id == elderly_id,
                     Todo.parent_recurring_id.in_([t.todo_id for t in recurring_templates]),
-                    Todo.due_date == target_date
+                Todo.due_date == target_date
                 )
             ).all()
             
@@ -853,7 +853,8 @@ class TodoService:
         db: Session,
         elderly_id: str,
         start_date: date,
-        end_date: date
+        end_date: date,
+        shared_only: bool = False
     ) -> TodoStatsResponse:
         """
         TODO 통계 조회
@@ -863,24 +864,30 @@ class TodoService:
             elderly_id: 어르신 ID
             start_date: 시작 날짜
             end_date: 종료 날짜
+            shared_only: 공유된 TODO만 (보호자용, 기본값: False)
         
         Returns:
             TODO 통계
         """
         # 반복 일정 템플릿 제외하고 실제 할일만 조회
-        todos = db.query(Todo).filter(
+        query = db.query(Todo).filter(
             and_(
                 Todo.elderly_id == elderly_id,
                 Todo.due_date >= start_date,
                 Todo.due_date <= end_date,
-                # 반복 일정 템플릿 제외
+                # 반복 일정 템플릿 제외: parent_recurring_id가 있거나 is_recurring이 False인 것만
                 or_(
                     Todo.is_recurring == False,
-                    Todo.is_recurring.is_(None),
                     Todo.parent_recurring_id.isnot(None)  # 생성된 개별 TODO (원본 템플릿이 아님)
                 )
             )
-        ).all()
+        )
+        
+        # 공유 필터 (보호자용)
+        if shared_only:
+            query = query.filter(Todo.is_shared_with_caregiver == True)
+        
+        todos = query.all()
         
         total = len(todos)
         completed = sum(1 for t in todos if t.status == TodoStatus.COMPLETED)
@@ -902,7 +909,8 @@ class TodoService:
         db: Session,
         elderly_id: str,
         start_date: date,
-        end_date: date
+        end_date: date,
+        shared_only: bool = False
     ) -> TodoDetailedStatsResponse:
         """
         TODO 상세 통계 조회 (카테고리별 포함)
@@ -912,6 +920,7 @@ class TodoService:
             elderly_id: 어르신 ID
             start_date: 시작 날짜
             end_date: 종료 날짜
+            shared_only: 공유된 TODO만 (보호자용, 기본값: False)
         
         Returns:
             TODO 상세 통계 (카테고리별 포함)
@@ -919,19 +928,24 @@ class TodoService:
         from app.models.todo import TodoCategory
         
         # 전체 TODO 조회 (반복 일정 템플릿 제외)
-        todos = db.query(Todo).filter(
+        query = db.query(Todo).filter(
             and_(
                 Todo.elderly_id == elderly_id,
                 Todo.due_date >= start_date,
                 Todo.due_date <= end_date,
-                # 반복 일정 템플릿 제외
+                # 반복 일정 템플릿 제외: parent_recurring_id가 있거나 is_recurring이 False인 것만
                 or_(
                     Todo.is_recurring == False,
-                    Todo.is_recurring.is_(None),
                     Todo.parent_recurring_id.isnot(None)  # 생성된 개별 TODO (원본 템플릿이 아님)
                 )
             )
-        ).all()
+        )
+        
+        # 공유 필터 (보호자용)
+        if shared_only:
+            query = query.filter(Todo.is_shared_with_caregiver == True)
+        
+        todos = query.all()
         
         # 전체 통계 계산
         total = len(todos)

@@ -17,12 +17,14 @@ import {
   Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { Calendar } from 'react-native-calendars';
 import { useAuthStore } from '../store/authStore';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { BottomNavigationBar, Header, QuickActionGrid, type QuickAction, CheckIcon, PhoneIcon, DiaryIcon } from '../components';
+import { BottomNavigationBar, Header, QuickActionGrid, type QuickAction, CheckIcon, PhoneIcon, DiaryIcon, TimePicker } from '../components';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as todoApi from '../api/todo';
 import * as connectionsApi from '../api/connections';
+import * as diaryApi from '../api/diary';
 import { useAlert } from '../components/GlobalAlertProvider';
 
 interface ElderlyProfile {
@@ -61,10 +63,17 @@ export const GuardianHomeScreen = () => {
     title: '',
     description: '',
     category: '',
-    time: '',
+    time: '', // "오전/오후 X시" 형식 (표시용)
+    timeValue: '12:00', // "HH:MM" 형식 (TimePicker용)
+    date: '',
+    isRecurring: false,
+    recurringType: 'daily' as 'daily' | 'weekly' | 'monthly',
+    recurringDays: [] as number[],
   });
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
-  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [showDatePickerModal, setShowDatePickerModal] = useState(false);
+  const [showRecurringModal, setShowRecurringModal] = useState(false);
+  const [showWeeklyDaysModal, setShowWeeklyDaysModal] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   
   // 어르신 추가 모달 관련 state
@@ -79,7 +88,6 @@ export const GuardianHomeScreen = () => {
   const [lastMonthStats, setLastMonthStats] = useState<todoApi.TodoDetailedStats | null>(null);
   const [isLoadingStats, setIsLoadingStats] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [showAllTodos, setShowAllTodos] = useState(false);
   const [selectedPeriod, setSelectedPeriod] = useState<'month' | 'last_month'>('month');
   const [allTodos, setAllTodos] = useState<todoApi.TodoItem[]>([]); // 전체 할일 목록 (통계 없을 때 구분용)
   const [selectedDayTab, setSelectedDayTab] = useState<'today' | 'tomorrow'>('today'); // 오늘/내일 탭
@@ -90,11 +98,13 @@ export const GuardianHomeScreen = () => {
   
   // 스크롤 관련 ref
   const scrollViewRef = useRef<ScrollView>(null);
-  const statsSectionRef = useRef<View>(null);
-  const [statsSectionY, setStatsSectionY] = useState(0);
   
-  // 보호자용: 공유 필터 상태 (기본값: 공유된 일정만)
-  const [showSharedOnly, setShowSharedOnly] = useState(true);
+  // 전체보기 토글 상태
+  const [showAllTodos, setShowAllTodos] = useState(false);
+  
+  // 다이어리 관련 상태
+  const [recentDiaries, setRecentDiaries] = useState<diaryApi.Diary[]>([]);
+  const [isLoadingDiaries, setIsLoadingDiaries] = useState(false);
   
   // 현재 보여줄 어르신 (마지막 인덱스는 "추가하기" 카드)
   const currentElderly = currentElderlyIndex < connectedElderly.length 
@@ -363,60 +373,153 @@ export const GuardianHomeScreen = () => {
               <ActivityIndicator size="large" color="#34B79F" />
             </View>
           ) : (() => {
+            // 시간순 정렬 함수
+            const sortByTime = (a: todoApi.TodoItem, b: todoApi.TodoItem) => {
+              // 시간이 없는 항목은 뒤로
+              if (!a.due_time && !b.due_time) return 0;
+              if (!a.due_time) return 1;
+              if (!b.due_time) return -1;
+              return a.due_time.localeCompare(b.due_time);
+            };
+
+            // 완료되지 않은 항목과 완료된 항목 분리
             const pendingTodos = todayTodos.filter(todo => 
               todo.status !== 'completed' && todo.status !== 'cancelled'
-            );
+            ).sort(sortByTime);
             
-            return pendingTodos.length === 0 ? (
+            const completedTodos = todayTodos.filter(todo => 
+              todo.status === 'completed'
+            ).sort(sortByTime);
+
+            // 전체 목록: 미완료 항목 먼저, 완료 항목 나중에
+            const allSortedTodos = [...pendingTodos, ...completedTodos];
+            
+            // 표시할 항목 결정 (전체보기 토글에 따라)
+            const displayTodos = showAllTodos ? allSortedTodos : pendingTodos.slice(0, 3);
+            const hasMoreTodos = pendingTodos.length > 3 || completedTodos.length > 0;
+
+            return allSortedTodos.length === 0 ? (
               <View style={{ paddingVertical: 40, alignItems: 'center' }}>
                 <Text style={{ fontSize: 16, color: '#999999' }}>
                   {selectedDayTab === 'today' ? '오늘' : '내일'} 할 일이 없습니다
                 </Text>
               </View>
             ) : (
-              pendingTodos.slice(0, 3).map((todo) => (
-                <TouchableOpacity
-                  key={todo.todo_id}
-                  style={styles.scheduleItem}
-                  onPress={() => {
-                    setSelectedTodo(todo);
-                    setShowEditModal(true);
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <View style={styles.scheduleTime}>
-                    <Text style={styles.scheduleTimeText}>
-                      {todo.due_time ? todo.due_time.substring(0, 5) : '시간미정'}
-                    </Text>
-                  </View>
-                  <View style={styles.scheduleContent}>
-                    <Text 
-                      style={styles.scheduleTitle}
-                      numberOfLines={1}
-                      ellipsizeMode="tail"
-                    >
-                      {todo.title}
-                    </Text>
-                    {todo.description && (
+              <>
+                {displayTodos.map((todo) => {
+                const isCompleted = todo.status === 'completed';
+                return (
+                  <TouchableOpacity
+                    key={todo.todo_id}
+                    style={[
+                      styles.scheduleItem,
+                      isCompleted && styles.scheduleItemCompleted
+                    ]}
+                    onPress={() => {
+                      // 모든 항목을 모달로 표시 (수정 가능)
+                      setSelectedTodo(todo);
+                      setIsEditMode(false);
+                      // 모달 열 때 즉시 수정 모드로 진입
+                      if (todo) {
+                        // 시간 변환 (HH:MM → 오전/오후 형식)
+                        let timeDisplay = '';
+                        if (todo.due_time) {
+                          const [hours] = todo.due_time.split(':');
+                          const hour = parseInt(hours);
+                          const isPM = hour >= 12;
+                          const displayHour = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+                          timeDisplay = `${isPM ? '오후' : '오전'} ${displayHour}시`;
+                        }
+                        
+                        // 반복 요일 변환
+                        let recurringDays: number[] = [];
+                        if (todo.recurring_days && Array.isArray(todo.recurring_days)) {
+                          recurringDays = todo.recurring_days;
+                        }
+                        
+                        setEditedTodo({
+                          title: todo.title,
+                          description: todo.description || '',
+                          category: todo.category || '',
+                          time: timeDisplay,
+                          timeValue: todo.due_time || '12:00',
+                          date: todo.due_date,
+                          isRecurring: todo.is_recurring || false,
+                          recurringType: todo.recurring_type?.toLowerCase() as 'daily' | 'weekly' | 'monthly' || 'daily',
+                          recurringDays: recurringDays,
+                        });
+                        setIsEditMode(true);
+                      }
+                      setShowEditModal(true);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.scheduleTime}>
+                      <Text style={[
+                        styles.scheduleTimeText,
+                        isCompleted && styles.scheduleTimeTextCompleted
+                      ]}>
+                        {todo.due_time ? todo.due_time.substring(0, 5) : '시간미정'}
+                      </Text>
+                    </View>
+                    <View style={styles.scheduleContent}>
                       <Text 
-                        style={styles.scheduleLocation}
+                        style={[
+                          styles.scheduleTitle,
+                          isCompleted && styles.scheduleTitleCompleted
+                        ]}
                         numberOfLines={1}
                         ellipsizeMode="tail"
                       >
-                        {todo.description}
+                        {todo.title}
                       </Text>
-                    )}
-                    {todo.category && (
-                      <Text style={styles.scheduleDate}>
-                        [{getCategoryName(todo.category)}]
+                      {todo.description && (
+                        <Text 
+                          style={[
+                            styles.scheduleLocation,
+                            isCompleted && styles.scheduleLocationCompleted
+                          ]}
+                          numberOfLines={1}
+                          ellipsizeMode="tail"
+                        >
+                          {todo.description}
+                        </Text>
+                      )}
+                      {todo.category && (
+                        <Text style={[
+                          styles.scheduleDate,
+                          isCompleted && styles.scheduleDateCompleted
+                        ]}>
+                          [{getCategoryName(todo.category)}]
+                        </Text>
+                      )}
+                    </View>
+                    <View style={[
+                      styles.scheduleStatus,
+                      isCompleted && styles.scheduleStatusCompleted
+                    ]}>
+                      <Text style={[
+                        styles.scheduleStatusText,
+                        isCompleted && styles.scheduleStatusTextCompleted
+                      ]}>
+                        {isCompleted ? '완료' : '예정'}
                       </Text>
-                    )}
-                  </View>
-                  <View style={styles.scheduleStatus}>
-                    <Text style={styles.scheduleStatusText}>예정</Text>
-                  </View>
-                </TouchableOpacity>
-              ))
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+                {hasMoreTodos && (
+                  <TouchableOpacity
+                    style={styles.expandButton}
+                    onPress={() => setShowAllTodos(!showAllTodos)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.expandButtonText}>
+                      {showAllTodos ? '접기 ▲' : `전체보기 ▼ (${allSortedTodos.length}개)`}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </>
             );
           })()}
         </View>
@@ -479,42 +582,23 @@ export const GuardianHomeScreen = () => {
             </TouchableOpacity>
           </View>
           
-          {/* 원형 차트 요약 - 통계 데이터가 있을 때만 표시 */}
+          {/* 요약 통계 - 통계 데이터가 있을 때만 표시 */}
           {!hasNoStats && (
-            <View style={styles.summaryChartContainer}>
-              <View style={styles.chartSection}>
-                <View style={styles.completionChart}>
-                  <View style={styles.chartCircle}>
-                    <View style={[styles.chartProgress, { 
-                      transform: [{ rotate: `${(stats.completion_rate || 0) * 360 - 90}deg` }]
-                    }]}>
-                    </View>
-                    <View style={styles.chartInnerCircle}>
-                      <Text style={styles.chartPercentage}>
-                        {Math.round((stats.completion_rate || 0) * 100)}%
-                      </Text>
-                      <Text style={styles.chartLabel}>완료율</Text>
-                    </View>
-                  </View>
-                </View>
+            <View style={styles.summaryStats}>
+              <View style={styles.summaryStatItem}>
+                <Ionicons name="checkmark-circle" size={20} color="#34B79F" />
+                <Text style={styles.summaryStatNumber}>{stats.completed || 0}</Text>
+                <Text style={styles.summaryStatLabel}>완료</Text>
               </View>
-              
-              <View style={styles.summaryStats}>
-                <View style={styles.summaryStatItem}>
-                  <Ionicons name="checkmark-circle" size={20} color="#34B79F" />
-                  <Text style={styles.summaryStatNumber}>{stats.completed || 0}</Text>
-                  <Text style={styles.summaryStatLabel}>완료</Text>
-                </View>
-                <View style={styles.summaryStatItem}>
-                  <Ionicons name="time" size={20} color="#FF9500" />
-                  <Text style={styles.summaryStatNumber}>{stats.pending || 0}</Text>
-                  <Text style={styles.summaryStatLabel}>대기</Text>
-                </View>
-                <View style={styles.summaryStatItem}>
-                  <Ionicons name="close-circle" size={20} color="#FF6B6B" />
-                  <Text style={styles.summaryStatNumber}>{stats.cancelled || 0}</Text>
-                  <Text style={styles.summaryStatLabel}>취소</Text>
-                </View>
+              <View style={styles.summaryStatItem}>
+                <Ionicons name="time" size={20} color="#FF9500" />
+                <Text style={styles.summaryStatNumber}>{stats.pending || 0}</Text>
+                <Text style={styles.summaryStatLabel}>대기</Text>
+              </View>
+              <View style={styles.summaryStatItem}>
+                <Ionicons name="close-circle" size={20} color="#FF6B6B" />
+                <Text style={styles.summaryStatNumber}>{stats.cancelled || 0}</Text>
+                <Text style={styles.summaryStatLabel}>취소</Text>
               </View>
             </View>
           )}
@@ -655,182 +739,519 @@ export const GuardianHomeScreen = () => {
                 })()}
               </View>
             </View>
-
-            {/* 카테고리별 완료 현황 */}
-            <View style={styles.categoryStatsCard}>
-              <Text style={styles.categoryStatsTitle}>카테고리별 완료율</Text>
-              {(() => {
-                const categoriesWithData = stats.by_category.filter(cat => cat.total > 0);
-                
-                if (categoriesWithData.length === 0) {
-                  return (
-                    <View style={{ padding: 20, alignItems: 'center' }}>
-                      <Ionicons name="stats-chart-outline" size={48} color="#CCCCCC" />
-                      <Text style={{ marginTop: 12, fontSize: 14, color: '#999999', textAlign: 'center' }}>
-                        카테고리별 데이터가 없습니다
-                      </Text>
-                    </View>
-                  );
-                }
-                
-                return categoriesWithData.map((cat) => (
-                  <View key={cat.category} style={styles.categoryStatRow}>
-                    <View style={styles.categoryStatLabelContainer}>
-                      <Ionicons name={getCategoryIcon(cat.category)} size={16} color="#34B79F" />
-                      <Text style={styles.categoryStatLabel}>
-                        {getCategoryName(cat.category)}
-                      </Text>
-                    </View>
-                    <View style={styles.categoryProgressContainer}>
-                      <View style={styles.categoryProgressBg}>
-                        <View 
-                          style={[
-                            styles.categoryProgressBar, 
-                            { width: `${Math.round(cat.completion_rate * 100)}%` }
-                          ]} 
-                        />
-                      </View>
-                      <Text style={styles.categoryProgressText}>
-                        {cat.completed}/{cat.total} ({Math.round(cat.completion_rate * 100)}%)
-                      </Text>
-                    </View>
-                  </View>
-                ));
-              })()}
-            </View>
           </>
         )}
       </>
     );
   };
 
-  const renderHealthTab = () => (
-    <View>
-      <View style={styles.healthSection}>
-        <View style={styles.sectionTitleContainer}>
-          <Ionicons name="fitness" size={24} color="#34B79F" />
-          <Text style={styles.sectionTitle}>건강관리</Text>
-        </View>
+  // 건강관리 카테고리별 분석 함수 (간결한 버전)
+  const getCategoryAnalysis = (category: 'MEDICINE' | 'HOSPITAL' | 'EXERCISE' | 'MEAL') => {
+    // 오늘 날짜의 TODO 필터링
+    const todayCategoryTodos = todayTodos.filter(t => t.category === category);
+    const todayCompleted = todayCategoryTodos.filter(t => t.status === 'completed').length;
+    const todayTotal = todayCategoryTodos.length;
+
+    // 이번 달 통계에서 카테고리 찾기
+    const categoryStats = monthlyStats?.by_category.find(c => c.category === category);
+    const completionRate = categoryStats ? Math.round(categoryStats.completion_rate * 100) : 0;
+    
+    // 다가오는 일정 찾기 (병원 일정용)
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const upcomingTodos = allTodos
+      .filter(t => {
+        if (t.category !== category || t.status !== 'pending') return false;
+        const todoDate = new Date(t.due_date);
+        todoDate.setHours(0, 0, 0, 0);
+        return todoDate.getTime() >= today.getTime();
+      })
+      .sort((a, b) => {
+        const dateA = new Date(`${a.due_date} ${a.due_time || '00:00'}`);
+        const dateB = new Date(`${b.due_date} ${b.due_time || '00:00'}`);
+        return dateA.getTime() - dateB.getTime();
+      });
+
+    switch (category) {
+      case 'MEDICINE': {
+        // 복약 관리: 오늘 완료/전체
+        const statusText = todayTotal > 0 ? `오늘 ${todayCompleted}/${todayTotal}` : '오늘 일정 없음';
+        return {
+          status: statusText,
+          completionRate,
+          categoryStats,
+        };
+      }
+
+      case 'HOSPITAL': {
+        // 병원 일정: 다가오는 일정
+        const nextAppointment = upcomingTodos[0];
+        let statusText = '일정 없음';
         
-        {/* 복약 관리 */}
-        <View style={styles.healthCard}>
-          <View style={styles.healthCardHeader}>
-            <View style={styles.healthCardTitleContainer}>
-              <Ionicons name="medical" size={18} color="#FF6B6B" />
-              <Text style={styles.healthCardTitle}>복약 관리</Text>
-            </View>
-            <Text style={styles.healthCardStatus}>오늘 2/3</Text>
-          </View>
-          <Text style={styles.healthCardDesc}>아침, 점심 복용 완료</Text>
-        </View>
+        if (nextAppointment) {
+          const appointmentDate = new Date(nextAppointment.due_date);
+          const daysUntil = Math.ceil((appointmentDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+          
+          if (daysUntil === 0) {
+            statusText = '오늘';
+          } else if (daysUntil === 1) {
+            statusText = '내일';
+          } else if (daysUntil <= 7) {
+            statusText = `${daysUntil}일 후`;
+          } else {
+            const month = appointmentDate.getMonth() + 1;
+            const day = appointmentDate.getDate();
+            statusText = `${month}월 ${day}일`;
+          }
+        }
+        
+        return {
+          status: statusText,
+          completionRate,
+          categoryStats,
+          nextAppointment,
+        };
+      }
 
-        {/* 병원 일정 */}
-        <View style={styles.healthCard}>
-          <View style={styles.healthCardHeader}>
-            <View style={styles.healthCardTitleContainer}>
-              <Ionicons name="medical-outline" size={18} color="#4ECDC4" />
-              <Text style={styles.healthCardTitle}>병원 일정</Text>
-            </View>
-            <Text style={styles.healthCardStatus}>이번 주</Text>
-          </View>
-          <Text style={styles.healthCardDesc}>정형외과 - 10월 16일 오후 2시</Text>
-        </View>
+      case 'EXERCISE': {
+        // 운동 기록: 오늘 완료 여부
+        const statusText = todayCompleted > 0 ? '오늘 완료' : todayTotal > 0 ? '오늘 미완료' : '오늘 일정 없음';
+        return {
+          status: statusText,
+          completionRate,
+          categoryStats,
+        };
+      }
 
-        {/* 운동 기록 */}
-        <View style={styles.healthCard}>
-          <View style={styles.healthCardHeader}>
-            <View style={styles.healthCardTitleContainer}>
-              <Ionicons name="fitness" size={18} color="#45B7D1" />
-              <Text style={styles.healthCardTitle}>운동 기록</Text>
-            </View>
-            <Text style={styles.healthCardStatus}>주 3회</Text>
-          </View>
-          <Text style={styles.healthCardDesc}>산책 30분, 스트레칭 완료</Text>
-        </View>
+      case 'MEAL': {
+        // 식사 관리: 오늘 완료/전체
+        const statusText = todayTotal > 0 ? `오늘 ${todayCompleted}/${todayTotal}` : '오늘 일정 없음';
+        return {
+          status: statusText,
+          completionRate,
+          categoryStats,
+        };
+      }
 
-        {/* 식사 관리 */}
-        <View style={styles.healthCard}>
-          <View style={styles.healthCardHeader}>
-            <View style={styles.healthCardTitleContainer}>
-              <Ionicons name="restaurant" size={18} color="#96CEB4" />
-              <Text style={styles.healthCardTitle}>식사 관리</Text>
-            </View>
-            <Text style={styles.healthCardStatus}>규칙적</Text>
+      default:
+        return {
+          status: '데이터 없음',
+          completionRate: 0,
+          categoryStats: null,
+        };
+    }
+  };
+
+  const renderHealthTab = () => {
+    const medicineAnalysis = getCategoryAnalysis('MEDICINE');
+    const hospitalAnalysis = getCategoryAnalysis('HOSPITAL');
+    const exerciseAnalysis = getCategoryAnalysis('EXERCISE');
+    const mealAnalysis = getCategoryAnalysis('MEAL');
+
+    return (
+      <View>
+        <View style={styles.healthSection}>
+          <View style={styles.sectionTitleContainer}>
+            <Ionicons name="fitness" size={24} color="#34B79F" />
+            <Text style={styles.sectionTitle}>건강관리</Text>
           </View>
-          <Text style={styles.healthCardDesc}>아침, 점심 식사 완료</Text>
+          
+          {/* 복약 관리 */}
+          <View style={styles.healthCard}>
+            <View style={styles.healthCardHeader}>
+              <View style={styles.healthCardTitleContainer}>
+                <Ionicons name="medical" size={20} color="#FF6B6B" />
+                <Text style={styles.healthCardTitle}>복약 관리</Text>
+              </View>
+              {medicineAnalysis.categoryStats && medicineAnalysis.categoryStats.total > 0 && (
+                <View style={[styles.healthCardCompletionBadge, { backgroundColor: '#FF6B6B15' }]}>
+                  <Text style={[styles.healthCardCompletionRate, { color: '#FF6B6B' }]}>
+                    {medicineAnalysis.completionRate}%
+                  </Text>
+                  <Text style={[styles.healthCardCompletionLabel, { color: '#FF6B6B' }]}>
+                    이번 달
+                  </Text>
+                </View>
+              )}
+            </View>
+            
+            {/* 오늘 상태 배지 */}
+            <View style={styles.healthCardTodaySection}>
+              <Text style={styles.healthCardSectionLabel}>오늘</Text>
+              <View style={[styles.healthCardTodayBadge, { backgroundColor: '#FF6B6B15' }]}>
+                <Text style={[styles.healthCardTodayText, { color: '#FF6B6B' }]}>
+                  {medicineAnalysis.status}
+                </Text>
+              </View>
+            </View>
+
+            {/* 이번 달 통계 - Progress Bar */}
+            {medicineAnalysis.categoryStats && medicineAnalysis.categoryStats.total > 0 && (
+              <View style={styles.healthCardStatsSection}>
+                <View style={styles.healthCardProgressContainer}>
+                  <View style={styles.healthCardProgressBg}>
+                    <View 
+                      style={[
+                        styles.healthCardProgressBar,
+                        { 
+                          width: `${medicineAnalysis.completionRate}%`,
+                          backgroundColor: '#FF6B6B'
+                        }
+                      ]} 
+                    />
+                  </View>
+                  <Text style={styles.healthCardProgressText}>
+                    {medicineAnalysis.categoryStats.completed}/{medicineAnalysis.categoryStats.total}
+                  </Text>
+                </View>
+                <Text style={styles.healthCardStatsLabel}>이번 달 통계</Text>
+              </View>
+            )}
+          </View>
+
+          {/* 병원 일정 */}
+          <View style={styles.healthCard}>
+            <View style={styles.healthCardHeader}>
+              <View style={styles.healthCardTitleContainer}>
+                <Ionicons name="medical-outline" size={20} color="#4ECDC4" />
+                <Text style={styles.healthCardTitle}>병원 일정</Text>
+              </View>
+              {hospitalAnalysis.categoryStats && hospitalAnalysis.categoryStats.total > 0 && (
+                <View style={[styles.healthCardCompletionBadge, { backgroundColor: '#4ECDC415' }]}>
+                  <Text style={[styles.healthCardCompletionRate, { color: '#4ECDC4' }]}>
+                    {hospitalAnalysis.completionRate}%
+                  </Text>
+                  <Text style={[styles.healthCardCompletionLabel, { color: '#4ECDC4' }]}>
+                    이번 달
+                  </Text>
+                </View>
+              )}
+            </View>
+            
+            {/* 다가오는 일정 */}
+            <View style={styles.healthCardTodaySection}>
+              <Text style={styles.healthCardSectionLabel}>다가오는 일정</Text>
+              {hospitalAnalysis.nextAppointment ? (
+                (() => {
+                  const appointmentDate = new Date(hospitalAnalysis.nextAppointment.due_date);
+                  const month = appointmentDate.getMonth() + 1;
+                  const day = appointmentDate.getDate();
+                  const timeDisplay = hospitalAnalysis.nextAppointment.due_time 
+                    ? `${hospitalAnalysis.nextAppointment.due_time.substring(0, 5)}`
+                    : '시간 미정';
+                  return (
+                    <View style={[styles.healthCardTodayBadge, { backgroundColor: '#4ECDC415' }]}>
+                      <Text style={[styles.healthCardTodayText, { color: '#4ECDC4' }]}>
+                        {hospitalAnalysis.nextAppointment.title || '병원 방문'}
+                      </Text>
+                      <Text style={[styles.healthCardTodaySubText, { color: '#4ECDC4' }]}>
+                        {month}월 {day}일 {timeDisplay}
+                      </Text>
+                    </View>
+                  );
+                })()
+              ) : (
+                <View style={[styles.healthCardTodayBadge, { backgroundColor: '#F0F0F0' }]}>
+                  <Text style={[styles.healthCardTodayText, { color: '#999999' }]}>
+                    일정 없음
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {/* 이번 달 통계 - Progress Bar */}
+            {hospitalAnalysis.categoryStats && hospitalAnalysis.categoryStats.total > 0 && (
+              <View style={styles.healthCardStatsSection}>
+                <View style={styles.healthCardProgressContainer}>
+                  <View style={styles.healthCardProgressBg}>
+                    <View 
+                      style={[
+                        styles.healthCardProgressBar,
+                        { 
+                          width: `${hospitalAnalysis.completionRate}%`,
+                          backgroundColor: '#4ECDC4'
+                        }
+                      ]} 
+                    />
+                  </View>
+                  <Text style={styles.healthCardProgressText}>
+                    {hospitalAnalysis.categoryStats.completed}/{hospitalAnalysis.categoryStats.total}
+                  </Text>
+                </View>
+                <Text style={styles.healthCardStatsLabel}>이번 달 통계</Text>
+              </View>
+            )}
+          </View>
+
+          {/* 운동 기록 */}
+          <View style={styles.healthCard}>
+            <View style={styles.healthCardHeader}>
+              <View style={styles.healthCardTitleContainer}>
+                <Ionicons name="fitness" size={20} color="#45B7D1" />
+                <Text style={styles.healthCardTitle}>운동 기록</Text>
+              </View>
+              {exerciseAnalysis.categoryStats && exerciseAnalysis.categoryStats.total > 0 && (
+                <View style={[styles.healthCardCompletionBadge, { backgroundColor: '#45B7D115' }]}>
+                  <Text style={[styles.healthCardCompletionRate, { color: '#45B7D1' }]}>
+                    {exerciseAnalysis.completionRate}%
+                  </Text>
+                  <Text style={[styles.healthCardCompletionLabel, { color: '#45B7D1' }]}>
+                    이번 달
+                  </Text>
+                </View>
+              )}
+            </View>
+            
+            {/* 오늘 상태 배지 */}
+            <View style={styles.healthCardTodaySection}>
+              <Text style={styles.healthCardSectionLabel}>오늘</Text>
+              <View style={[
+                styles.healthCardTodayBadge, 
+                { 
+                  backgroundColor: exerciseAnalysis.status === '오늘 완료' ? '#45B7D115' : '#F0F0F0'
+                }
+              ]}>
+                <Text style={[
+                  styles.healthCardTodayText, 
+                  { color: exerciseAnalysis.status === '오늘 완료' ? '#45B7D1' : '#999999' }
+                ]}>
+                  {exerciseAnalysis.status}
+                </Text>
+              </View>
+            </View>
+
+            {/* 이번 달 통계 - Progress Bar */}
+            {exerciseAnalysis.categoryStats && exerciseAnalysis.categoryStats.total > 0 && (
+              <View style={styles.healthCardStatsSection}>
+                <View style={styles.healthCardProgressContainer}>
+                  <View style={styles.healthCardProgressBg}>
+                    <View 
+                      style={[
+                        styles.healthCardProgressBar,
+                        { 
+                          width: `${exerciseAnalysis.completionRate}%`,
+                          backgroundColor: '#45B7D1'
+                        }
+                      ]} 
+                    />
+                  </View>
+                  <Text style={styles.healthCardProgressText}>
+                    {exerciseAnalysis.categoryStats.completed}/{exerciseAnalysis.categoryStats.total}
+                  </Text>
+                </View>
+                <Text style={styles.healthCardStatsLabel}>이번 달 통계</Text>
+              </View>
+            )}
+          </View>
+
+          {/* 식사 관리 */}
+          <View style={styles.healthCard}>
+            <View style={styles.healthCardHeader}>
+              <View style={styles.healthCardTitleContainer}>
+                <Ionicons name="restaurant" size={20} color="#96CEB4" />
+                <Text style={styles.healthCardTitle}>식사 관리</Text>
+              </View>
+              {mealAnalysis.categoryStats && mealAnalysis.categoryStats.total > 0 && (
+                <View style={[styles.healthCardCompletionBadge, { backgroundColor: '#96CEB415' }]}>
+                  <Text style={[styles.healthCardCompletionRate, { color: '#96CEB4' }]}>
+                    {mealAnalysis.completionRate}%
+                  </Text>
+                  <Text style={[styles.healthCardCompletionLabel, { color: '#96CEB4' }]}>
+                    이번 달
+                  </Text>
+                </View>
+              )}
+            </View>
+            
+            {/* 오늘 상태 배지 */}
+            <View style={styles.healthCardTodaySection}>
+              <Text style={styles.healthCardSectionLabel}>오늘</Text>
+              <View style={[styles.healthCardTodayBadge, { backgroundColor: '#96CEB415' }]}>
+                <Text style={[styles.healthCardTodayText, { color: '#96CEB4' }]}>
+                  {mealAnalysis.status}
+                </Text>
+              </View>
+            </View>
+
+            {/* 이번 달 통계 - Progress Bar */}
+            {mealAnalysis.categoryStats && mealAnalysis.categoryStats.total > 0 && (
+              <View style={styles.healthCardStatsSection}>
+                <View style={styles.healthCardProgressContainer}>
+                  <View style={styles.healthCardProgressBg}>
+                    <View 
+                      style={[
+                        styles.healthCardProgressBar,
+                        { 
+                          width: `${mealAnalysis.completionRate}%`,
+                          backgroundColor: '#96CEB4'
+                        }
+                      ]} 
+                    />
+                  </View>
+                  <Text style={styles.healthCardProgressText}>
+                    {mealAnalysis.categoryStats.completed}/{mealAnalysis.categoryStats.total}
+                  </Text>
+                </View>
+                <Text style={styles.healthCardStatsLabel}>이번 달 통계</Text>
+              </View>
+            )}
+          </View>
         </View>
       </View>
-    </View>
-  );
+    );
+  };
 
-  const renderCommunicationTab = () => (
-    <View>
-      <View style={styles.communicationSection}>
-        <View style={styles.sectionTitleContainer}>
-          <Ionicons name="chatbubbles" size={24} color="#34B79F" />
-          <Text style={styles.sectionTitle}>소통</Text>
-        </View>
-        
-        {/* AI 통화 내역 */}
-        <View style={styles.commCard}>
-          <View style={styles.commCardHeader}>
-            <View style={styles.commCardTitleContainer}>
-              <Ionicons name="call" size={18} color="#007AFF" />
-              <Text style={styles.commCardTitle}>AI 통화 내역</Text>
-            </View>
-            <Text style={styles.commCardTime}>오늘 오후 7시</Text>
-          </View>
-          <Text style={styles.commCardContent}>안부 인사 및 오늘 하루 일과 확인</Text>
-          <View style={styles.moodContainer}>
-            <Ionicons name="happy" size={16} color="#4CAF50" />
-            <Text style={styles.commCardMood}>기분: 좋음</Text>
-          </View>
-        </View>
+  // 감정 아이콘 및 색상 매핑
+  const getMoodIcon = (mood: string | null | undefined) => {
+    if (!mood) return { name: 'help-circle-outline', color: '#999999' };
+    
+    const moodLower = mood.toLowerCase();
+    if (moodLower.includes('happy') || moodLower.includes('excited')) {
+      return { name: 'happy', color: '#4CAF50' };
+    } else if (moodLower.includes('calm') || moodLower.includes('content') || moodLower.includes('peaceful')) {
+      return { name: 'happy-outline', color: '#66BB6A' };
+    } else if (moodLower.includes('sad') || moodLower.includes('depressed')) {
+      return { name: 'sad', color: '#FF9800' };
+    } else if (moodLower.includes('angry') || moodLower.includes('frustrated')) {
+      return { name: 'flame', color: '#FF5722' };
+    } else if (moodLower.includes('anxious') || moodLower.includes('worried')) {
+      return { name: 'alert-circle-outline', color: '#FF9800' };
+    }
+    return { name: 'help-circle-outline', color: '#999999' };
+  };
+  
+  const getMoodLabel = (mood: string | null | undefined) => {
+    if (!mood) return '감정 없음';
+    
+    const moodLower = mood.toLowerCase();
+    if (moodLower.includes('happy')) return '행복함';
+    if (moodLower.includes('excited')) return '신남';
+    if (moodLower.includes('calm')) return '평온함';
+    if (moodLower.includes('content')) return '만족';
+    if (moodLower.includes('sad')) return '슬픔';
+    if (moodLower.includes('depressed')) return '우울';
+    if (moodLower.includes('angry')) return '화남';
+    if (moodLower.includes('frustrated')) return '답답함';
+    if (moodLower.includes('anxious')) return '불안';
+    if (moodLower.includes('worried')) return '걱정';
+    return mood;
+  };
+  
+  // 날짜 포맷팅
+  const formatDiaryDate = (dateString: string) => {
+    const date = new Date(dateString);
+    const month = date.getMonth() + 1;
+    const day = date.getDate();
+    return `${month}월 ${day}일`;
+  };
 
-        {/* 일기 */}
-        <View style={styles.commCard}>
-          <View style={styles.commCardHeader}>
-            <View style={styles.commCardTitleContainer}>
-              <Ionicons name="book" size={18} color="#FF9500" />
-              <Text style={styles.commCardTitle}>최근 일기</Text>
+  const renderCommunicationTab = () => {
+    const emotionAnalysis = analyzeEmotionState();
+    
+    return (
+      <View>
+        <View style={styles.communicationSection}>
+          <View style={styles.sectionTitleContainer}>
+            <Ionicons name="chatbubbles" size={24} color="#34B79F" />
+            <Text style={styles.sectionTitle}>소통</Text>
+          </View>
+          
+          {/* 최근 다이어리 목록 */}
+          {isLoadingDiaries ? (
+            <View style={styles.commCard}>
+              <ActivityIndicator size="small" color="#34B79F" />
+              <Text style={styles.commCardContent}>다이어리를 불러오는 중...</Text>
             </View>
-            <Text style={styles.commCardTime}>10월 13일</Text>
-          </View>
-          <Text style={styles.commCardContent}>오늘은 날씨가 좋아서 산책을 했다. 기분이 상쾌했다.</Text>
-          <View style={styles.moodContainer}>
-            <Ionicons name="happy-outline" size={16} color="#4CAF50" />
-            <Text style={styles.commCardMood}>감정: 평온함</Text>
-          </View>
-        </View>
+          ) : recentDiaries.length > 0 ? (
+            recentDiaries.slice(0, 3).map((diary) => {
+              const moodIcon = getMoodIcon(diary.mood);
+              return (
+                <TouchableOpacity
+                  key={diary.diary_id}
+                  style={styles.commCard}
+                  activeOpacity={0.7}
+                  onPress={() => router.push(`/diary-detail?id=${diary.diary_id}`)}
+                >
+                  <View style={styles.commCardHeader}>
+                    <View style={styles.commCardTitleContainer}>
+                      <Ionicons name="book" size={18} color="#FF9500" />
+                      <Text style={styles.commCardTitle}>최근 일기</Text>
+                    </View>
+                    <Text style={styles.commCardTime}>{formatDiaryDate(diary.date)}</Text>
+                  </View>
+                  <Text 
+                    style={styles.commCardContent}
+                    numberOfLines={2}
+                    ellipsizeMode="tail"
+                  >
+                    {diary.content}
+                  </Text>
+                  {diary.mood && (
+                    <View style={styles.moodContainer}>
+                      <Ionicons name={moodIcon.name as any} size={16} color={moodIcon.color} />
+                      <Text style={[styles.commCardMood, { color: moodIcon.color }]}>
+                        감정: {getMoodLabel(diary.mood)}
+                      </Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              );
+            })
+          ) : (
+            <View style={styles.commCard}>
+              <Text style={styles.commCardContent}>아직 작성된 다이어리가 없습니다.</Text>
+            </View>
+          )}
 
-        {/* 감정 분석 */}
-        <View style={styles.commCard}>
-          <View style={styles.commCardHeader}>
-            <View style={styles.commCardTitleContainer}>
-              <Ionicons name="analytics" size={18} color="#9C27B0" />
-              <Text style={styles.commCardTitle}>감정 분석</Text>
+          {/* 감정 분석 */}
+          {emotionAnalysis.total && emotionAnalysis.total > 0 && (
+            <View style={styles.commCard}>
+              <View style={styles.commCardHeader}>
+                <View style={styles.commCardTitleContainer}>
+                  <Ionicons name="analytics" size={18} color="#9C27B0" />
+                  <Text style={styles.commCardTitle}>감정 분석</Text>
+                </View>
+                <Text style={styles.commCardTime}>최근 7일</Text>
+              </View>
+              <Text style={styles.commCardContent}>{emotionAnalysis.summary}</Text>
+              {Object.keys(emotionAnalysis.emotionStats).length > 0 && (
+                <View style={styles.emotionTags}>
+                  {Object.entries(emotionAnalysis.emotionStats).map(([mood, percentage]) => {
+                    const moodIcon = getMoodIcon(mood);
+                    return (
+                      <View key={mood} style={styles.emotionTagWithIcon}>
+                        <Ionicons name={moodIcon.name as any} size={12} color={moodIcon.color} />
+                        <Text style={styles.emotionTag}>
+                          {getMoodLabel(mood)} {percentage}%
+                        </Text>
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
             </View>
-            <Text style={styles.commCardTime}>이번 주</Text>
-          </View>
-          <Text style={styles.commCardContent}>전반적으로 안정적인 감정 상태를 보이고 있습니다.</Text>
-          <View style={styles.emotionTags}>
-            <View style={styles.emotionTagWithIcon}>
-              <Ionicons name="happy" size={12} color="#4CAF50" />
-              <Text style={styles.emotionTag}>긍정 70%</Text>
-            </View>
-            <View style={styles.emotionTagWithIcon}>
-              <Ionicons name="happy-outline" size={12} color="#66BB6A" />
-              <Text style={styles.emotionTag}>평온 25%</Text>
-            </View>
-            <View style={styles.emotionTagWithIcon}>
-              <Ionicons name="sad" size={12} color="#FF9800" />
-              <Text style={styles.emotionTag}>우울 5%</Text>
-            </View>
-          </View>
+          )}
+          
+          {/* 일기장 바로가기 */}
+          {currentElderly && (
+            <TouchableOpacity
+              style={[styles.commCard, styles.viewAllCard]}
+              activeOpacity={0.7}
+              onPress={() => router.push('/diaries')}
+            >
+              <View style={styles.commCardHeader}>
+                <View style={styles.commCardTitleContainer}>
+                  <Ionicons name="book-outline" size={18} color="#34B79F" />
+                  <Text style={styles.commCardTitle}>전체 일기장 보기</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color="#999999" />
+              </View>
+            </TouchableOpacity>
+          )}
         </View>
       </View>
-    </View>
-  );
+    );
+  };
 
   // menuItems는 현재 사용되지 않음 (참고용으로만 유지)
   const menuItems = [
@@ -953,14 +1374,9 @@ export const GuardianHomeScreen = () => {
       // 백엔드에서 해당 날짜만 조회 (반복 일정 자동 생성 포함)
       const todos = await todoApi.getTodos(dateFilter, elderlyId);
       
-      // 보호자는 공유 필터 적용 (showSharedOnly가 true면 공유된 일정만)
-      const filteredTodos = showSharedOnly 
-        ? todos.filter(todo => todo.is_shared_with_caregiver === true)
-        : todos;
-      
-      console.log(`✅ 보호자: TODO 로딩 성공 - 전체 ${todos.length}개, 필터링 후 ${filteredTodos.length}개 (${targetDayTab === 'today' ? '오늘' : '내일'})`);
-      console.log('📊 완료된 TODO:', filteredTodos.filter(t => t.status === 'completed').length);
-      console.log('📊 필터링된 TODO 목록:', filteredTodos.map(t => ({
+      console.log(`✅ 보호자: TODO 로딩 성공 - ${todos.length}개 (${targetDayTab === 'today' ? '오늘' : '내일'})`);
+      console.log('📊 완료된 TODO:', todos.filter(t => t.status === 'completed').length);
+      console.log('📊 TODO 목록:', todos.map(t => ({
         id: t.todo_id,
         title: t.title,
         date: t.due_date,
@@ -969,7 +1385,7 @@ export const GuardianHomeScreen = () => {
       })));
       
       // 성공 시에만 상태 업데이트 (로딩 중에도 이전 데이터 유지)
-      setTodayTodos(filteredTodos);
+      setTodayTodos(todos);
     } catch (error: any) {
       console.error('❌ TODO 로딩 실패:', error);
       console.error('❌ 에러 상세:', error.response?.data || error.message);
@@ -983,41 +1399,103 @@ export const GuardianHomeScreen = () => {
     }
   };
 
-  // 어르신의 통계 불러오기 (통합 함수)
-  const loadStatsForElderly = async (
-    elderlyId: string, 
-    period: 'month' | 'last_month',
-    skipLoadingState: boolean = false
-  ) => {
-    if (!skipLoadingState && isLoadingStats) {
-      return; // 이미 로딩 중이면 스킵
-    }
-    if (!skipLoadingState) {
-      setIsLoadingStats(true);
-    }
+  // 최근 다이어리 불러오기
+  const loadRecentDiaries = async (elderlyId: string) => {
+    if (!elderlyId) return;
+    
+    setIsLoadingDiaries(true);
     try {
-      const periodLabel = period === 'month' ? '월간' : '전월';
-      console.log(`📊 보호자: ${periodLabel} 통계 로딩 시작 -`, elderlyId);
-      const stats = await todoApi.getDetailedStats(period, elderlyId);
-      console.log(`✅ 보호자: ${periodLabel} 통계 로딩 성공`);
-      console.log(`📈 ${periodLabel} 완료율:`, Math.round(stats.completion_rate * 100) + '%');
-      console.log('📋 카테고리별:', stats.by_category.length, '개');
-      
-      // period에 따라 적절한 state에 저장
-      if (period === 'month') {
-        setMonthlyStats(stats);
-      } else {
-        setLastMonthStats(stats);
-      }
+      console.log('📖 보호자: 최근 다이어리 로딩 시작 -', elderlyId);
+      const diaries = await diaryApi.getDiaries({
+        elderly_id: elderlyId,
+        limit: 5, // 최근 5개만
+      });
+      console.log('✅ 보호자: 다이어리 로딩 성공 -', diaries.length, '개');
+      setRecentDiaries(diaries);
     } catch (error: any) {
-      const periodLabel = period === 'month' ? '월간' : '전월';
-      console.error(`❌ ${periodLabel} 통계 로딩 실패:`, error);
-      show('오류', `${periodLabel} 통계를 불러오는데 실패했습니다.`);
+      console.error('❌ 다이어리 로딩 실패:', error);
+      setRecentDiaries([]);
     } finally {
-      if (!skipLoadingState) {
-        setIsLoadingStats(false);
-      }
+      setIsLoadingDiaries(false);
     }
+  };
+  
+  // 감정 상태 분석 함수
+  const analyzeEmotionState = () => {
+    if (recentDiaries.length === 0) {
+      return {
+        summary: '아직 다이어리가 없습니다.',
+        emotionStats: {},
+        dominantEmotion: null,
+      };
+    }
+    
+    // 최근 7일간의 다이어리만 분석
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    
+    const recentWeekDiaries = recentDiaries.filter(diary => {
+      const diaryDate = new Date(diary.date);
+      return diaryDate >= sevenDaysAgo;
+    });
+    
+    if (recentWeekDiaries.length === 0) {
+      return {
+        summary: '최근 7일간 작성된 다이어리가 없습니다.',
+        emotionStats: {},
+        dominantEmotion: null,
+      };
+    }
+    
+    // mood별 카운트
+    const moodCount: Record<string, number> = {};
+    recentWeekDiaries.forEach(diary => {
+      if (diary.mood) {
+        moodCount[diary.mood] = (moodCount[diary.mood] || 0) + 1;
+      }
+    });
+    
+    // 전체 감정 통계 계산
+    const total = recentWeekDiaries.length;
+    const emotionStats: Record<string, number> = {};
+    Object.keys(moodCount).forEach(mood => {
+      emotionStats[mood] = Math.round((moodCount[mood] / total) * 100);
+    });
+    
+    // 주요 감정 찾기
+    const dominantEmotion = Object.keys(moodCount).reduce((a, b) => 
+      moodCount[a] > moodCount[b] ? a : b, Object.keys(moodCount)[0]
+    );
+    
+    // 요약 메시지 생성
+    let summary = '';
+    const positiveMoods = ['happy', 'excited', 'calm', 'content'];
+    const negativeMoods = ['sad', 'angry', 'anxious', 'worried'];
+    
+    const positiveCount = Object.keys(moodCount).filter(m => 
+      positiveMoods.includes(m.toLowerCase())
+    ).reduce((sum, m) => sum + moodCount[m], 0);
+    
+    const negativeCount = Object.keys(moodCount).filter(m => 
+      negativeMoods.includes(m.toLowerCase())
+    ).reduce((sum, m) => sum + moodCount[m], 0);
+    
+    if (positiveCount > negativeCount * 2) {
+      summary = '전반적으로 긍정적이고 안정적인 감정 상태를 보이고 있습니다.';
+    } else if (positiveCount > negativeCount) {
+      summary = '대체로 안정적인 감정 상태를 보이고 있습니다.';
+    } else if (negativeCount > positiveCount) {
+      summary = '감정 상태에 주의가 필요할 수 있습니다.';
+    } else {
+      summary = '감정 상태를 지속적으로 확인해주세요.';
+    }
+    
+    return {
+      summary,
+      emotionStats,
+      dominantEmotion,
+      total,
+    };
   };
 
   // 하위 호환성을 위한 별칭 함수들 (기존 코드 호환성 유지)
@@ -1058,18 +1536,14 @@ export const GuardianHomeScreen = () => {
         // 순차적으로 실행하여 데이터가 확실히 업데이트되도록 함
         // selectedDayTab을 명시적으로 전달하여 최신 값 사용
         await loadTodosForElderly(targetElderly.id, true, selectedDayTab); // skipLoadingState = true
-        // 선택된 기간에 따라 필요한 통계만 로딩 (최적화)
-        await refreshStats(targetElderly.id, true);
-        // 통계 데이터 로딩을 위해 전체 할일 목록 로드
-        await loadAllTodosForElderly(targetElderly.id);
+        // 최근 다이어리 로딩
+        await loadRecentDiaries(targetElderly.id);
       } else if (currentElderly) {
         // fallback: currentElderly가 있으면 사용
         // selectedDayTab을 명시적으로 전달하여 최신 값 사용
         await loadTodosForElderly(currentElderly.id, true, selectedDayTab);
-        await refreshStats(currentElderly.id, true);
-        // 통계 탭이 활성화된 경우에만 전체 할일 목록 로딩 (최적화)
-        // 통계 데이터 로딩을 위해 전체 할일 목록 로드
-        await loadAllTodosForElderly(currentElderly.id);
+        // 최근 다이어리 로딩
+        await loadRecentDiaries(currentElderly.id);
       }
     } catch (error: any) {
       console.error('새로고침 실패:', error);
@@ -1106,17 +1580,15 @@ export const GuardianHomeScreen = () => {
     }
   };
 
-  // 현재 어르신 변경 시 TODO 및 통계 다시 로딩
+  // 현재 어르신 변경 시 TODO 및 다이어리 다시 로딩
   useEffect(() => {
     if (currentElderly) {
       // selectedDayTab을 명시적으로 전달하여 최신 값 사용
       loadTodosForElderly(currentElderly.id, false, selectedDayTab);
-      // 선택된 기간에 따라 필요한 통계만 로딩 (최적화)
-      refreshStats(currentElderly.id, false);
-      // 통계 데이터 로딩을 위해 전체 할일 목록 로드
-      loadAllTodosForElderly(currentElderly.id);
+      // 최근 다이어리 로딩
+      loadRecentDiaries(currentElderly.id);
     }
-  }, [currentElderly?.id, selectedDayTab, selectedPeriod, refreshStats]);
+  }, [currentElderly?.id, selectedDayTab]);
 
   // 화면 포커스 시 데이터 새로고침 (다른 화면 갔다가 돌아올 때만)
   useFocusEffect(
@@ -1135,10 +1607,8 @@ export const GuardianHomeScreen = () => {
           // 로딩 상태 표시 없이 백그라운드에서 데이터만 업데이트 (깜빡임 방지)
           // selectedDayTab을 명시적으로 전달하여 최신 값 사용
           await loadTodosForElderly(currentElderly.id, true, selectedDayTab);
-          // 선택된 기간에 따라 필요한 통계만 로딩 (최적화)
-          await refreshStats(currentElderly.id, true);
-          // 통계 데이터 로딩을 위해 전체 할일 목록 로드
-          await loadAllTodosForElderly(currentElderly.id);
+          // 최근 다이어리 로딩
+          await loadRecentDiaries(currentElderly.id);
         }
       };
       
@@ -1153,7 +1623,7 @@ export const GuardianHomeScreen = () => {
         isMounted = false;
         clearTimeout(refreshTimer);
       };
-    }, [user, currentElderly?.id, selectedDayTab, selectedPeriod, refreshStats]) // selectedDayTab도 의존성에 포함
+    }, [user, currentElderly?.id, selectedDayTab]) // selectedDayTab도 의존성에 포함
   );
 
   // 날짜 포맷팅 유틸리티 함수들
@@ -1357,17 +1827,21 @@ export const GuardianHomeScreen = () => {
     return `${hour.toString().padStart(2, '0')}:00`;
   };
 
-  // TODO 수정 모드 활성화
-  const handleEditMode = () => {
-    if (selectedTodo) {
-      setEditedTodo({
-        title: selectedTodo.title,
-        description: selectedTodo.description || '',
-        category: selectedTodo.category || '',
-        time: formatTimeToDisplay(selectedTodo.due_time),
-      });
-      setIsEditMode(true);
-    }
+  // 반복 옵션
+  const recurringOptions = [
+    { id: 'daily', name: '매일' },
+    { id: 'weekly', name: '매주' },
+    { id: 'monthly', name: '매월' },
+  ];
+
+  // 날짜 포맷팅
+  const formatDateForDisplay = (dateString: string) => {
+    const date = new Date(dateString);
+    const month = date.getMonth() + 1;
+    const day = date.getDate();
+    const weekdays = ['일', '월', '화', '수', '목', '금', '토'];
+    const weekday = weekdays[date.getDay()];
+    return `${month}월 ${day}일 (${weekday})`;
   };
 
   // TODO 수정 저장
@@ -1382,20 +1856,35 @@ export const GuardianHomeScreen = () => {
       return;
     }
 
-    if (!editedTodo.time) {
+    if (!editedTodo.timeValue) {
       show('알림', '시간을 선택해주세요.');
       return;
     }
 
     setIsSaving(true);
     try {
-      // 백엔드 TodoUpdate는 due_time을 time 객체로 기대하지만,
-      // FastAPI/Pydantic이 "HH:MM" 형식 문자열을 자동으로 time 객체로 변환
+      // 시간은 이미 "HH:MM" 형식으로 저장되어 있음
+      const formattedTime = editedTodo.timeValue || '12:00';
+
+      // 반복 설정에 따른 추가 데이터 처리
+      const selectedDate = new Date(editedTodo.date);
+      const selectedDayOfMonth = selectedDate.getDate(); // 1~31
+      const selectedWeekday = selectedDate.getDay() === 0 ? 6 : selectedDate.getDay() - 1; // 월요일=0, 일요일=6
+      
       const updateData: todoApi.TodoUpdateRequest = {
         title: editedTodo.title,
         description: editedTodo.description || undefined,
         category: editedTodo.category.toUpperCase() as any,
-        due_time: parseDisplayTimeToApi(editedTodo.time), // "HH:MM" 형식 문자열
+        due_date: editedTodo.date,
+        due_time: formattedTime,
+        is_recurring: editedTodo.isRecurring,
+        recurring_type: editedTodo.isRecurring ? editedTodo.recurringType.toUpperCase() as any : undefined,
+        recurring_days: editedTodo.isRecurring && editedTodo.recurringType === 'weekly' 
+          ? (editedTodo.recurringDays.length > 0 ? editedTodo.recurringDays : [selectedWeekday])
+          : undefined,
+        recurring_day_of_month: editedTodo.isRecurring && editedTodo.recurringType === 'monthly'
+          ? selectedDayOfMonth
+          : undefined,
       };
 
       await todoApi.updateTodo(selectedTodo!.todo_id, updateData);
@@ -1610,19 +2099,6 @@ export const GuardianHomeScreen = () => {
   // 현재 날짜 정보
   const today = new Date();
 
-  // 통계 섹션으로 스크롤
-  const scrollToStats = useCallback(() => {
-    if (statsSectionY > 0 && scrollViewRef.current) {
-      scrollViewRef.current.scrollTo({ y: statsSectionY - 20, animated: true });
-    } else {
-      // 위치가 아직 측정되지 않은 경우, 약간의 지연 후 재시도
-      setTimeout(() => {
-        if (statsSectionY > 0 && scrollViewRef.current) {
-          scrollViewRef.current.scrollTo({ y: statsSectionY - 20, animated: true });
-        }
-      }, 100);
-    }
-  }, [statsSectionY]);
 
   // 빠른 액션 버튼 설정 (보호자용)
   const quickActions: QuickAction[] = currentElderly ? [
@@ -1636,7 +2112,11 @@ export const GuardianHomeScreen = () => {
       id: 'stats',
       label: '통계',
       icon: 'stats-chart-outline',
-      onPress: () => scrollToStats(), // 통계 섹션으로 스크롤
+      onPress: () => {
+        if (currentElderly) {
+          router.push(`/guardian-statistics?elderlyId=${currentElderly.id}&elderlyName=${encodeURIComponent(currentElderly.name)}`);
+        }
+      },
     },
     {
       id: 'ai-call',
@@ -1678,76 +2158,9 @@ export const GuardianHomeScreen = () => {
         }
       >
         {/* 보호자용 공유 필터 */}
-        {currentElderly && (
-          <View style={styles.sharedFilterContainer}>
-            <TouchableOpacity
-              style={[
-                styles.sharedFilterButton,
-                showSharedOnly && styles.sharedFilterButtonActive
-              ]}
-              onPress={() => {
-                setShowSharedOnly(true);
-                // 필터 변경 시 일정 다시 로드
-                if (currentElderly) {
-                  loadTodosForElderly(currentElderly.id, false, selectedDayTab);
-                }
-              }}
-              activeOpacity={0.7}
-            >
-              <Text style={[
-                styles.sharedFilterButtonText,
-                showSharedOnly && styles.sharedFilterButtonTextActive
-              ]}>
-                공유된 일정만
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.sharedFilterButton,
-                !showSharedOnly && styles.sharedFilterButtonActive
-              ]}
-              onPress={() => {
-                setShowSharedOnly(false);
-                // 필터 변경 시 일정 다시 로드
-                if (currentElderly) {
-                  loadTodosForElderly(currentElderly.id, false, selectedDayTab);
-                }
-              }}
-              activeOpacity={0.7}
-            >
-              <Text style={[
-                styles.sharedFilterButtonText,
-                !showSharedOnly && styles.sharedFilterButtonTextActive
-              ]}>
-                전체 일정
-              </Text>
-            </TouchableOpacity>
-          </View>
-        )}
 
         {/* 어르신 카드 섹션 */}
         {renderFamilyTab()}
-
-        {/* 통계 섹션 */}
-        {currentElderly && (
-          <View 
-            ref={statsSectionRef}
-            style={styles.statsSection}
-            onLayout={(event) => {
-              const { y } = event.nativeEvent.layout;
-              setStatsSectionY(y);
-            }}
-          >
-            {renderStatsTab()}
-          </View>
-        )}
-
-        {/* 건강 정보 섹션 */}
-        {currentElderly && (
-          <View style={styles.healthSectionContainer}>
-            {renderHealthTab()}
-          </View>
-        )}
 
         {/* 소통 섹션 */}
         {currentElderly && (
@@ -1770,7 +2183,9 @@ export const GuardianHomeScreen = () => {
           setSelectedTodo(null);
           setIsEditMode(false);
           setShowCategoryPicker(false);
-          setShowTimePicker(false);
+          setShowDatePickerModal(false);
+          setShowRecurringModal(false);
+          setShowWeeklyDaysModal(false);
         }}
       >
         <View style={styles.modalOverlay}>
@@ -1778,7 +2193,7 @@ export const GuardianHomeScreen = () => {
             {/* 모달 헤더 */}
             <View style={styles.editModalHeader}>
               <Text style={styles.editModalTitle}>
-                {isEditMode ? '할 일 수정' : '할 일 상세'}
+                할 일 수정
               </Text>
               <TouchableOpacity
                 onPress={() => {
@@ -1786,7 +2201,9 @@ export const GuardianHomeScreen = () => {
                   setSelectedTodo(null);
                   setIsEditMode(false);
                   setShowCategoryPicker(false);
-                  setShowTimePicker(false);
+                  setShowDatePickerModal(false);
+                  setShowRecurringModal(false);
+                  setShowWeeklyDaysModal(false);
                 }}
                 activeOpacity={0.7}
               >
@@ -1794,67 +2211,10 @@ export const GuardianHomeScreen = () => {
               </TouchableOpacity>
           </View>
 
-            {/* TODO 정보 */}
+            {/* TODO 정보 - 수정 폼 (GuardianTodoAddScreen과 동일한 UI) */}
             {selectedTodo && (
               <ScrollView style={styles.editModalBody} showsVerticalScrollIndicator={false}>
-                {!isEditMode ? (
-                  // 상세 보기 모드
-                  <>
-                    <View style={styles.todoDetailSection}>
-                      <Text style={styles.todoDetailLabel}>제목</Text>
-                      <Text style={styles.todoDetailValue}>{selectedTodo.title}</Text>
-        </View>
-
-                    {selectedTodo.description && (
-                      <View style={styles.todoDetailSection}>
-                        <Text style={styles.todoDetailLabel}>설명</Text>
-                        <Text style={styles.todoDetailValue}>{selectedTodo.description}</Text>
-            </View>
-                    )}
-
-                    <View style={styles.todoDetailRow}>
-                      <View style={[styles.todoDetailSection, { flex: 1 }]}>
-                        <Text style={styles.todoDetailLabel}>카테고리</Text>
-                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                          <Ionicons name={getCategoryIcon(selectedTodo.category)} size={16} color="#34B79F" style={{ marginRight: 4 }} />
-                          <Text style={styles.todoDetailValue}>{getCategoryName(selectedTodo.category)}</Text>
-            </View>
-          </View>
-
-                      <View style={[styles.todoDetailSection, { flex: 1 }]}>
-                        <Text style={styles.todoDetailLabel}>시간</Text>
-                        <Text style={styles.todoDetailValue}>
-                          {formatTimeToDisplay(selectedTodo.due_time) || '-'}
-                        </Text>
-            </View>
-          </View>
-
-                    <View style={styles.todoDetailSection}>
-                      <Text style={styles.todoDetailLabel}>상태</Text>
-                      <Text style={[
-                        styles.todoDetailValue,
-                        { color: selectedTodo.status === 'completed' ? '#34B79F' : '#666666' }
-                      ]}>
-                        {selectedTodo.status === 'completed' ? '완료' : 
-                         selectedTodo.status === 'cancelled' ? '취소' : '대기'}
-                      </Text>
-                    </View>
-
-                    {selectedTodo.is_recurring && (
-                      <View style={styles.todoDetailSection}>
-                        <Text style={styles.todoDetailLabel}>반복 일정</Text>
-                        <Text style={styles.todoDetailValue}>
-                          {selectedTodo.recurring_type === 'DAILY' ? '매일' :
-                           selectedTodo.recurring_type === 'WEEKLY' ? '매주' :
-                           selectedTodo.recurring_type === 'MONTHLY' ? '매월' : '-'}
-                        </Text>
-                      </View>
-                    )}
-                  </>
-                ) : (
-                  // 수정 모드
-                  <>
-                    <View style={styles.inputSection}>
+                <View style={styles.inputSection}>
                       <Text style={styles.inputLabel}>제목</Text>
                       <TextInput
                         style={styles.textInput}
@@ -1878,149 +2238,368 @@ export const GuardianHomeScreen = () => {
                       />
                     </View>
 
+                    {/* 카테고리 선택 - 그리드 형식 */}
                     <View style={styles.inputSection}>
-                      <Text style={styles.inputLabel}>카테고리</Text>
-              <TouchableOpacity
-                        style={styles.pickerButton}
-                        onPress={() => setShowCategoryPicker(!showCategoryPicker)}
-                activeOpacity={0.7}
-              >
-                        <Text style={[
-                          styles.pickerButtonText,
-                          !editedTodo.category && styles.pickerPlaceholder
-                        ]}>
-                          {editedTodo.category 
-                            ? `${getCategoryName(editedTodo.category)}`
-                            : '카테고리를 선택하세요'}
-                        </Text>
-                        <Text style={styles.dropdownIcon}>{showCategoryPicker ? '▲' : '▼'}</Text>
-                      </TouchableOpacity>
+                      <Text style={styles.inputLabel}>카테고리 *</Text>
+                      <View style={styles.categoryGridInline}>
+                        {categories.map((category) => (
+                          <TouchableOpacity
+                            key={category.id}
+                            style={[
+                              styles.categoryCardInline,
+                              editedTodo.category === category.id && styles.categoryCardInlineSelected,
+                            ]}
+                            onPress={() => setEditedTodo({ ...editedTodo, category: category.id })}
+                            activeOpacity={0.7}
+                          >
+                            <View style={[
+                              styles.categoryCardIconContainerInline,
+                              { backgroundColor: category.color + '15' }
+                            ]}>
+                              <Ionicons 
+                                name={category.icon as any} 
+                                size={28} 
+                                color={category.color} 
+                              />
+                            </View>
+                            <Text style={[
+                              styles.categoryCardTextInline,
+                              editedTodo.category === category.id && styles.categoryCardTextInlineSelected
+                            ]}>
+                              {category.name}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </View>
 
-                      {showCategoryPicker && (
-                        <View style={styles.pickerDropdown}>
-                          {categories.map((cat) => (
+                    {/* 날짜 선택 */}
+                    <View style={styles.inputSection}>
+                      <Text style={styles.inputLabel}>날짜</Text>
+                      <TouchableOpacity
+                        style={styles.dateButton}
+                        onPress={() => setShowDatePickerModal(true)}
+                        activeOpacity={0.7}
+                      >
+                        <View style={styles.dateButtonContent}>
+                          <Ionicons name="calendar-outline" size={20} color="#34B79F" />
+                          <Text style={styles.dateButtonText}>
+                            {formatDateForDisplay(editedTodo.date)}
+                          </Text>
+                        </View>
+                        <Text style={styles.dropdownIcon}>▼</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* 시간 선택 */}
+                    <View style={styles.inputSection}>
+                      <Text style={styles.inputLabel}>시간 *</Text>
+                      <View style={styles.timePickerContainer}>
+                        <TimePicker
+                          value={editedTodo.timeValue}
+                          compact={true}
+                          onChange={(time: string) => {
+                            // "HH:MM" 형식에서 "오전/오후 X시" 형식으로 변환
+                            const [hours, minutes] = time.split(':');
+                            const hour = parseInt(hours);
+                            const isPM = hour >= 12;
+                            const displayHour = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+                            const timeDisplay = `${isPM ? '오후' : '오전'} ${displayHour}시`;
+                            
+                            setEditedTodo({
+                              ...editedTodo,
+                              time: timeDisplay,
+                              timeValue: time,
+                            });
+                          }}
+                        />
+                      </View>
+                    </View>
+
+                    {/* 반복 설정 */}
+                    <View style={styles.inputSection}>
+                      <View style={styles.toggleSection}>
+                        <Text style={styles.inputLabel}>반복 설정</Text>
+                        <TouchableOpacity
+                          style={[styles.toggleButton, editedTodo.isRecurring && styles.toggleButtonActive]}
+                          onPress={() => setEditedTodo({ ...editedTodo, isRecurring: !editedTodo.isRecurring })}
+                        >
+                          <Text style={[
+                            styles.toggleButtonText,
+                            editedTodo.isRecurring && styles.toggleButtonTextActive
+                          ]}>
+                            {editedTodo.isRecurring ? 'ON' : 'OFF'}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                      
+                      {editedTodo.isRecurring && (
+                        <>
+                          <TouchableOpacity
+                            style={styles.recurringButton}
+                            onPress={() => setShowRecurringModal(true)}
+                            activeOpacity={0.7}
+                          >
+                            <Text style={styles.recurringButtonText}>
+                              {recurringOptions.find(opt => opt.id === editedTodo.recurringType)?.name || '반복 주기 선택'}
+                            </Text>
+                            <Text style={styles.dropdownIcon}>▼</Text>
+                          </TouchableOpacity>
+                          
+                          {editedTodo.recurringType === 'weekly' && (
                             <TouchableOpacity
-                              key={cat.id}
-                              style={[
-                                styles.pickerOption,
-                                editedTodo.category === cat.id && styles.pickerOptionSelected,
-                              ]}
-                              onPress={() => {
-                                setEditedTodo({ ...editedTodo, category: cat.id });
-                                setShowCategoryPicker(false);
-                              }}
+                              style={styles.recurringButton}
+                              onPress={() => setShowWeeklyDaysModal(true)}
                               activeOpacity={0.7}
                             >
-                              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                <Ionicons name={cat.icon as any} size={16} color={cat.color} style={{ marginRight: 8 }} />
-                                <Text style={styles.pickerOptionText}>{cat.name}</Text>
-                              </View>
-              </TouchableOpacity>
-            ))}
-                        </View>
+                              <Text style={styles.recurringButtonText}>
+                                {editedTodo.recurringDays.length > 0 
+                                  ? `${editedTodo.recurringDays.length}개 요일 선택됨`
+                                  : '반복 요일 선택'}
+                              </Text>
+                              <Text style={styles.dropdownIcon}>▼</Text>
+                            </TouchableOpacity>
+                          )}
+                          
+                          <View style={styles.recurringInfo}>
+                            <View style={styles.recurringInfoContent}>
+                              <Ionicons name="repeat-outline" size={16} color="#34B79F" />
+                              <Text style={styles.recurringInfoText}>
+                                {editedTodo.recurringType === 'daily' && '매일 반복됩니다'}
+                                {editedTodo.recurringType === 'weekly' && '선택한 요일마다 반복됩니다'}
+                                {editedTodo.recurringType === 'monthly' && '선택한 날짜의 날짜마다 반복됩니다'}
+                              </Text>
+                            </View>
+                          </View>
+                        </>
                       )}
-          </View>
-
-                    <View style={styles.inputSection}>
-                      <Text style={styles.inputLabel}>시간</Text>
-          <TouchableOpacity
-                        style={styles.pickerButton}
-                        onPress={() => setShowTimePicker(!showTimePicker)}
-            activeOpacity={0.7}
-          >
-                        <Text style={[
-                          styles.pickerButtonText,
-                          !editedTodo.time && styles.pickerPlaceholder
-                        ]}>
-                          {editedTodo.time || '시간을 선택하세요'}
-                        </Text>
-                        <Text style={styles.dropdownIcon}>{showTimePicker ? '▲' : '▼'}</Text>
-          </TouchableOpacity>
-
-                      {showTimePicker && (
-                        <View style={styles.pickerDropdown}>
-                          <ScrollView style={styles.pickerScroll} showsVerticalScrollIndicator={true}>
-                            {timeOptions.map((time) => (
-                              <TouchableOpacity
-                                key={time}
-                                style={[
-                                  styles.pickerOption,
-                                  editedTodo.time === time && styles.pickerOptionSelected,
-                                ]}
-                                onPress={() => {
-                                  setEditedTodo({ ...editedTodo, time });
-                                  setShowTimePicker(false);
-                                }}
-                                activeOpacity={0.7}
-                              >
-                                <Text style={styles.pickerOptionText}>{time}</Text>
-            </TouchableOpacity>
-                            ))}
-                          </ScrollView>
-        </View>
-                      )}
-          </View>
-                  </>
-                )}
+                    </View>
               </ScrollView>
             )}
 
             {/* 모달 액션 버튼 */}
             <View style={[styles.editModalFooter, { paddingBottom: Math.max(insets.bottom, 20) }]}>
-              {!isEditMode ? (
-                // 상세 보기 모드 버튼
-                <>
-                  {selectedTodo && selectedTodo.status !== 'completed' && (
-          <TouchableOpacity
-                      style={[styles.modalActionButton, styles.editButton]}
-                      onPress={handleEditMode}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={styles.editButtonText}>수정</Text>
-          </TouchableOpacity>
-                  )}
-                  
-                  <TouchableOpacity
-                    style={[styles.modalActionButton, styles.deleteButton]}
-                    onPress={() => {
-                      if (selectedTodo) {
-                        handleDeleteTodo(selectedTodo.todo_id, selectedTodo.is_recurring);
-                      }
-                    }}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.deleteButtonText}>삭제</Text>
-                  </TouchableOpacity>
-                </>
-              ) : (
-                // 수정 모드 버튼
-                <>
-                  <TouchableOpacity
-                    style={[styles.modalActionButton, styles.cancelButton]}
-                    onPress={() => {
-                      setIsEditMode(false);
-                      setShowCategoryPicker(false);
-                      setShowTimePicker(false);
-                    }}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.cancelButtonText}>취소</Text>
-                  </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalActionButton, styles.cancelButton]}
+                onPress={() => {
+                  setIsEditMode(false);
+                  setShowCategoryPicker(false);
+                  setShowDatePickerModal(false);
+                  setShowRecurringModal(false);
+                  setShowWeeklyDaysModal(false);
+                  setShowEditModal(false);
+                  setSelectedTodo(null);
+                }}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.cancelButtonText}>취소</Text>
+              </TouchableOpacity>
 
+              <TouchableOpacity
+                style={[styles.modalActionButton, styles.deleteButton]}
+                onPress={() => {
+                  if (selectedTodo) {
+                    handleDeleteTodo(selectedTodo.todo_id, selectedTodo.is_recurring);
+                  }
+                }}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.deleteButtonText}>삭제</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.modalActionButton, styles.saveButton]}
+                onPress={handleSaveEdit}
+                activeOpacity={0.7}
+                disabled={isSaving}
+              >
+                {isSaving ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.saveButtonText}>수정 완료</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+
+      {/* 반복 주기 선택 모달 */}
+      <Modal
+        visible={showRecurringModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowRecurringModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>반복 주기 선택</Text>
+              <TouchableOpacity 
+                onPress={() => setShowRecurringModal(false)}
+                style={{ padding: 4 }}
+              >
+                <Text style={styles.modalCloseText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.modalBody}>
+              {recurringOptions.map((option, index) => (
+                <TouchableOpacity
+                  key={option.id}
+                  style={[
+                    styles.recurringOption,
+                    editedTodo.recurringType === option.id && styles.recurringOptionSelected,
+                    index === recurringOptions.length - 1 && styles.recurringOptionLast
+                  ]}
+                  onPress={() => {
+                    setEditedTodo({ ...editedTodo, recurringType: option.id as 'daily' | 'weekly' | 'monthly' });
+                    setShowRecurringModal(false);
+                  }}
+                >
+                  <Text style={[
+                    styles.recurringOptionText,
+                    editedTodo.recurringType === option.id && styles.recurringOptionTextSelected
+                  ]}>
+                    {option.name}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 날짜 선택 모달 */}
+      <Modal
+        visible={showDatePickerModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowDatePickerModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.calendarModalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>날짜 선택</Text>
+              <TouchableOpacity 
+                onPress={() => setShowDatePickerModal(false)}
+                style={{ padding: 4 }}
+              >
+                <Text style={styles.modalCloseText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.calendarContainer}>
+              <Calendar
+                onDayPress={(day) => {
+                  setEditedTodo({ ...editedTodo, date: day.dateString });
+                  setShowDatePickerModal(false);
+                }}
+                markedDates={{
+                  [editedTodo.date]: { 
+                    selected: true, 
+                    selectedColor: '#34B79F',
+                    selectedTextColor: '#FFFFFF'
+                  }
+                }}
+                monthFormat={'yyyy년 M월'}
+                current={editedTodo.date}
+                minDate={new Date().toISOString().split('T')[0]}
+                theme={{
+                  calendarBackground: '#FFFFFF',
+                  textSectionTitleColor: '#666666',
+                  selectedDayBackgroundColor: '#34B79F',
+                  selectedDayTextColor: '#FFFFFF',
+                  todayTextColor: '#34B79F',
+                  dayTextColor: '#333333',
+                  textDisabledColor: '#CCCCCC',
+                  dotColor: '#34B79F',
+                  selectedDotColor: '#FFFFFF',
+                  arrowColor: '#34B79F',
+                  monthTextColor: '#333333',
+                  textDayFontWeight: '500',
+                  textMonthFontWeight: 'bold',
+                  textDayHeaderFontWeight: '600',
+                  textDayFontSize: 16,
+                  textMonthFontSize: 18,
+                  textDayHeaderFontSize: 12,
+                }}
+                enableSwipeMonths={true}
+              />
+              
+              <TouchableOpacity
+                style={styles.todayButton}
+                onPress={() => {
+                  const today = new Date().toISOString().split('T')[0];
+                  setEditedTodo({ ...editedTodo, date: today });
+                  setShowDatePickerModal(false);
+                }}
+              >
+                <Ionicons name="today-outline" size={18} color="#34B79F" />
+                <Text style={styles.todayButtonText}>오늘</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 주간 반복 요일 선택 모달 */}
+      <Modal
+        visible={showWeeklyDaysModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowWeeklyDaysModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>반복 요일 선택</Text>
+              <TouchableOpacity 
+                onPress={() => setShowWeeklyDaysModal(false)}
+                style={{ padding: 4 }}
+              >
+                <Text style={styles.modalCloseText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.modalBody}>
+              {['월', '화', '수', '목', '금', '토', '일'].map((dayName, index) => {
+                const isSelected = editedTodo.recurringDays.includes(index);
+                const isLast = index === ['월', '화', '수', '목', '금', '토', '일'].length - 1;
+                return (
                   <TouchableOpacity
-                    style={[styles.modalActionButton, styles.saveButton]}
-                    onPress={handleSaveEdit}
-                    activeOpacity={0.7}
-                    disabled={isSaving}
+                    key={index}
+                    style={[
+                      styles.weeklyDayOption,
+                      isSelected && styles.weeklyDayOptionSelected,
+                      isLast && styles.weeklyDayOptionLast
+                    ]}
+                    onPress={() => {
+                      const updatedDays = isSelected
+                        ? editedTodo.recurringDays.filter(d => d !== index)
+                        : [...editedTodo.recurringDays, index];
+                      setEditedTodo({ ...editedTodo, recurringDays: updatedDays });
+                    }}
                   >
-                    {isSaving ? (
-                      <ActivityIndicator color="#FFFFFF" />
-                    ) : (
-                      <Text style={styles.saveButtonText}>저장</Text>
-                    )}
+                    <Text style={[
+                      styles.weeklyDayOptionText,
+                      isSelected && styles.weeklyDayOptionTextSelected
+                    ]}>
+                      {dayName}
+                    </Text>
                   </TouchableOpacity>
-                </>
-              )}
+                );
+              })}
+            </View>
+            
+            <View style={styles.modalFooter}>
+              <TouchableOpacity
+                style={styles.modalFooterButton}
+                onPress={() => setShowWeeklyDaysModal(false)}
+              >
+                <Text style={styles.modalFooterButtonText}>완료</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -2410,10 +2989,84 @@ const styles = StyleSheet.create({
     color: '#34B79F',
     fontWeight: '500',
   },
-  healthCardDesc: {
+  healthCardCompletionBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    alignItems: 'flex-end',
+  },
+  healthCardCompletionRate: {
+    fontSize: 20,
+    fontWeight: '700',
+    lineHeight: 24,
+  },
+  healthCardCompletionLabel: {
+    fontSize: 10,
+    fontWeight: '500',
+    marginTop: 2,
+    opacity: 0.8,
+  },
+  healthCardTodaySection: {
+    marginBottom: 12,
+  },
+  healthCardSectionLabel: {
+    fontSize: 11,
+    color: '#999999',
+    fontWeight: '600',
+    marginBottom: 6,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  healthCardTodayBadge: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 12,
+    alignSelf: 'flex-start',
+  },
+  healthCardTodayText: {
     fontSize: 14,
-    color: '#666666',
-    lineHeight: 20,
+    fontWeight: '600',
+  },
+  healthCardTodaySubText: {
+    fontSize: 12,
+    fontWeight: '500',
+    marginTop: 2,
+    opacity: 0.8,
+  },
+  healthCardStatsSection: {
+    marginTop: 8,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F0F0F0',
+  },
+  healthCardStatsLabel: {
+    fontSize: 11,
+    color: '#999999',
+    marginTop: 6,
+    fontWeight: '500',
+  },
+  healthCardProgressContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  healthCardProgressBg: {
+    flex: 1,
+    height: 10,
+    backgroundColor: '#F0F0F0',
+    borderRadius: 5,
+    overflow: 'hidden',
+  },
+  healthCardProgressBar: {
+    height: '100%',
+    borderRadius: 5,
+  },
+  healthCardProgressText: {
+    fontSize: 12,
+    color: '#999999',
+    minWidth: 60,
+    textAlign: 'right',
+    fontWeight: '600',
   },
 
   // 소통 탭
@@ -2458,6 +3111,11 @@ const styles = StyleSheet.create({
     color: '#34B79F',
     fontWeight: '500',
     marginLeft: 4,
+  },
+  viewAllCard: {
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    borderStyle: 'dashed',
   },
   emotionTags: {
     flexDirection: 'row',
@@ -2745,6 +3403,339 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#34B79F',
     fontWeight: '500',
+  },
+  // 완료된 항목 스타일
+  scheduleItemCompleted: {
+    opacity: 0.6,
+  },
+  scheduleTimeTextCompleted: {
+    color: '#999999',
+    textDecorationLine: 'line-through',
+  },
+  scheduleTitleCompleted: {
+    color: '#999999',
+    textDecorationLine: 'line-through',
+  },
+  scheduleLocationCompleted: {
+    color: '#CCCCCC',
+  },
+  scheduleDateCompleted: {
+    color: '#CCCCCC',
+  },
+  scheduleStatusCompleted: {
+    backgroundColor: '#E8E8E8',
+  },
+  scheduleStatusTextCompleted: {
+    color: '#666666',
+  },
+  // 전체보기 버튼
+  expandButton: {
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: '#F0F0F0',
+    marginTop: 8,
+  },
+  expandButtonText: {
+    fontSize: 14,
+    color: '#34B79F',
+    fontWeight: '600',
+  },
+  // 카테고리 그리드 (GuardianTodoAddScreen 스타일)
+  categoryGridInline: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    justifyContent: 'center',
+  },
+  categoryCardInline: {
+    width: '31%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 12,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#F0F0F0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  categoryCardInlineSelected: {
+    borderColor: '#34B79F',
+    backgroundColor: '#F0FDFA',
+    shadowColor: '#34B79F',
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  categoryCardIconContainerInline: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  categoryCardTextInline: {
+    fontSize: 13,
+    color: '#666666',
+    fontWeight: '500',
+    textAlign: 'center',
+  },
+  categoryCardTextInlineSelected: {
+    color: '#34B79F',
+    fontWeight: '600',
+  },
+  // 날짜/시간 버튼 (GuardianTodoAddScreen 스타일)
+  dateButton: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E8E8E8',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: '#FFFFFF',
+  },
+  dateButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  dateButtonText: {
+    fontSize: 16,
+    color: '#333333',
+    fontWeight: '500',
+    marginLeft: 12,
+  },
+  timeButton: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E8E8E8',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: '#FFFFFF',
+  },
+  timeButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  timeButtonText: {
+    fontSize: 16,
+    color: '#333333',
+    fontWeight: '500',
+  },
+  placeholderText: {
+    color: '#999999',
+  },
+  timePickerContainer: {
+    marginTop: 8,
+  },
+  // 토글 버튼
+  toggleSection: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  toggleButton: {
+    backgroundColor: '#E0E0E0',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    minWidth: 60,
+    alignItems: 'center',
+  },
+  toggleButtonActive: {
+    backgroundColor: '#34B79F',
+  },
+  toggleButtonText: {
+    fontSize: 14,
+    color: '#666666',
+    fontWeight: '600',
+  },
+  toggleButtonTextActive: {
+    color: '#FFFFFF',
+  },
+  // 반복 설정
+  recurringButton: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E8E8E8',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: '#FFFFFF',
+    marginTop: 8,
+  },
+  recurringButtonText: {
+    fontSize: 16,
+    color: '#333333',
+    fontWeight: '500',
+  },
+  recurringInfo: {
+    backgroundColor: '#E6F7F4',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 8,
+  },
+  recurringInfoContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  recurringInfoText: {
+    fontSize: 13,
+    color: '#34B79F',
+    lineHeight: 18,
+  },
+  // 모달 스타일 (GuardianTodoAddScreen과 동일)
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E8E8E8',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#333333',
+  },
+  modalCloseText: {
+    fontSize: 24,
+    color: '#999999',
+    fontWeight: 'normal',
+    lineHeight: 24,
+  },
+  modalBody: {
+    maxHeight: 300,
+  },
+  modalContent: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    width: '90%',
+    maxHeight: '70%',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  calendarModalContent: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    width: '90%',
+    maxHeight: '80%',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  calendarContainer: {
+    padding: 20,
+  },
+  todayButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 16,
+    paddingVertical: 12,
+    backgroundColor: '#F0FDFA',
+    borderRadius: 12,
+    gap: 8,
+  },
+  todayButtonText: {
+    fontSize: 16,
+    color: '#34B79F',
+    fontWeight: '600',
+  },
+  timeOption: {
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  timeOptionSelected: {
+    backgroundColor: '#E6F7F4',
+  },
+  timeOptionText: {
+    fontSize: 16,
+    color: '#333333',
+    textAlign: 'center',
+  },
+  timeOptionTextSelected: {
+    color: '#34B79F',
+    fontWeight: '600',
+  },
+  recurringOption: {
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  recurringOptionSelected: {
+    backgroundColor: '#E6F7F4',
+  },
+  recurringOptionLast: {
+    borderBottomWidth: 0,
+  },
+  recurringOptionText: {
+    fontSize: 16,
+    color: '#333333',
+    textAlign: 'center',
+  },
+  recurringOptionTextSelected: {
+    color: '#34B79F',
+    fontWeight: '600',
+  },
+  weeklyDayOption: {
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  weeklyDayOptionSelected: {
+    backgroundColor: '#E6F7F4',
+  },
+  weeklyDayOptionLast: {
+    borderBottomWidth: 0,
+  },
+  weeklyDayOptionText: {
+    fontSize: 16,
+    color: '#333333',
+    textAlign: 'center',
+  },
+  weeklyDayOptionTextSelected: {
+    color: '#34B79F',
+    fontWeight: '600',
+  },
+  modalFooter: {
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#E8E8E8',
+  },
+  modalFooterButton: {
+    backgroundColor: '#34B79F',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  modalFooterButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
 
   // 수정/삭제 모달 스타일

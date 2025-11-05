@@ -15,7 +15,7 @@ import {
   Image,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { Header, BottomNavigationBar } from '../components';
+import { Header, BottomNavigationBar, TimePicker } from '../components';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Calendar } from 'react-native-calendars';
 import { Ionicons } from '@expo/vector-icons';
@@ -44,11 +44,14 @@ export const GuardianTodoAddScreen = () => {
   const { show } = useAlert();
   const [isSaving, setIsSaving] = useState(false);
   
-  // 쿼리 파라미터로 어르신 ID와 이름 받기
-  const { elderlyId, elderlyName } = useLocalSearchParams<{
+  // 쿼리 파라미터로 어르신 ID와 이름, 수정할 TODO ID 받기
+  const { elderlyId, elderlyName, todoId } = useLocalSearchParams<{
     elderlyId: string;
     elderlyName: string;
+    todoId?: string;
   }>();
+  
+  const isEditMode = !!todoId;
 
   // elderlyId가 없으면 뒤로가기
   useEffect(() => {
@@ -58,13 +61,76 @@ export const GuardianTodoAddScreen = () => {
       ]);
     }
   }, [elderlyId]);
+  
+  // 수정 모드일 때 TODO 데이터 로드
+  useEffect(() => {
+    const loadTodoForEdit = async () => {
+      if (isEditMode && todoId) {
+        setIsLoadingTodo(true);
+        try {
+          const todo = await todoApi.getTodoById(todoId);
+          
+          // 시간 변환 (HH:MM → 오전/오후 형식)
+          let timeDisplay = '';
+          let timeValue = todo.due_time || '12:00';
+          if (todo.due_time) {
+            const [hours, minutes] = todo.due_time.split(':');
+            const hour = parseInt(hours);
+            const isPM = hour >= 12;
+            const displayHour = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+            timeDisplay = `${isPM ? '오후' : '오전'} ${displayHour}시`;
+          }
+          
+          // 반복 요일 변환
+          let recurringDays: number[] = [];
+          if (todo.recurring_days && Array.isArray(todo.recurring_days)) {
+            recurringDays = todo.recurring_days;
+          }
+          
+          setNewTodo({
+            title: todo.title,
+            description: todo.description || '',
+            category: todo.category || '',
+            time: timeDisplay,
+            timeValue: timeValue,
+            date: todo.due_date,
+            elderlyId: todo.elderly_id,
+            isRecurring: todo.is_recurring || false,
+            recurringType: todo.recurring_type?.toLowerCase() as 'daily' | 'weekly' | 'monthly' || 'daily',
+            reminderEnabled: true,
+            reminderTime: '',
+            recurringDays: recurringDays,
+          });
+        } catch (error: any) {
+          console.error('TODO 로드 실패:', error);
+          show('오류', '할일 정보를 불러오는데 실패했습니다.');
+          router.back();
+        } finally {
+          setIsLoadingTodo(false);
+        }
+      }
+    };
+    
+    loadTodoForEdit();
+  }, [isEditMode, todoId]);
+
+  // 로딩 중일 때 표시
+  if (isLoadingTodo) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center', paddingTop: 100 }]}>
+        <ActivityIndicator size="large" color="#34B79F" />
+        <Text style={{ marginTop: 16, color: '#666666' }}>할일 정보를 불러오는 중...</Text>
+      </View>
+    );
+  }
 
   // 폼 상태
   const [newTodo, setNewTodo] = useState({
     title: '',
     description: '',
     category: '',
-    time: '',
+    time: '', // "오전/오후 X시" 형식 (표시용)
+    timeValue: '12:00', // "HH:MM" 형식 (TimePicker용)
     date: new Date().toISOString().split('T')[0], // YYYY-MM-DD
     elderlyId: elderlyId || '', // 쿼리 파라미터에서 받은 어르신 ID 사용
     isRecurring: false,
@@ -73,9 +139,10 @@ export const GuardianTodoAddScreen = () => {
     reminderTime: '',
     recurringDays: [] as number[], // 주간 반복 요일: [0,1,2,3,4,5,6] (월~일)
   });
+  
+  const [isLoadingTodo, setIsLoadingTodo] = useState(false);
 
   // 모달 상태
-  const [showTimeModal, setShowTimeModal] = useState(false);
   const [showRecurringModal, setShowRecurringModal] = useState(false);
   const [showDatePickerModal, setShowDatePickerModal] = useState(false);
   const [showWeeklyDaysModal, setShowWeeklyDaysModal] = useState(false);
@@ -90,14 +157,6 @@ export const GuardianTodoAddScreen = () => {
     { id: 'EXERCISE', name: '운동', icon: 'fitness', color: '#45B7D1' },
     { id: 'MEAL', name: '식사', icon: 'restaurant', color: '#96CEB4' },
     { id: 'OTHER', name: '기타', icon: 'list', color: '#95A5A6' },
-  ];
-
-  // 시간 옵션
-  const timeOptions = [
-    '오전 6시', '오전 7시', '오전 8시', '오전 9시', '오전 10시',
-    '오전 11시', '오후 12시', '오후 1시', '오후 2시', '오후 3시',
-    '오후 4시', '오후 5시', '오후 6시', '오후 7시', '오후 8시',
-    '오후 9시', '오후 10시'
   ];
 
   // 반복 옵션
@@ -118,7 +177,7 @@ export const GuardianTodoAddScreen = () => {
       return;
     }
 
-    if (!newTodo.time) {
+    if (!newTodo.timeValue) {
       show('알림', '시간을 선택해주세요.');
       return;
     }
@@ -126,64 +185,99 @@ export const GuardianTodoAddScreen = () => {
     try {
       setIsSaving(true);
 
-      // 시간 변환 (오전 8시 → 08:00)
-      const timeStr = newTodo.time.replace('오전 ', '').replace('오후 ', '').replace('시', '');
-      const hour = newTodo.time.includes('오후') 
-        ? (parseInt(timeStr) === 12 ? 12 : parseInt(timeStr) + 12)
-        : (parseInt(timeStr) === 12 ? 0 : parseInt(timeStr));
-      const formattedTime = `${hour.toString().padStart(2, '0')}:00`;
+      // 시간은 이미 "HH:MM" 형식으로 저장되어 있음
+      const formattedTime = newTodo.timeValue || '12:00';
 
       // 반복 설정에 따른 추가 데이터 처리
       const selectedDate = new Date(newTodo.date);
       const selectedDayOfMonth = selectedDate.getDate(); // 1~31
       const selectedWeekday = selectedDate.getDay() === 0 ? 6 : selectedDate.getDay() - 1; // 월요일=0, 일요일=6
       
-      // API 요청 데이터
-      const todoData: todoApi.TodoCreateRequest = {
-        elderly_id: newTodo.elderlyId,
-        title: newTodo.title,
-        description: newTodo.description || undefined,
-        category: newTodo.category as any, // 이미 대문자로 저장됨
-        due_date: newTodo.date,
-        due_time: formattedTime,
-        is_shared_with_caregiver: true, // 보호자와 공유 설정
-        is_recurring: newTodo.isRecurring,
-        recurring_type: newTodo.isRecurring ? newTodo.recurringType.toUpperCase() as any : undefined,
-        recurring_days: newTodo.isRecurring && newTodo.recurringType === 'weekly' 
-          ? (newTodo.recurringDays.length > 0 ? newTodo.recurringDays : [selectedWeekday])
-          : undefined,
-        recurring_day_of_month: newTodo.isRecurring && newTodo.recurringType === 'monthly'
-          ? selectedDayOfMonth
-          : undefined,
-      };
+      if (isEditMode && todoId) {
+        // 수정 모드
+        const updateData: todoApi.TodoUpdateRequest = {
+          title: newTodo.title,
+          description: newTodo.description || undefined,
+          category: newTodo.category as any,
+          due_date: newTodo.date,
+          due_time: formattedTime,
+          is_recurring: newTodo.isRecurring,
+          recurring_type: newTodo.isRecurring ? newTodo.recurringType.toUpperCase() as any : undefined,
+          recurring_days: newTodo.isRecurring && newTodo.recurringType === 'weekly' 
+            ? (newTodo.recurringDays.length > 0 ? newTodo.recurringDays : [selectedWeekday])
+            : undefined,
+          recurring_day_of_month: newTodo.isRecurring && newTodo.recurringType === 'monthly'
+            ? selectedDayOfMonth
+            : undefined,
+        };
 
-      console.log('📤 TODO 생성 요청:', JSON.stringify(todoData, null, 2));
+        console.log('📤 TODO 수정 요청:', JSON.stringify(updateData, null, 2));
 
-      const result = await todoApi.createTodo(todoData);
-      console.log('✅ TODO 생성 성공:', result.todo_id);
-      console.log('📊 생성된 할일 상세:', {
-        todo_id: result.todo_id,
-        title: result.title,
-        due_date: result.due_date,
-        is_recurring: result.is_recurring,
-        is_shared_with_caregiver: result.is_shared_with_caregiver
-      });
+        const result = await todoApi.updateTodo(todoId, updateData);
+        console.log('✅ TODO 수정 성공:', result.todo_id);
 
-      show(
-        '저장 완료',
-        '어르신의 할일이 등록되었습니다.',
-        [
-          {
-            text: '확인',
-            onPress: () => {
-              // 화면 이동 전에 약간의 지연을 두어 백엔드 처리 시간 확보
-              setTimeout(() => {
-                router.back();
-              }, 300);
+        show(
+          '수정 완료',
+          '할일이 수정되었습니다.',
+          [
+            {
+              text: '확인',
+              onPress: () => {
+                setTimeout(() => {
+                  router.back();
+                }, 300);
+              },
             },
-          },
-        ]
-      );
+          ]
+        );
+      } else {
+        // 생성 모드
+        const todoData: todoApi.TodoCreateRequest = {
+          elderly_id: newTodo.elderlyId,
+          title: newTodo.title,
+          description: newTodo.description || undefined,
+          category: newTodo.category as any, // 이미 대문자로 저장됨
+          due_date: newTodo.date,
+          due_time: formattedTime,
+          is_shared_with_caregiver: true, // 보호자와 공유 설정
+          is_recurring: newTodo.isRecurring,
+          recurring_type: newTodo.isRecurring ? newTodo.recurringType.toUpperCase() as any : undefined,
+          recurring_days: newTodo.isRecurring && newTodo.recurringType === 'weekly' 
+            ? (newTodo.recurringDays.length > 0 ? newTodo.recurringDays : [selectedWeekday])
+            : undefined,
+          recurring_day_of_month: newTodo.isRecurring && newTodo.recurringType === 'monthly'
+            ? selectedDayOfMonth
+            : undefined,
+        };
+
+        console.log('📤 TODO 생성 요청:', JSON.stringify(todoData, null, 2));
+
+        const result = await todoApi.createTodo(todoData);
+        console.log('✅ TODO 생성 성공:', result.todo_id);
+        console.log('📊 생성된 할일 상세:', {
+          todo_id: result.todo_id,
+          title: result.title,
+          due_date: result.due_date,
+          is_recurring: result.is_recurring,
+          is_shared_with_caregiver: result.is_shared_with_caregiver
+        });
+
+        show(
+          '저장 완료',
+          '어르신의 할일이 등록되었습니다.',
+          [
+            {
+              text: '확인',
+              onPress: () => {
+                // 화면 이동 전에 약간의 지연을 두어 백엔드 처리 시간 확보
+                setTimeout(() => {
+                  router.back();
+                }, 300);
+              },
+            },
+          ]
+        );
+      }
     } catch (error: any) {
       console.error('TODO 저장 실패:', error);
       show('오류', '할일 등록에 실패했습니다.');
@@ -237,7 +331,10 @@ export const GuardianTodoAddScreen = () => {
     <View style={styles.container}>
       {/* 헤더 */}
       <Header 
-        title={elderlyName ? `${elderlyName}님의 할일 추가` : '할일 추가'} 
+        title={isEditMode 
+          ? (elderlyName ? `${elderlyName}님의 할일 수정` : '할일 수정')
+          : (elderlyName ? `${elderlyName}님의 할일 추가` : '할일 추가')
+        } 
         showMenuButton={true}
       />
 
@@ -336,25 +433,26 @@ export const GuardianTodoAddScreen = () => {
         {/* 시간 선택 */}
         <View style={styles.inputSection}>
           <Text style={styles.inputLabel}>시간 *</Text>
-          <TouchableOpacity
-            style={styles.timeButton}
-            onPress={() => setShowTimeModal(true)}
-            activeOpacity={0.7}
-          >
-            <View style={styles.timeButtonContent}>
-              {newTodo.time && (
-                <Ionicons name="time-outline" size={20} color="#34B79F" />
-              )}
-              <Text style={[
-                styles.timeButtonText,
-                !newTodo.time && styles.placeholderText,
-                newTodo.time && { marginLeft: 12 }
-              ]}>
-                {newTodo.time || '시간을 선택해주세요'}
-              </Text>
-            </View>
-            <Text style={styles.dropdownIcon}>▼</Text>
-          </TouchableOpacity>
+          <View style={styles.timePickerContainer}>
+            <TimePicker
+              value={newTodo.timeValue}
+              compact={true}
+              onChange={(time: string) => {
+                // "HH:MM" 형식에서 "오전/오후 X시" 형식으로 변환
+                const [hours, minutes] = time.split(':');
+                const hour = parseInt(hours);
+                const isPM = hour >= 12;
+                const displayHour = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+                const timeDisplay = `${isPM ? '오후' : '오전'} ${displayHour}시`;
+                
+                setNewTodo({
+                  ...newTodo,
+                  time: timeDisplay,
+                  timeValue: time,
+                });
+              }}
+            />
+          </View>
         </View>
 
         {/* 반복 설정 */}
@@ -465,50 +563,6 @@ export const GuardianTodoAddScreen = () => {
         </TouchableOpacity>
       </View>
 
-      {/* 시간 선택 모달 */}
-      <Modal
-        visible={showTimeModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowTimeModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>시간 선택</Text>
-              <TouchableOpacity 
-                onPress={() => setShowTimeModal(false)}
-                style={{ padding: 4 }}
-              >
-                <Text style={styles.modalCloseText}>✕</Text>
-              </TouchableOpacity>
-            </View>
-            
-            <ScrollView style={styles.modalBody}>
-              {timeOptions.map((time) => (
-                <TouchableOpacity
-                  key={time}
-                  style={[
-                    styles.timeOption,
-                    newTodo.time === time && styles.timeOptionSelected
-                  ]}
-                  onPress={() => {
-                    setNewTodo({ ...newTodo, time });
-                    setShowTimeModal(false);
-                  }}
-                >
-                  <Text style={[
-                    styles.timeOptionText,
-                    newTodo.time === time && styles.timeOptionTextSelected
-                  ]}>
-                    {time}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
 
       {/* 반복 주기 선택 모달 */}
       <Modal
@@ -792,6 +846,9 @@ const styles = StyleSheet.create({
   },
   placeholderText: {
     color: '#999999',
+  },
+  timePickerContainer: {
+    marginTop: 8,
   },
   dropdownIcon: {
     fontSize: 12,
