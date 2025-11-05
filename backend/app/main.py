@@ -31,6 +31,7 @@ from app.services.ai_call.llm_service import LLMService
 from app.services.ai_call.twilio_service import TwilioService
 from app.services.ai_call.rtzr_stt_realtime import RTZRRealtimeSTT, LLMPartialCollector
 from app.services.ai_call.naver_clova_tts_service import naver_clova_tts_service
+from app.utils.performance_metrics import PerformanceMetricsCollector
 
 # 로거 설정 (시간 포함)
 logging.basicConfig(
@@ -50,6 +51,9 @@ saved_calls: set = set()  # 중복 저장 방지용 플래그
 
 # TTS 재생 완료 시간 추적 (call_sid -> (completion_time, total_playback_duration))
 active_tts_completions: Dict[str, tuple[float, float]] = {}
+
+# 성능 메트릭 수집기 관리 (call_sid -> PerformanceMetricsCollector)
+performance_collectors: Dict[str, PerformanceMetricsCollector] = {}
 
 # ==================== Helper Functions ====================
 
@@ -239,7 +243,9 @@ async def process_streaming_response(
     user_text: str,
     conversation_history: list,
     rtzr_stt=None,
-    call_sid=None
+    call_sid=None,
+    metrics_collector=None,
+    turn_index=None
 ) -> str:
     """
     최적화된 스트리밍 응답 처리 - 사전 연결된 WebSocket 사용
@@ -266,7 +272,9 @@ async def process_streaming_response(
             full_response,
             pipeline_start,
             rtzr_stt=rtzr_stt,
-            call_sid=call_sid
+            call_sid=call_sid,
+            metrics_collector=metrics_collector,
+            turn_index=turn_index
         )
         
         pipeline_time = time.time() - pipeline_start
@@ -297,7 +305,9 @@ async def llm_to_clova_tts_pipeline(
     full_response: list,
     pipeline_start: float,
     rtzr_stt=None,
-    call_sid=None
+    call_sid=None,
+    metrics_collector=None,
+    turn_index=None
 ) -> float:
     """
     LLM 텍스트 생성 → Naver Clova TTS → Twilio 전송 파이프라인
@@ -322,7 +332,15 @@ async def llm_to_clova_tts_pipeline(
         
         logger.info("🤖 [LLM] Naver Clova TTS 스트리밍 시작")
         
+        first_token_time = None
         async for chunk in llm_service.generate_response_streaming(user_text, conversation_history):
+            # 메트릭 수집: LLM 첫 토큰 시간
+            if first_token_time is None and chunk.strip():
+                first_token_time = time.time()
+                if metrics_collector is not None and turn_index is not None:
+                    metrics_collector.record_llm_first_token(turn_index, first_token_time)
+                    logger.debug(f"📊 [메트릭] LLM 첫 토큰 시간 기록: {first_token_time:.3f}")
+            
             sentence_buffer += chunk
             full_response.append(chunk)
             
@@ -353,12 +371,34 @@ async def llm_to_clova_tts_pipeline(
                 
                 logger.info(f"🔊 [문장 {sentence_count}] TTS 변환 시작: {sentence[:40]}...")
                 
+                # 메트릭 수집: TTS 시작 시간 (첫 문장만)
+                if sentence_count == 1 and metrics_collector is not None and turn_index is not None:
+                    tts_start_time = time.time()
+                    metrics_collector.record_tts_start(turn_index, tts_start_time)
+                    logger.debug(f"📊 [메트릭] TTS 시작 시간 기록: {tts_start_time:.3f}")
+                
                 # Naver Clova TTS로 즉시 변환
                 audio_data, tts_time = await naver_clova_tts_service.text_to_speech_bytes(sentence)
                 
                 if audio_data:
                     elapsed_tts = time.time() - pipeline_start
                     logger.info(f"✅ [문장 {sentence_count}] TTS 완료 (+{elapsed_tts:.2f}초, {tts_time:.2f}초)")
+                    
+                    # 메트릭 수집: TTS 완료 시간 기록
+                    tts_completion_time = time.time()
+                    if metrics_collector is not None and turn_index is not None:
+                        # 첫 문장의 TTS 완료 시간 (LLM 첫 토큰부터 첫 TTS 완료까지의 지연시간 계산용)
+                        if sentence_count == 1:
+                            # 첫 문장의 TTS 완료 시간을 정확히 기록
+                            metrics_collector.record_tts_completion(turn_index, tts_completion_time, is_first_sentence=True)
+                            logger.debug(
+                                f"📊 [메트릭] 첫 문장 TTS 완료 시간 기록: {tts_completion_time:.6f} "
+                                f"(LLM 첫 토큰 이후: {turn_index < len(metrics_collector.metrics['turns']) and metrics_collector.metrics['turns'][turn_index]['llm']['first_token_time'] is not None})"
+                            )
+                        else:
+                            # 나머지 문장들은 완료 시간만 업데이트 (first_completion_time은 기록하지 않음)
+                            metrics_collector.record_tts_completion(turn_index, tts_completion_time, is_first_sentence=False)
+                            logger.debug(f"📊 [메트릭] 문장 {sentence_count} TTS 완료 시간 업데이트: {tts_completion_time:.3f}")
                     
                     # WAV → mulaw 변환 및 Twilio 전송
                     playback_duration = await send_clova_audio_to_twilio(
@@ -383,6 +423,12 @@ async def llm_to_clova_tts_pipeline(
             audio_data, tts_time = await naver_clova_tts_service.text_to_speech_bytes(sentence_buffer.strip())
             
             if audio_data:
+                # 마지막 문장의 TTS 완료 시간 기록 (first_completion_time은 기록하지 않음)
+                tts_completion_time = time.time()
+                if metrics_collector is not None and turn_index is not None:
+                    metrics_collector.record_tts_completion(turn_index, tts_completion_time, is_first_sentence=False)
+                    logger.debug(f"📊 [메트릭] 마지막 문장 TTS 완료 시간 업데이트: {tts_completion_time:.3f}")
+                
                 playback_duration = await send_clova_audio_to_twilio(
                     websocket,
                     stream_sid,
@@ -402,6 +448,12 @@ async def llm_to_clova_tts_pipeline(
             completion_time = time.time()
             active_tts_completions[call_sid] = (completion_time, total_playback_duration)
             logger.info(f"📝 [TTS 추적] {call_sid}: 완료 시점={completion_time:.2f}, 재생 시간={total_playback_duration:.2f}초")
+            
+            # 마지막 TTS 완료 시간 업데이트 (first_completion_time은 이미 첫 문장에서 기록됨)
+            if metrics_collector is not None and turn_index is not None:
+                # 첫 문장이 아닌 경우에만 호출 (첫 문장은 이미 기록됨)
+                # completion_time만 업데이트하고 first_completion_time은 건드리지 않음
+                metrics_collector.record_tts_completion(turn_index, completion_time, is_first_sentence=False)
            
                 
         return total_playback_duration  
@@ -937,6 +989,11 @@ async def media_stream_handler(
                 
                 llm_collector = LLMPartialCollector(llm_partial_callback)
                 
+                # 성능 메트릭 수집기 초기화
+                metrics_collector = PerformanceMetricsCollector(call_sid)
+                performance_collectors[call_sid] = metrics_collector
+                logger.info(f"📊 성능 메트릭 수집 시작: {call_sid}")
+                
                 # DB에 통화 시작 기록 저장 (status: initiated만)
                 try:
                     from app.models.call import CallLog, CallStatus
@@ -1107,6 +1164,21 @@ async def media_stream_handler(
                             if partial_only and text:
                                 logger.debug(f"📝 [RTZR 부분 인식] {text}")
                                 last_partial_time = current_time
+                                
+                                # 메트릭 수집: STT 부분 인식
+                                # 현재 턴이 있으면 기록하고, 없으면 다음 턴에서 기록됨
+                                if call_sid in performance_collectors and rtzr_stt:
+                                    metrics_collector = performance_collectors[call_sid]
+                                    if metrics_collector.metrics["turns"]:
+                                        turn_index = len(metrics_collector.metrics["turns"]) - 1
+                                        turn = metrics_collector.metrics["turns"][turn_index]
+                                        
+                                        # 사용자 발화 시작 시간 가져오기 (RTZR에서)
+                                        speech_start_time = None
+                                        if hasattr(rtzr_stt, 'streaming_start_time') and rtzr_stt.streaming_start_time:
+                                            speech_start_time = rtzr_stt.streaming_start_time
+                                        
+                                        metrics_collector.record_stt_partial(turn_index, current_time, speech_start_time)
                                 continue
                             
                             # 최종 결과 처리
@@ -1115,6 +1187,10 @@ async def media_stream_handler(
                                 if call_sid not in conversation_sessions:
                                     logger.info("⚠️ 통화 종료로 인한 최종 처리 중단")
                                     break
+                                
+                                # ✅ RTZR 결과에서 사용자 발화 시작 시간 가져오기 (리셋 전에 저장된 값)
+                                user_speech_start_time = result.get('user_speech_start_time')
+                                
                                 # STT 응답 속도 측정
                                 # 말이 끝난 시점부터 최종 인식까지의 시간
                                 if last_partial_time:
@@ -1124,9 +1200,9 @@ async def media_stream_handler(
                                 # 최종 발화 완료
                                 logger.info(f"✅ [RTZR 최종] {text}")
                                 
-                                # 최종 인식 시점 기록 (LLM 전달 전 시간 측정용)
-                                stt_complete_time = current_time
-
+                                # ✅ 턴 시작 시간을 STT 최종 인식 시점으로 설정 (동기화)
+                                turn_start_time = current_time
+                                stt_complete_time = current_time  # 동일한 시간 사용
                                 
                                 # 종료 키워드 확인
                                 if '그랜비 통화를 종료합니다' in text:
@@ -1146,11 +1222,27 @@ async def media_stream_handler(
                                     return
                                 
                                 # 발화 처리 사이클
-                                cycle_start = time.time()
                                 logger.info(f"{'='*60}")
                                 logger.info(f"🎯 발화 완료 → 즉시 응답 생성")
                                 logger.info(f"{'='*60}")
                                 
+                                # 메트릭 수집: 새로운 턴 시작 (STT 최종 인식 시점 = 턴 시작 시점)
+                                turn_index = None
+                                if call_sid in performance_collectors:
+                                    metrics_collector = performance_collectors[call_sid]
+                                    
+                                    turn_metrics = metrics_collector.start_turn(text, turn_start_time)
+                                    turn_index = turn_metrics["turn_number"] - 1
+                                    
+                                    # 사용자 발화 시작 시간 기록 (RTZR 결과에서 가져온 값)
+                                    if user_speech_start_time:
+                                        metrics_collector.record_user_speech_start(turn_index, user_speech_start_time)
+                                        logger.debug(f"📊 [메트릭] 사용자 발화 시작 시간 기록: {user_speech_start_time:.3f}")
+                                    else:
+                                        logger.warning(f"⚠️ [메트릭] 사용자 발화 시작 시간을 가져올 수 없음")
+                                    
+                                    # STT 최종 인식 시간 기록
+                                    metrics_collector.record_stt_final(turn_index, stt_complete_time)
                                 
                                 # 대화 세션에 사용자 메시지 추가
                                 if call_sid not in conversation_sessions:
@@ -1168,7 +1260,7 @@ async def media_stream_handler(
                                 # ✅ AI 응답 시작 (사용자 입력 차단)
                                 rtzr_stt.start_bot_speaking()
                                 
-                                # LLM 응답 생성
+                                # LLM 응답 생성 (메트릭 수집을 위해 수정된 함수 사용)
                                 logger.info("🤖 [LLM] 응답 생성 시작")
                                 llm_start_time = time.time()
                                 ai_response = await process_streaming_response(
@@ -1177,7 +1269,9 @@ async def media_stream_handler(
                                     text,
                                     conversation_history,
                                     rtzr_stt=rtzr_stt,
-                                    call_sid=call_sid
+                                    call_sid=call_sid,
+                                    metrics_collector=performance_collectors.get(call_sid),
+                                    turn_index=turn_index
                                 )
                                 llm_end_time = time.time()
                                 llm_duration = llm_end_time - llm_start_time
@@ -1186,6 +1280,12 @@ async def media_stream_handler(
                                 rtzr_stt.stop_bot_speaking()
                                 
                                 logger.info("✅ [LLM] 응답 생성 완료")
+                                
+                                # 메트릭 수집: LLM 완료 및 턴 종료
+                                if call_sid in performance_collectors and turn_index is not None:
+                                    metrics_collector = performance_collectors[call_sid]
+                                    metrics_collector.record_llm_completion(turn_index, llm_end_time, ai_response)
+                                    metrics_collector.record_turn_end(turn_index, llm_end_time)
                                 
                                 # 전체 처리 시간 로깅
                                 if stt_complete_time:
@@ -1203,7 +1303,7 @@ async def media_stream_handler(
                                         if call_sid in conversation_sessions and len(conversation_sessions[call_sid]) > 20:
                                             conversation_sessions[call_sid] = conversation_sessions[call_sid][-20:]
                                     
-                                    total_cycle_time = time.time() - cycle_start
+                                    total_cycle_time = time.time() - turn_start_time
                                     logger.info(f"⏱️  전체 응답 사이클: {total_cycle_time:.2f}초")
                                     logger.info(f"{'='*60}\n\n")
                                 except KeyError:
@@ -1264,6 +1364,13 @@ async def media_stream_handler(
                     await rtzr_stt.end_streaming()
                     logger.info("🛑 RTZR 스트리밍 종료")
                 
+                # ✅ 성능 메트릭 최종 저장
+                if call_sid in performance_collectors:
+                    metrics_collector = performance_collectors[call_sid]
+                    metrics_file = metrics_collector.finalize()
+                    logger.info(f"📊 성능 메트릭 최종 저장 완료: {metrics_file}")
+                    del performance_collectors[call_sid]
+                
                 # ✅ 대화 세션을 DB에 저장 (함수 호출)
                 if call_sid in conversation_sessions:
                     conversation = conversation_sessions[call_sid]
@@ -1307,6 +1414,15 @@ async def media_stream_handler(
             logger.debug(f"🗑️ TTS 추적 정보 삭제: {call_sid}")
         if call_sid and call_sid in conversation_sessions:
             del conversation_sessions[call_sid]
+        if call_sid and call_sid in performance_collectors:
+            # 최종 저장 (예외 발생 시에도)
+            try:
+                metrics_collector = performance_collectors[call_sid]
+                metrics_file = metrics_collector.finalize()
+                logger.info(f"📊 [Finally] 성능 메트릭 저장: {metrics_file}")
+            except Exception as e:
+                logger.error(f"❌ [Finally] 메트릭 저장 실패: {e}")
+            del performance_collectors[call_sid]
         
         logger.info(f"🧹 WebSocket 정리 완료: {call_sid}")
 
