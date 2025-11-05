@@ -586,9 +586,13 @@ export const MyPageScreen = () => {
         },
       });
 
-      // 사용자 정보 업데이트
-      if (response.data) {
-        setUser(response.data);
+      // 사용자 정보 업데이트 (profile_image_url만 업데이트)
+      if (response.data && user) {
+        // 기존 사용자 정보를 유지하면서 profile_image_url만 업데이트
+        setUser({
+          ...user,
+          profile_image_url: response.data.profile_image_url,
+        });
         setConfirmModal({
           visible: true,
           title: '성공',
@@ -630,9 +634,13 @@ export const MyPageScreen = () => {
           setIsUploading(true);
           const response = await apiClient.delete('/api/users/profile-image');
           
-          // 사용자 정보 업데이트
-          if (response.data) {
-            setUser(response.data);
+          // 사용자 정보 업데이트 (profile_image_url만 제거)
+          if (response.data && user) {
+            // 기존 사용자 정보를 유지하면서 profile_image_url만 undefined로 업데이트
+            setUser({
+              ...user,
+              profile_image_url: undefined,
+            });
             setConfirmModal({
               visible: true,
               title: '성공',
