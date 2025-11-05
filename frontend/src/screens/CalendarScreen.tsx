@@ -681,6 +681,17 @@ export const CalendarScreen = () => {
 
   // 날짜 선택 핸들러 (일정 추가 모달용)
   const handleDateSelectInModal = (day: { dateString: string }) => {
+    // 과거 날짜 선택 방지
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const selectedDate = new Date(day.dateString);
+    selectedDate.setHours(0, 0, 0, 0);
+    
+    if (selectedDate < today) {
+      show('알림', '과거 날짜는 선택할 수 없습니다. 오늘 또는 미래 날짜를 선택해주세요.');
+      return;
+    }
+    
     setNewSchedule({ ...newSchedule, date: day.dateString });
     setShowDatePicker(false);
   };
@@ -1519,6 +1530,7 @@ export const CalendarScreen = () => {
                       onDayPress={handleDateSelectInModal}
                       monthFormat={'yyyy년 M월'}
                       hideExtraDays={true}
+                      minDate={new Date().toISOString().split('T')[0]}
                       theme={{
                         backgroundColor: '#FFFFFF',
                         calendarBackground: '#FFFFFF',
