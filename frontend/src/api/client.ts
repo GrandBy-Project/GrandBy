@@ -235,6 +235,16 @@ apiClient.interceptors.response.use(
     const currentPath = getState().currentPath;
     const shouldShowAlert = !currentPath.includes('diary') && !currentPath.includes('ai-call');
     
+    // 401: 인증 실패 (리프레시 제외 케이스: 로그인 실패 등)
+    if (status === 401 && originalRequest._retry !== true) {
+      const message = '이메일 또는 비밀번호가 올바르지 않습니다.';
+      if (shouldShowAlert) {
+        const { setError } = useErrorStore.getState();
+        setError('로그인 실패', message);
+      }
+      return Promise.reject({ message });
+    }
+
     // 403: 권한 없음
     if (status === 403) {
       const detail = error.response.data?.detail || '접근 권한이 없습니다.';
@@ -263,6 +273,26 @@ apiClient.interceptors.response.use(
       });
     }
     
+    // 422: 입력 검증 실패 (Validation Error)
+    if (status === 422) {
+      const details = error.response.data?.detail;
+      // Pydantic detail 배열에서 메시지 추출
+      let message = '입력값을 확인해주세요.';
+      if (Array.isArray(details) && details.length > 0) {
+        const first = details[0];
+        if (first?.loc?.includes('email')) {
+          message = '이메일 형식을 확인해주세요.';
+        } else if (typeof first?.msg === 'string') {
+          message = '입력값을 확인해주세요.';
+        }
+      }
+      if (shouldShowAlert) {
+        const { setError } = useErrorStore.getState();
+        setError('입력 오류', message);
+      }
+      return Promise.reject({ message });
+    }
+
     // 429: Too Many Requests
     if (status === 429) {
       const message = error.response.data?.detail || '요청이 너무 많습니다. 잠시 후 다시 시도해주세요.';
