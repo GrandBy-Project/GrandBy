@@ -1318,9 +1318,9 @@ async def call_status_handler(
 ):
     """
     Twilio 통화 상태 업데이트 콜백
-    통화 상태: initiated, ringing, answered, completed
+    통화 상태: initiated, ringing, answered, completed, no-answer, busy, failed, canceled
     """
-    logger.info(f"📞 통화 상태 업데이트: {CallSid} - {CallStatus}")
+    logger.info(f"📞 통화 상태 업데이트 콜백 수신: CallSid={CallSid}, CallStatus={CallStatus}")
     
     # 통화 상태에 따른 DB 업데이트
     try:
@@ -1329,47 +1329,103 @@ async def call_status_handler(
         
         call_log = db.query(CallLog).filter(CallLog.call_id == CallSid).first()
         
-        if call_log:
-            if CallStatus == 'answered':
-                # 통화 연결 시 시작 시간 설정
-                if not call_log.call_start_time:
-                    call_log.call_start_time = datetime.utcnow()
-                    call_log.call_status = CallStatusEnum.ANSWERED
-                    db.commit()
-                    logger.info(f"✅ 통화 시작 시간 설정: {CallSid}")
-            
-            elif CallStatus == 'completed':
-                # 통화 종료 시 종료 시간 설정
-                call_log.call_end_time = datetime.utcnow()
-                call_log.call_status = CallStatusEnum.COMPLETED
-                
-                # 통화 시간 계산
-                if call_log.call_start_time:
-                    duration = (call_log.call_end_time - call_log.call_start_time).total_seconds()
-                    call_log.call_duration = int(duration)
-                    logger.info(f"✅ 통화 종료 시간 설정: {CallSid}, 지속시간: {duration}초")
-                
+        if not call_log:
+            logger.warning(f"⚠️ CallLog를 찾을 수 없음: {CallSid} (상태: {CallStatus})")
+            db.close()
+            return {"status": "ok", "call_sid": CallSid, "call_status": CallStatus}
+        
+        logger.info(f"📋 CallLog 찾음: {CallSid} (현재 상태: {call_log.call_status}, 새 상태: {CallStatus})")
+        
+        # 통화 상태에 따른 처리
+        if CallStatus == 'answered':
+            # 통화 연결 시 시작 시간 설정
+            logger.info(f"📞 [answered 상태 처리] 통화 연결됨: {CallSid}")
+            if not call_log.call_start_time:
+                call_log.call_start_time = datetime.utcnow()
+                call_log.call_status = CallStatusEnum.ANSWERED
                 db.commit()
-                
-                # ✅ 통화 종료 시 DB 저장 (백업용 - 중복 방지 로직 포함)
-                if CallSid in conversation_sessions:
-                    try:
-                        conversation = conversation_sessions[CallSid]
-                        await save_conversation_to_db(CallSid, conversation)
-                        logger.info(f"💾 콜백에서 통화 기록 저장 완료: {CallSid}")
-                    except Exception as e:
-                        logger.error(f"❌ 콜백 DB 저장 실패: {e}")
-                
-                # 세션 정리
-                if CallSid in conversation_sessions:
-                    del conversation_sessions[CallSid]
-                if CallSid in active_connections:
-                    del active_connections[CallSid]
+                logger.info(f"✅ 통화 시작 시간 설정: {CallSid} (상태: ANSWERED로 변경)")
+            else:
+                logger.info(f"ℹ️ 통화 시작 시간이 이미 설정되어 있음: {CallSid}")
+        
+        elif CallStatus == 'completed':
+            # 통화 종료 시 종료 시간 설정
+            logger.info(f"✅ [completed 상태 처리] 통화 종료됨: {CallSid}")
+            call_log.call_end_time = datetime.utcnow()
+            call_log.call_status = CallStatusEnum.COMPLETED
+            
+            # 통화 시간 계산
+            if call_log.call_start_time:
+                duration = (call_log.call_end_time - call_log.call_start_time).total_seconds()
+                call_log.call_duration = int(duration)
+                logger.info(f"✅ 통화 종료 시간 설정: {CallSid}, 지속시간: {duration}초 (상태: COMPLETED로 변경)")
+            
+            db.commit()
+            
+            # ✅ 통화 종료 시 DB 저장 (백업용 - 중복 방지 로직 포함)
+            if CallSid in conversation_sessions:
+                try:
+                    conversation = conversation_sessions[CallSid]
+                    await save_conversation_to_db(CallSid, conversation)
+                    logger.info(f"💾 콜백에서 통화 기록 저장 완료: {CallSid}")
+                except Exception as e:
+                    logger.error(f"❌ 콜백 DB 저장 실패: {e}")
+            
+            # 세션 정리
+            session_cleaned = False
+            if CallSid in conversation_sessions:
+                del conversation_sessions[CallSid]
+                session_cleaned = True
+                logger.info(f"🧹 conversation_sessions에서 제거: {CallSid}")
+            if CallSid in active_connections:
+                del active_connections[CallSid]
+                session_cleaned = True
+                logger.info(f"🧹 active_connections에서 제거: {CallSid}")
+            
+            if not session_cleaned:
+                logger.info(f"ℹ️ 세션 정리 불필요 (세션에 없음): {CallSid}")
+            logger.info(f"✅ [completed 상태 처리 종료] 모든 처리가 완료되었습니다: {CallSid}")
+        
+        # ✅ 통화 거절/부재중/실패 처리 추가
+        elif CallStatus in ['busy', 'canceled', 'failed', 'no-answer']:
+            # 상태별 메시지 및 DB 상태 설정
+            status_messages = {
+                'busy': ('📴 [거절/실패 처리] 사용자 직접 거절 감지', CallStatusEnum.REJECTED, 'REJECTED'),
+                'canceled': ('🚫 [거절/실패 처리] 통화 취소 감지', CallStatusEnum.REJECTED, 'REJECTED'),
+                'failed': ('❌ [거절/실패 처리] 통화 실패 감지', CallStatusEnum.FAILED, 'FAILED'),
+                'no-answer': ('📵 [거절/실패 처리] 통화 부재중 감지', CallStatusEnum.MISSED, 'MISSED')
+            }
+            
+            message, db_status, status_name = status_messages[CallStatus]
+            logger.info(f"{message}: {CallSid}")
+            
+            call_log.call_status = db_status
+            call_log.call_end_time = datetime.utcnow()
+            db.commit()
+            logger.info(f"✅ [거절/실패 처리 완료] 통화 처리 완료: {CallSid} (상태: {status_name}로 변경)")
+            
+            # 세션 정리
+            session_cleaned = False
+            if CallSid in conversation_sessions:
+                del conversation_sessions[CallSid]
+                session_cleaned = True
+                logger.info(f"🧹 conversation_sessions에서 제거: {CallSid}")
+            if CallSid in active_connections:
+                del active_connections[CallSid]
+                session_cleaned = True
+                logger.info(f"🧹 active_connections에서 제거: {CallSid}")
+            
+            if not session_cleaned:
+                logger.info(f"ℹ️ 세션 정리 불필요 (세션에 없음): {CallSid}")
+            logger.info(f"✅ [거절/실패 처리 종료] 모든 처리가 완료되었습니다: {CallSid} (상태: {CallStatus})")
         
         db.close()
+        logger.info(f"📞 통화 상태 업데이트 콜백 처리 완료: {CallSid} - {CallStatus}")
         
     except Exception as e:
-        logger.error(f"❌ 통화 상태 업데이트 실패: {e}")
+        logger.error(f"❌ 통화 상태 업데이트 실패: {CallSid} - {CallStatus}, 오류: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         if 'db' in locals():
             db.close()
     
