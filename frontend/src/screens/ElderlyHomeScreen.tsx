@@ -17,7 +17,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../store/authStore';
 import { useRouter } from 'expo-router';
-import { BottomNavigationBar, Header, CheckIcon, PhoneIcon, DiaryIcon, NotificationIcon, PillIcon, SunIcon, ProfileIcon } from '../components';
+import { BottomNavigationBar, Header, CheckIcon, PhoneIcon, DiaryIcon, NotificationIcon, PillIcon, SunIcon, ProfileIcon, QuickActionGrid, type QuickAction } from '../components';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import * as todoApi from '../api/todo';
@@ -648,56 +648,35 @@ export const ElderlyHomeScreen = () => {
         </View>
 
         {/* 빠른 액션 버튼들 */}
-        <View style={styles.quickActions}>
-          <TouchableOpacity style={[styles.actionButton, fontSizeLevel >= 1 && styles.actionButtonLarge]} onPress={() => router.push('/todos')}>
-            <View style={[styles.actionIcon, fontSizeLevel >= 1 && styles.actionIconLarge]}>
-              <CheckIcon size={fontSizeLevel >= 1 ? 32 : 24} color="#34B79F" />
-            </View>
-            <Text 
-              style={[styles.actionLabel, fontSizeLevel >= 1 && styles.actionLabelLarge]}
-              numberOfLines={1}
-              ellipsizeMode="tail"
-            >
-              할 일
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.actionButton, fontSizeLevel >= 1 && styles.actionButtonLarge]} onPress={() => router.push('/ai-call')}>
-            <View style={[styles.actionIcon, fontSizeLevel >= 1 && styles.actionIconLarge]}>
-              <PhoneIcon size={fontSizeLevel >= 1 ? 32 : 24} color="#34B79F" />
-            </View>
-            <Text 
-              style={[styles.actionLabel, fontSizeLevel >= 1 && styles.actionLabelLarge]}
-              numberOfLines={1}
-              ellipsizeMode="tail"
-            >
-              AI 통화
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.actionButton, fontSizeLevel >= 1 && styles.actionButtonLarge]} onPress={() => router.push('/diaries')}>
-            <View style={[styles.actionIcon, fontSizeLevel >= 1 && styles.actionIconLarge]}>
-              <DiaryIcon size={fontSizeLevel >= 1 ? 32 : 24} color="#34B79F" />
-            </View>
-            <Text 
-              style={[styles.actionLabel, fontSizeLevel >= 1 && styles.actionLabelLarge]}
-              numberOfLines={1}
-              ellipsizeMode="tail"
-            >
-              일기
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.actionButton, fontSizeLevel >= 1 && styles.actionButtonLarge]} onPress={() => router.push('/calendar')}>
-            <View style={[styles.actionIcon, fontSizeLevel >= 1 && styles.actionIconLarge]}>
-              <Ionicons name="calendar-outline" size={fontSizeLevel >= 1 ? 32 : 24} color="#34B79F" />
-            </View>
-            <Text 
-              style={[styles.actionLabel, fontSizeLevel >= 1 && styles.actionLabelLarge]}
-              numberOfLines={1}
-              ellipsizeMode="tail"
-            >
-              캘린더
-            </Text>
-          </TouchableOpacity>
-        </View>
+        <QuickActionGrid
+          actions={[
+            {
+              id: 'todos',
+              label: '내 일정',
+              icon: <CheckIcon size={fontSizeLevel >= 1 ? 32 : 24} color="#34B79F" />,
+              onPress: () => router.push('/todos'), // 할 일 목록 조회 및 완료 처리
+            },
+            {
+              id: 'ai-call',
+              label: 'AI 통화',
+              icon: <PhoneIcon size={fontSizeLevel >= 1 ? 32 : 24} color="#34B79F" />,
+              onPress: () => router.push('/ai-call'), // AI 전화 통화
+            },
+            {
+              id: 'diaries',
+              label: '일기',
+              icon: <DiaryIcon size={fontSizeLevel >= 1 ? 32 : 24} color="#34B79F" />,
+              onPress: () => router.push('/diaries'), // 일기 작성 및 조회
+            },
+            {
+              id: 'calendar',
+              label: '캘린더',
+              icon: 'calendar-outline',
+              onPress: () => router.push('/calendar'), // 전체 일정 한눈에 보기
+            },
+          ]}
+          size={fontSizeLevel >= 1 ? 'large' : 'default'}
+        />
 
         {/* 오늘/내일의 일정 카드 - 미완료 */}
         <View style={styles.scheduleCard}>

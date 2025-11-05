@@ -168,6 +168,20 @@ class TodoService:
         logger.info(f"   - is_recurring 값: {todo_data.is_recurring} (타입: {type(todo_data.is_recurring)})")
         logger.info(f"   - is_shared_with_caregiver 값: {todo_data.is_shared_with_caregiver} (타입: {type(todo_data.is_shared_with_caregiver)})")
         
+        # 출처별 공유 기본값 설정
+        # - 보호자 할당: 항상 공유 (True)
+        # - AI 추출: 기본 비공유 (False), 사용자가 선택 가능
+        # - 어르신 직접 등록: 기본 비공유 (False), 사용자가 선택 가능
+        if creator_type_value == CreatorType.CAREGIVER:
+            # 보호자가 할당한 TODO는 항상 공유
+            final_shared_status = True
+            logger.info(f"   - 보호자 할당 TODO: 항상 공유 (True)")
+        else:
+            # AI 추출 또는 어르신 직접 등록: 사용자가 명시적으로 전달한 값 사용
+            # (스키마 기본값이 True이므로, False로 명시적으로 전달해야 함)
+            final_shared_status = todo_data.is_shared_with_caregiver
+            logger.info(f"   - {creator_type_value.value} 생성 TODO: 공유 상태 = {final_shared_status}")
+        
         # 반복 일정 템플릿의 경우, due_date는 항상 recurring_start_date와 같아야 함
         # 템플릿은 시작일에 생성되어야 하고, 이후 날짜의 개별 TODO는 Celery Beat가 생성
         recurring_start_date = todo_data.recurring_start_date or todo_data.due_date
@@ -190,8 +204,8 @@ class TodoService:
             creator_type=creator_type_value,  # 동적으로 설정된 creator_type 사용
             status=TodoStatus.PENDING,
             is_confirmed=True,
-            # 공유 설정
-            is_shared_with_caregiver=todo_data.is_shared_with_caregiver,
+            # 공유 설정 (출처별 기본값 적용)
+            is_shared_with_caregiver=final_shared_status,
             # 반복 일정 설정
             is_recurring=todo_data.is_recurring,
             recurring_type=todo_data.recurring_type,

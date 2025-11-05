@@ -1,7 +1,7 @@
 /**
  * 어르신 통합 캘린더 화면 (주간 달력 + 일정 추가)
  */
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -16,6 +16,7 @@ import {
   ActivityIndicator,
   Dimensions,
   TouchableWithoutFeedback,
+  Switch,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Header, BottomNavigationBar, TimePicker } from '../components';
@@ -25,6 +26,7 @@ import { Calendar } from 'react-native-calendars';
 import { TodoItem, getTodosByRange, createTodo, deleteTodo } from '../api/todo';
 import { getDiaries, Diary } from '../api/diary';
 import { useAuthStore } from '../store/authStore';
+import * as connectionsApi from '../api/connections';
 import { Colors } from '../constants/Colors';
 import { useFontSizeStore } from '../store/fontSizeStore';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -73,6 +75,7 @@ export const CalendarScreen = () => {
     description: '',
     time: '', // HH:MM 형식
     date: '',
+    isShared: false, // 공유 여부 (어르신 직접 등록 시 기본 비공유)
   });
   // 시간 선택 상태 (시간, 분) - 기본값 12:00
   const [selectedHour, setSelectedHour] = useState(12);
@@ -88,6 +91,13 @@ export const CalendarScreen = () => {
 
   // 일기 상태
   const [diaries, setDiaries] = useState<Diary[]>([]);
+
+  // 보호자용: 연결된 어르신 목록
+  const [connectedElderly, setConnectedElderly] = useState<any[]>([]);
+  const [selectedElderlyId, setSelectedElderlyId] = useState<string | null>(null);
+  
+  // 보호자용: 공유 필터 상태 (기본값: 공유된 일정만)
+  const [showSharedOnly, setShowSharedOnly] = useState(true);
 
   // 필터링된 일정 가져오기
   const getFilteredSchedules = (schedules: TodoItem[]) => {
@@ -218,10 +228,33 @@ export const CalendarScreen = () => {
     return `${hour}시 ${minute}분`;
   };
 
+  // 연결된 어르신 목록 로드 (보호자용)
+  const loadConnectedElderly = async () => {
+    if (user?.role !== 'caregiver') return;
+    
+    try {
+      const elderly = await connectionsApi.getConnectedElderly();
+      setConnectedElderly(elderly);
+      
+      // 첫 번째 어르신을 기본 선택
+      if (elderly.length > 0 && !selectedElderlyId) {
+        setSelectedElderlyId(elderly[0].user_id);
+      }
+    } catch (error) {
+      console.error('연결된 어르신 로드 실패:', error);
+    }
+  };
+
   // 날짜 범위별 일정 조회
   const loadSchedules = async (baseDate?: Date) => {
     if (!user) {
       console.log('⚠️ 사용자 정보 없음, 조회 중단');
+      return;
+    }
+
+    // 보호자인데 어르신이 선택되지 않은 경우
+    if (user.role === 'caregiver' && !selectedElderlyId) {
+      console.log('⚠️ 보호자: 어르신이 선택되지 않아 조회 중단');
       return;
     }
 
@@ -262,19 +295,33 @@ export const CalendarScreen = () => {
       console.log(`📅 캘린더 일정 조회 시작`);
       console.log(`  - 사용자 ID: ${user.user_id}`);
       console.log(`  - 사용자 역할: ${user.role}`);
+      console.log(`  - 어르신 ID: ${user.role === 'caregiver' ? selectedElderlyId : 'N/A'}`);
       console.log(`  - 날짜 범위: ${startDateStr} ~ ${endDateStr}`);
       console.log(`  - 월간 뷰: ${isMonthlyView}`);
 
-      const todos = await getTodosByRange(startDateStr, endDateStr);
-
-      console.log(`✅ 조회된 일정: ${todos.length}개`);
-      setSchedules(todos);
+      // 보호자인 경우 어르신 ID 전달
+      // 보호자는 공유 필터 적용 (showSharedOnly가 true면 공유된 일정만)
+      if (user.role === 'caregiver' && selectedElderlyId) {
+        // 보호자인 경우: 공유된 일정만 또는 전체 일정
+        const todos = await getTodosByRange(startDateStr, endDateStr, selectedElderlyId);
+        // 클라이언트 측에서 필터링 (백엔드에 shared_only 파라미터 추가 필요하지만, 일단 클라이언트 필터링)
+        const filteredTodos = showSharedOnly 
+          ? todos.filter(todo => todo.is_shared_with_caregiver === true)
+          : todos;
+        setSchedules(filteredTodos);
+      } else {
+        // 어르신인 경우: 모든 일정 조회
+        const todos = await getTodosByRange(startDateStr, endDateStr);
+        setSchedules(todos);
+      }
+      
+      return; // 이미 setSchedules 호출 완료
     } catch (error: any) {
       console.error('❌ 일정 조회 실패:', error);
       console.error('❌ 에러 상세:', JSON.stringify(error, null, 2));
       console.error('❌ 응답 데이터:', error.response?.data);
       console.error('❌ 응답 상태:', error.response?.status);
-      show('오류', `일정을 불러오는데 실패했습니다.\n${error.message || JSON.stringify(error)}`);
+      show('오류', `일정을 불러오는데 실패했습니다.\n${error.response?.data?.detail || error.message || '알 수 없는 오류'}`);
     } finally {
       setIsLoading(false);
     }
@@ -318,6 +365,11 @@ export const CalendarScreen = () => {
         end_date: endDateStr
       };
       
+      // 보호자인 경우 선택된 어르신 ID 전달
+      if (user.role === 'caregiver' && selectedElderlyId) {
+        params.elderly_id = selectedElderlyId;
+      }
+      
       const data = await getDiaries(params);
       console.log(`✅ 조회된 일기: ${data.length}개`);
       setDiaries(data);
@@ -326,8 +378,27 @@ export const CalendarScreen = () => {
     }
   };
 
+  // 화면 마운트 시 연결된 어르신 로드 (보호자용)
+  useEffect(() => {
+    if (user?.role === 'caregiver') {
+      loadConnectedElderly();
+    }
+  }, [user]);
+
+  // 선택된 어르신 변경 시 일정 다시 로드
+  useEffect(() => {
+    if (user?.role === 'caregiver' && selectedElderlyId) {
+      loadSchedules();
+      loadDiaries();
+    }
+  }, [selectedElderlyId, showSharedOnly]);
+
   // 컴포넌트 마운트 시 & selectedDay 변경 시 일정 로딩
   useEffect(() => {
+    // 보호자인 경우 어르신이 선택된 후에만 로드
+    if (user?.role === 'caregiver' && !selectedElderlyId) {
+      return;
+    }
     loadSchedules();
     loadDiaries();
   }, [selectedDay, isMonthlyView]);
@@ -646,7 +717,8 @@ export const CalendarScreen = () => {
       title: '',
       description: '',
       time: defaultTime,
-      date: formatDateString(targetDate)
+      date: formatDateString(targetDate),
+      isShared: false,
     });
     setShowAddModal(true);
     
@@ -733,12 +805,23 @@ export const CalendarScreen = () => {
       // 시간 형식 (이미 HH:MM 형식)
       const timeHHMM = newSchedule.time;
 
+      // 보호자인 경우 선택된 어르신 ID 사용, 어르신인 경우 본인 ID 사용
+      const targetElderlyId = user.role === 'caregiver' && selectedElderlyId 
+        ? selectedElderlyId 
+        : user.user_id;
+
+      // 출처별 공유 설정:
+      // - 보호자가 등록: 항상 공유 (백엔드에서 자동 처리)
+      // - 어르신이 직접 등록: 사용자가 선택한 공유 여부 사용
+      const isShared = user.role === 'caregiver' ? true : newSchedule.isShared;
+
       const todoData = {
-        elderly_id: user.user_id,
+        elderly_id: targetElderlyId,
         title: newSchedule.title,
         description: newSchedule.description || '',
         due_date: newSchedule.date,
         due_time: timeHHMM,
+        is_shared_with_caregiver: isShared,
       };
 
       console.log('📝 일정 생성 요청:', todoData);
@@ -750,7 +833,7 @@ export const CalendarScreen = () => {
       // 일정 다시 불러오기
       await loadSchedules();
 
-      setNewSchedule({ title: '', description: '', time: '', date: '' });
+      setNewSchedule({ title: '', description: '', time: '', date: '', isShared: false });
       setShowAddModal(false);
       show('저장 완료', '일정이 추가되었습니다.');
     } catch (error: any) {
@@ -762,7 +845,7 @@ export const CalendarScreen = () => {
   };
 
   const handleCancelAdd = () => {
-    setNewSchedule({ title: '', description: '', time: '', date: '' });
+    setNewSchedule({ title: '', description: '', time: '', date: '', isShared: false });
     setShowAddModal(false);
     setShowDatePicker(false); // 날짜 선택 모달도 함께 닫기
   };
@@ -845,6 +928,77 @@ export const CalendarScreen = () => {
           </TouchableOpacity>
         }
       />
+
+      {/* 보호자용 어르신 선택 (연결된 어르신이 여러 명인 경우) */}
+      {user?.role === 'caregiver' && connectedElderly.length > 1 && (
+        <View style={styles.elderlySelectorContainer}>
+          <Text style={styles.elderlySelectorLabel}>어르신 선택:</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.elderlySelectorScroll}>
+            {connectedElderly.map((elderly) => (
+              <TouchableOpacity
+                key={elderly.user_id}
+                style={[
+                  styles.elderlySelectorButton,
+                  selectedElderlyId === elderly.user_id && styles.elderlySelectorButtonActive
+                ]}
+                onPress={() => setSelectedElderlyId(elderly.user_id)}
+                activeOpacity={0.7}
+              >
+                <Text style={[
+                  styles.elderlySelectorButtonText,
+                  selectedElderlyId === elderly.user_id && styles.elderlySelectorButtonTextActive
+                ]}>
+                  {elderly.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      )}
+
+      {/* 보호자인데 어르신이 선택되지 않은 경우 안내 */}
+      {user?.role === 'caregiver' && !selectedElderlyId && connectedElderly.length === 0 && (
+        <View style={styles.emptyState}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+          <Text style={styles.emptyStateText}>연결된 어르신 정보를 불러오는 중...</Text>
+        </View>
+      )}
+
+      {/* 보호자용 공유 필터 */}
+      {user?.role === 'caregiver' && selectedElderlyId && (
+        <View style={styles.sharedFilterContainer}>
+          <TouchableOpacity
+            style={[
+              styles.sharedFilterButton,
+              showSharedOnly && styles.sharedFilterButtonActive
+            ]}
+            onPress={() => setShowSharedOnly(true)}
+            activeOpacity={0.7}
+          >
+            <Text style={[
+              styles.sharedFilterButtonText,
+              showSharedOnly && styles.sharedFilterButtonTextActive
+            ]}>
+              공유된 일정만
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.sharedFilterButton,
+              !showSharedOnly && styles.sharedFilterButtonActive
+            ]}
+            onPress={() => setShowSharedOnly(false)}
+            activeOpacity={0.7}
+          >
+            <Text style={[
+              styles.sharedFilterButtonText,
+              !showSharedOnly && styles.sharedFilterButtonTextActive
+            ]}>
+              전체 일정
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* 필터 탭 */}
@@ -1603,6 +1757,42 @@ export const CalendarScreen = () => {
                   }}
                 />
               </View>
+
+              {/* 공유 설정 토글 - 어르신만 표시 */}
+              {user?.role === 'elderly' && (
+                <View style={styles.inputSection}>
+                  <Text style={styles.inputLabel}>공유 설정</Text>
+                  <View style={styles.shareToggleContainer}>
+                    <View style={styles.shareToggleLeft}>
+                      <View style={styles.shareToggleHeader}>
+                        <Ionicons 
+                          name={newSchedule.isShared ? "people" : "lock-closed"} 
+                          size={24} 
+                          color={newSchedule.isShared ? '#34B79F' : '#666666'} 
+                          style={styles.shareToggleIcon}
+                        />
+                        <Text style={styles.shareToggleLabel}>
+                          보호자와 공유
+                        </Text>
+                      </View>
+                      <Text style={styles.shareToggleHint}>
+                        {newSchedule.isShared 
+                          ? '보호자도 이 일정을 볼 수 있어요 ✓'
+                          : '나만 볼 수 있어요 (비공개)'}
+                      </Text>
+                    </View>
+                    <Switch
+                      value={newSchedule.isShared}
+                      onValueChange={(value) => 
+                        setNewSchedule({ ...newSchedule, isShared: value })
+                      }
+                      trackColor={{ false: '#E8E8E8', true: '#34B79F' }}
+                      thumbColor='#FFFFFF'
+                      ios_backgroundColor='#E8E8E8'
+                    />
+                  </View>
+                </View>
+              )}
             </ScrollView>
 
             {/* 저장 버튼 */}
@@ -2223,6 +2413,78 @@ const styles = StyleSheet.create({
   emptySubText: {
     fontSize: 14,
     color: '#999999',
+  },
+  emptyStateText: {
+    fontSize: 16,
+    color: '#999999',
+    marginTop: 16,
+  },
+  // 보호자용 어르신 선택기
+  elderlySelectorContainer: {
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  elderlySelectorLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333333',
+    marginBottom: 8,
+  },
+  elderlySelectorScroll: {
+    flexDirection: 'row',
+  },
+  elderlySelectorButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#F5F5F5',
+    marginRight: 8,
+  },
+  elderlySelectorButtonActive: {
+    backgroundColor: Colors.primary,
+  },
+  elderlySelectorButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#666666',
+  },
+  elderlySelectorButtonTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+  // 보호자용 공유 필터
+  sharedFilterContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+    gap: 8,
+  },
+  sharedFilterButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#F5F5F5',
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+  },
+  sharedFilterButtonActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  sharedFilterButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#666666',
+  },
+  sharedFilterButtonTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '600',
   },
   scheduleDate: {
     fontSize: 12,
@@ -3116,6 +3378,40 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: Colors.primary,
     fontWeight: '600',
+  },
+  // 공유 토글 스타일
+  shareToggleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F0F8FF',
+    padding: 20,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#E0F2F1',
+    minHeight: 80,
+  },
+  shareToggleLeft: {
+    flex: 1,
+    marginRight: 16,
+  },
+  shareToggleHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  shareToggleIcon: {
+    marginRight: 10,
+  },
+  shareToggleLabel: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#333333',
+  },
+  shareToggleHint: {
+    fontSize: 14,
+    color: '#666666',
+    lineHeight: 20,
   },
 });
 
