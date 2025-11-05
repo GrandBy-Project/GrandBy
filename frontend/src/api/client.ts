@@ -30,7 +30,7 @@ const getApiBaseUrl = () => {
   
   // 2. 프로덕션 환경
   if (!__DEV__) {
-    return 'https://api.grandby.com'; // 실제 프로덕션 URL
+    return 'https://api.grandby-app.store'; // 실제 프로덕션 URL
   }
   
   // 3. 개발 환경: Expo 개발 서버의 호스트 자동 감지
