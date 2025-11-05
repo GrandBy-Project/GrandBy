@@ -85,7 +85,7 @@ export const AICallScreen = () => {
   /**
    * 통화 상태 폴링 훅
    */
-  const useCallStatusPolling = (callStatus: CallStatus, callSid: string, router: any) => {
+  const useCallStatusPolling = (callStatus: CallStatus, callSid: string, router: any, setCallStatus: any, setErrorMessage: any) => {
     useEffect(() => {
       if (callStatus !== 'in_progress' || !callSid) return;
       
@@ -107,6 +107,7 @@ export const AICallScreen = () => {
           const statusData = await getCallStatus(callSid);
           const status = String(statusData.call_status).toLowerCase();
           
+          // 통화 완료 시 다이어리 작성 화면으로 이동
           if (status === 'completed') {
             clearInterval(intervalId);
             router.push({
@@ -117,6 +118,22 @@ export const AICallScreen = () => {
               },
             });
           }
+          // 통화 실패/거절/부재중 상태 감지 (백엔드: busy, canceled, failed, no-answer → DB: rejected, missed, failed)
+          else if (status === 'rejected' || status === 'missed' || status === 'failed') {
+            clearInterval(intervalId);
+            let errorMessage = '통화 연결에 실패했습니다.';
+            
+            if (status === 'rejected') {
+              errorMessage = '통화가 거절되었습니다.';
+            } else if (status === 'missed') {
+              errorMessage = '통화를 받지 못했습니다.';
+            } else if (status === 'failed') {
+              errorMessage = '통화 연결에 실패했습니다.';
+            }
+            
+            setCallStatus('error');
+            setErrorMessage(errorMessage);
+          }
         } catch (error) {
           if (__DEV__) {
             console.error('통화 상태 확인 실패:', error);
@@ -125,11 +142,11 @@ export const AICallScreen = () => {
       }, 5000);
       
       return () => clearInterval(intervalId);
-    }, [callStatus, callSid, router]);
+    }, [callStatus, callSid, router, setCallStatus, setErrorMessage]);
   };
   
   // 통화 상태 폴링 사용
-  useCallStatusPolling(callStatus, callSid, router);
+  useCallStatusPolling(callStatus, callSid, router, setCallStatus, setErrorMessage);
   
   /**
    * 애니메이션 초기화 (높이 측정 후)
@@ -333,16 +350,43 @@ export const AICallScreen = () => {
       >
         <View style={styles.content}>
         {/* 상태 아이콘 */}
-        <View style={styles.iconContainer}>
-          <Image 
-            source={require('../../assets/haru-character.png')}
-            style={styles.haruImage}
-            resizeMode="contain"
-          />
-        </View>
+        {callStatus !== 'error' && (
+          <View style={styles.iconContainer}>
+            <Image 
+              source={require('../../assets/haru-character.png')}
+              style={styles.haruImage}
+              resizeMode="contain"
+            />
+          </View>
+        )}
+        
+        {/* 통화 실패 화면 */}
+        {callStatus === 'error' && (
+          <View style={styles.errorScreenContainer}>
+            <View style={styles.errorIconContainer}>
+              <Image 
+                source={require('../../assets/haru_call_failed.png')}
+                style={styles.errorImage}
+                resizeMode="contain"
+              />
+            </View>
+            <Text style={styles.errorTitle}>통화 연결 실패</Text>
+            <Text style={styles.errorDescription}>
+              하루와의 통화 연결에 실패했습니다.{'\n'}
+              잠시 후 다시 시도해주세요.
+            </Text>
+            {errorMessage && (
+              <View style={styles.errorMessageContainer}>
+                <Text style={styles.errorMessageText}>{errorMessage}</Text>
+              </View>
+            )}
+          </View>
+        )}
         
         {/* 상태 메시지 */}
-        <Text style={styles.statusMessage}>{statusMessage}</Text>
+        {callStatus !== 'error' && (
+          <Text style={styles.statusMessage}>{statusMessage}</Text>
+        )}
         
          {callStatus === 'idle' && (
            <Text style={styles.description}>
@@ -358,13 +402,6 @@ export const AICallScreen = () => {
               대화가 끝나면 자동으로 다이어리 작성 화면으로 이동합니다.
             </Text>
             <ActivityIndicator size="large" color="#34B79F" style={{ marginTop: 20 }} />
-          </View>
-        )}
-        
-        {/* 에러 메시지 */}
-        {errorMessage && (
-          <View style={styles.errorContainer}>
-            <Text style={styles.errorText}>{errorMessage}</Text>
           </View>
         )}
         
@@ -387,18 +424,20 @@ export const AICallScreen = () => {
         )}
         
         
-        {/* 재시도 버튼 */}
+        {/* 통화 실패 화면 버튼 */}
         {callStatus === 'error' && (
-          <TouchableOpacity
-            style={styles.retryButton}
-            onPress={() => {
-              setCallStatus('idle');
-              setErrorMessage('');
-              setCallSid('');
-            }}
-          >
-            <Text style={styles.retryButtonText}>다시 시도</Text>
-          </TouchableOpacity>
+          <View style={styles.errorButtonsContainer}>
+            <TouchableOpacity
+              style={styles.homeButton}
+              onPress={() => {
+                router.replace('/home');
+              }}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="home" size={20} color="#FFFFFF" style={{ marginRight: 8 }} />
+              <Text style={styles.homeButtonText}>메인 화면으로 돌아가기</Text>
+            </TouchableOpacity>
+          </View>
         )}
         
         {/* 완료 후 다이어리 작성 버튼 */}
@@ -660,10 +699,16 @@ const styles = StyleSheet.create({
   retryButton: {
     width: '100%',
     height: 56,
-    backgroundColor: '#FF6B6B',
+    backgroundColor: '#34B79F',
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
+    flexDirection: 'row',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   retryButtonText: {
     fontSize: 18,
@@ -831,5 +876,75 @@ const styles = StyleSheet.create({
   inProgressContainer: {
     alignItems: 'center',
     marginVertical: 24,
+  },
+  // 통화 실패 화면 스타일
+  errorScreenContainer: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 32,
+  },
+  errorIconContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 24,
+  },
+  errorImage: {
+    width: 200,
+    height: 200,
+  },
+  errorTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#333333',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  errorDescription: {
+    fontSize: 16,
+    color: '#666666',
+    textAlign: 'center',
+    lineHeight: 24,
+    marginBottom: 24,
+    paddingHorizontal: 24,
+  },
+  errorMessageContainer: {
+    width: '100%',
+    padding: 16,
+    backgroundColor: '#FFF3E0',
+    borderRadius: 12,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: '#FFE0B2',
+  },
+  errorMessageText: {
+    fontSize: 14,
+    color: '#F57C00',
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  errorButtonsContainer: {
+    width: '100%',
+    gap: 12,
+    marginTop: 24,
+  },
+  homeButton: {
+    width: '100%',
+    height: 56,
+    backgroundColor: '#34B79F',
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  homeButtonText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
 });
