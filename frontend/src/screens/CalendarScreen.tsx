@@ -75,8 +75,18 @@ export const CalendarScreen = () => {
     description: '',
     time: '', // HH:MM 형식
     date: '',
+    category: '', // 카테고리
     isShared: false, // 공유 여부 (어르신 직접 등록 시 기본 비공유)
   });
+
+  // 카테고리 옵션 (Backend Enum과 일치)
+  const categories = [
+    { id: 'MEDICINE', name: '약 복용', icon: 'medical', color: '#FF6B6B' },
+    { id: 'HOSPITAL', name: '병원 방문', icon: 'medical-outline', color: '#4ECDC4' },
+    { id: 'EXERCISE', name: '운동', icon: 'fitness', color: '#45B7D1' },
+    { id: 'MEAL', name: '식사', icon: 'restaurant', color: '#96CEB4' },
+    { id: 'OTHER', name: '기타', icon: 'list', color: '#95A5A6' },
+  ];
   // 시간 선택 상태 (시간, 분) - 기본값 12:00
   const [selectedHour, setSelectedHour] = useState(12);
   const [selectedMinute, setSelectedMinute] = useState(0);
@@ -718,6 +728,7 @@ export const CalendarScreen = () => {
       description: '',
       time: defaultTime,
       date: formatDateString(targetDate),
+      category: '',
       isShared: false,
     });
     setShowAddModal(true);
@@ -789,6 +800,11 @@ export const CalendarScreen = () => {
       return;
     }
 
+    if (!newSchedule.category) {
+      show('알림', '카테고리를 선택해주세요.');
+      return;
+    }
+
     if (!newSchedule.time) {
       show('알림', '시간을 선택해주세요.');
       return;
@@ -819,6 +835,7 @@ export const CalendarScreen = () => {
         elderly_id: targetElderlyId,
         title: newSchedule.title,
         description: newSchedule.description || '',
+        category: newSchedule.category as any,
         due_date: newSchedule.date,
         due_time: timeHHMM,
         is_shared_with_caregiver: isShared,
@@ -833,7 +850,7 @@ export const CalendarScreen = () => {
       // 일정 다시 불러오기
       await loadSchedules();
 
-      setNewSchedule({ title: '', description: '', time: '', date: '', isShared: false });
+      setNewSchedule({ title: '', description: '', time: '', date: '', category: '', isShared: false });
       setShowAddModal(false);
       show('저장 완료', '일정이 추가되었습니다.');
     } catch (error: any) {
@@ -845,7 +862,7 @@ export const CalendarScreen = () => {
   };
 
   const handleCancelAdd = () => {
-    setNewSchedule({ title: '', description: '', time: '', date: '', isShared: false });
+    setNewSchedule({ title: '', description: '', time: '', date: '', category: '', isShared: false });
     setShowAddModal(false);
     setShowDatePicker(false); // 날짜 선택 모달도 함께 닫기
   };
@@ -1742,6 +1759,42 @@ export const CalendarScreen = () => {
                   numberOfLines={4}
                   editable={!showDatePicker}
                 />
+              </View>
+
+              {/* 카테고리 선택 */}
+              <View style={styles.inputSection}>
+                <Text style={styles.inputLabel}>카테고리</Text>
+                <View style={styles.categoryGridInline}>
+                  {categories.map((category) => (
+                    <TouchableOpacity
+                      key={category.id}
+                      style={[
+                        styles.categoryCardInline,
+                        newSchedule.category === category.id && styles.categoryCardInlineSelected,
+                      ]}
+                      onPress={() => setNewSchedule({ ...newSchedule, category: category.id })}
+                      activeOpacity={0.7}
+                      disabled={showDatePicker}
+                    >
+                      <View style={[
+                        styles.categoryCardIconContainerInline,
+                        { backgroundColor: category.color + '15' }
+                      ]}>
+                        <Ionicons 
+                          name={category.icon as any} 
+                          size={28} 
+                          color={category.color} 
+                        />
+                      </View>
+                      <Text style={[
+                        styles.categoryCardTextInline,
+                        newSchedule.category === category.id && styles.categoryCardTextInlineSelected
+                      ]}>
+                        {category.name}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
               </View>
 
               {/* 시간 선택 - AICallScreen과 동일한 TimePicker 사용 */}
@@ -3412,6 +3465,53 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666666',
     lineHeight: 20,
+  },
+  // 카테고리 선택 스타일
+  categoryGridInline: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    justifyContent: 'center',
+  },
+  categoryCardInline: {
+    width: '31%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 12,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#F0F0F0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  categoryCardInlineSelected: {
+    borderColor: '#34B79F',
+    backgroundColor: '#F0FDFA',
+    shadowColor: '#34B79F',
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  categoryCardIconContainerInline: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  categoryCardTextInline: {
+    fontSize: 13,
+    color: '#666666',
+    fontWeight: '500',
+    textAlign: 'center',
+  },
+  categoryCardTextInlineSelected: {
+    color: '#34B79F',
+    fontWeight: '700',
   },
 });
 
