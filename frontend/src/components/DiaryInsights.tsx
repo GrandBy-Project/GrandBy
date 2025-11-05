@@ -11,7 +11,8 @@ import { Diary } from '../api/diary';
 
 export interface DiaryInsightsProps {
   month: string; // YYYY-MM
-  diaries: Diary[];
+  diaries: Diary[]; // 월별 다이어리 (히트맵용)
+  allDiaries?: Diary[]; // 전체 다이어리 (연속 작성 계산용)
   onInsightPress?: (type: string) => void;
   onMonthChange?: (month: string) => void; // 월 변경 핸들러
   availableMonths?: string[]; // 다이어리가 있는 월 목록 (YYYY-MM 형식)
@@ -165,6 +166,7 @@ const SkeletonLoader: React.FC = () => (
 export const DiaryInsights: React.FC<DiaryInsightsProps> = ({
   month,
   diaries,
+  allDiaries, // 전체 다이어리 (연속 작성 계산용)
   onInsightPress,
   onMonthChange,
   availableMonths = [],
@@ -225,12 +227,15 @@ export const DiaryInsights: React.FC<DiaryInsightsProps> = ({
   };
   // 연속 작성 일수 계산
   const calculateStreak = (): StreakData => {
-    if (diaries.length === 0) {
+    // 전체 다이어리 사용 (연속 작성은 월별로 나누지 않고 전체 기록 기준)
+    const diariesForStreak = allDiaries && allDiaries.length > 0 ? allDiaries : diaries;
+    
+    if (diariesForStreak.length === 0) {
       return { current: 0, longest: 0, thisMonthProgress: 0 };
     }
 
     // 날짜 순 정렬
-    const sortedDates = [...new Set(diaries.map(d => d.date))].sort();
+    const sortedDates = [...new Set(diariesForStreak.map(d => d.date))].sort();
 
     // 현재 연속 작성 일수
     let currentStreak = 0;
@@ -265,7 +270,7 @@ export const DiaryInsights: React.FC<DiaryInsightsProps> = ({
       }
     }
 
-    // 이번 달 진행률
+    // 이번 달 진행률 (월별 다이어리 사용)
     const [yearStr, monthNumStr] = month.split('-');
     const daysInMonth = new Date(parseInt(yearStr), parseInt(monthNumStr), 0).getDate();
     const todayDate = new Date();

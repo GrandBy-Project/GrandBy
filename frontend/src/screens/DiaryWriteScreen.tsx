@@ -25,6 +25,7 @@ import { getCallLog, getExtractedTodos, ExtractedTodo } from '../api/call';
 import { createTodo } from '../api/todo';
 import { useAuthStore } from '../store/authStore';
 import { BottomNavigationBar, Header } from '../components';
+import { TimePicker } from '../components/TimePicker';
 import { Colors } from '../constants/Colors';
 import apiClient from '../api/client';
 
@@ -61,6 +62,7 @@ export const DiaryWriteScreen = () => {
   const [editingTodo, setEditingTodo] = useState<{
     title: string;
     description: string;
+    time: string; // "HH:mm" 형식
     isShared: boolean;
   } | null>(null);
 
@@ -215,7 +217,7 @@ export const DiaryWriteScreen = () => {
               
               // 사용자에게 피드백
               showConfirmModal({
-                title: '💡 일정 발견!',
+                title: '일정 발견!',
                 message: `대화에서 ${extractedTodos.length}개의 일정을 발견했습니다.\n아래에서 등록할 일정을 선택해주세요!`,
                 onConfirm: () => {
                   hideConfirmModal();
@@ -288,6 +290,18 @@ export const DiaryWriteScreen = () => {
   };
 
   /**
+   * 시간 포맷 변환 (HH:MM → HH:MM, 기본값 처리)
+   */
+  const formatTimeToDisplay = (time24?: string | null): string => {
+    if (!time24) return '09:00'; // 기본값: 오전 9시
+    // 이미 HH:MM 형식인지 확인
+    if (time24.includes(':')) {
+      return time24;
+    }
+    return '09:00'; // 기본값
+  };
+
+  /**
    * TODO 확장 (등록 폼 표시)
    */
   const handleExpandTodo = (index: number, todo: ExtractedTodo) => {
@@ -295,6 +309,7 @@ export const DiaryWriteScreen = () => {
     setEditingTodo({
       title: todo.title,
       description: todo.description || '',
+      time: formatTimeToDisplay(todo.due_time), // "HH:mm" 형식
       isShared: false,  // 기본값: 비공유 (AI 추출 TODO는 개인 일정)
     });
   };
@@ -376,6 +391,16 @@ export const DiaryWriteScreen = () => {
   const handleConfirmTodo = async (index: number, originalTodo: ExtractedTodo) => {
     if (!editingTodo || !user) return;
     
+    // 시간이 지정되지 않은 경우 안내 모달 표시
+    if (!editingTodo.time || !editingTodo.time.includes(':')) {
+      showConfirmModal({
+        title: '알림',
+        message: '시간을 지정해주세요.\n홈 화면에서 시간이 표시되지 않으면 폰트가 깨질 수 있습니다.',
+        onConfirm: hideConfirmModal,
+      });
+      return;
+    }
+    
     try {
       await createTodo({
         elderly_id: user.user_id,
@@ -383,13 +408,13 @@ export const DiaryWriteScreen = () => {
         description: editingTodo.description,
         category: originalTodo.category,
         due_date: originalTodo.due_date,
-        due_time: originalTodo.due_time || undefined,
+        due_time: editingTodo.time, // 이미 "HH:mm" 형식
         is_shared_with_caregiver: editingTodo.isShared,
       });
       
       // 성공 피드백
       showConfirmModal({
-        title: '✅ 등록 완료',
+        title: '등록 완료',
         message: '일정이 등록되었습니다!',
         onConfirm: () => {
           hideConfirmModal();
@@ -677,7 +702,15 @@ export const DiaryWriteScreen = () => {
                   </View>
                   
                   {expandedTodoIndex === index ? (
-                    <Text style={styles.todoExpandedIcon}>▼</Text>
+                    <TouchableOpacity
+                      onPress={() => {
+                        setExpandedTodoIndex(null);
+                        setEditingTodo(null);
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.todoExpandedIcon}>▼</Text>
+                    </TouchableOpacity>
                   ) : (
                     <TouchableOpacity
                       style={styles.todoAddButton}
@@ -722,6 +755,17 @@ export const DiaryWriteScreen = () => {
                         }
                         placeholder="일정 설명"
                         multiline
+                      />
+                    </View>
+                    
+                    {/* 시간 선택 */}
+                    <View style={styles.formField}>
+                      <Text style={styles.formLabel}>시간</Text>
+                      <TimePicker
+                        value={editingTodo.time}
+                        onChange={(time) => 
+                          setEditingTodo({ ...editingTodo, time })
+                        }
                       />
                     </View>
                     
@@ -821,9 +865,17 @@ export const DiaryWriteScreen = () => {
           onPress={hideConfirmModal}
         >
           <Pressable style={styles.commonModalContainer} onPress={() => {}}>
-            <Text style={styles.commonModalTitle}>
-              {confirmModal.title}
-            </Text>
+            <View style={styles.modalTitleContainer}>
+              {confirmModal.title === '등록 완료' && (
+                <Ionicons name="checkmark-circle" size={24} color="#34B79F" style={styles.modalTitleIcon} />
+              )}
+              {confirmModal.title === '일정 발견!' && (
+                <Ionicons name="bulb-outline" size={24} color="#FFD700" style={styles.modalTitleIcon} />
+              )}
+              <Text style={styles.commonModalTitle}>
+                {confirmModal.title}
+              </Text>
+            </View>
             <Text style={styles.commonModalText}>
               {confirmModal.message}
             </Text>
@@ -1172,6 +1224,14 @@ const styles = StyleSheet.create({
     color: '#111827',
     marginBottom: 8,
     fontSize: 18,
+  },
+  modalTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  modalTitleIcon: {
+    marginRight: 8,
   },
   commonModalText: {
     color: '#374151',

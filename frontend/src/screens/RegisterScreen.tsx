@@ -116,7 +116,16 @@ export const RegisterScreen = () => {
       });
 
       if (!checkResponse.data.available) {
-        setErrors({ ...errors, email: '이미 사용 중인 이메일입니다.' });
+        const message = checkResponse.data.message || '이미 사용 중인 이메일입니다.';
+        
+        // 비활성화된 계정에 대한 별도 안내
+        if (message.startsWith('INACTIVE_EMAIL:')) {
+          const alertMessage = message.split(':')[1];
+          show('비활성화된 계정', alertMessage);
+          return;
+        }
+        
+        setErrors({ ...errors, email: message });
         return;
       }
 
@@ -127,7 +136,15 @@ export const RegisterScreen = () => {
       setTimeLeft(300); // 5분
       show('인증 코드 발송', '이메일로 인증 코드가 발송되었습니다. 이메일 확인후 인증 번호를 입력해주세요.');
     } catch (error: any) {
-      show('오류', error.response?.data?.detail || '인증 코드 발송에 실패했습니다.');
+      const errorDetail = error.response?.data?.detail || '인증 코드 발송에 실패했습니다.';
+      
+      // 비활성화된 계정에 대한 별도 안내
+      if (errorDetail.startsWith('INACTIVE_EMAIL:')) {
+        const alertMessage = errorDetail.split(':')[1];
+        show('비활성화된 계정', alertMessage);
+      } else {
+        show('오류', errorDetail);
+      }
     } finally {
       setIsSendingCode(false);
     }
@@ -264,7 +281,15 @@ export const RegisterScreen = () => {
       show('환영합니다!', '회원가입이 완료되었습니다.');
       router.replace('/home');
     } catch (error: any) {
-      show('회원가입 실패', error.response?.data?.detail || '회원가입에 실패했습니다.');
+      const errorDetail = error.response?.data?.detail || '회원가입에 실패했습니다.';
+      
+      // 비활성화된 계정에 대한 별도 안내
+      if (errorDetail.startsWith('INACTIVE_EMAIL:') || errorDetail.startsWith('INACTIVE_PHONE:')) {
+        const message = errorDetail.split(':')[1];
+        show('비활성화된 계정', message);
+      } else {
+        show('회원가입 실패', errorDetail);
+      }
     } finally {
       setIsLoading(false);
     }

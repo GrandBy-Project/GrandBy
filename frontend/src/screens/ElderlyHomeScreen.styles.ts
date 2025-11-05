@@ -372,6 +372,12 @@ export const elderlyHomeStyles = StyleSheet.create({
     fontSize: 18,
     lineHeight: 24,
   },
+  reminderTimeTextSmall: {
+    fontSize: 12,
+  },
+  reminderTimeTextSmallLarge: {
+    fontSize: 14,
+  },
   weatherTextLarge: {
     fontSize: 18,
     lineHeight: 24,
@@ -399,6 +405,12 @@ export const elderlyHomeStyles = StyleSheet.create({
   },
   scheduleTimeTextLarge: {
     fontSize: 20,
+  },
+  scheduleTimeTextSmall: {
+    fontSize: 12,
+  },
+  scheduleTimeTextSmallLarge: {
+    fontSize: 14,
   },
   scheduleTitleLarge: {
     fontSize: 20,

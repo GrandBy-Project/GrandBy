@@ -55,11 +55,12 @@ async def search_elderly(
     # 쿼리 정제
     query = query.strip()
     
-    # 이메일 또는 전화번호로 검색
+    # 이메일 또는 전화번호로 검색 (활성화된 계정만)
     elderly_users = db.query(User).filter(
         and_(
             User.role == UserRole.ELDERLY,
             User.user_id != current_user.user_id,  # 본인 제외
+            User.is_active == True,
             or_(
                 User.email.ilike(f"%{query}%"),
                 User.phone_number.ilike(f"%{query}%")
@@ -112,11 +113,12 @@ async def create_connection(
             detail="보호자만 연결 요청을 보낼 수 있습니다."
         )
     
-    # 어르신 찾기
+    # 어르신 찾기 (활성화된 계정만)
     query = connection_data.elderly_phone_or_email.strip()
     elderly = db.query(User).filter(
         and_(
             User.role == UserRole.ELDERLY,
+            User.is_active == True,
             or_(
                 User.email == query,
                 User.phone_number == query
@@ -258,7 +260,12 @@ async def get_connections(
         ).all()
         
         for conn in connections:
-            elderly = db.query(User).filter(User.user_id == conn.elderly_id).first()
+            elderly = db.query(User).filter(
+                and_(
+                    User.user_id == conn.elderly_id,
+                    User.is_active == True
+                )
+            ).first()
             if not elderly:
                 continue
             
@@ -287,7 +294,12 @@ async def get_connections(
         ).all()
         
         for conn in connections:
-            caregiver = db.query(User).filter(User.user_id == conn.caregiver_id).first()
+            caregiver = db.query(User).filter(
+                and_(
+                    User.user_id == conn.caregiver_id,
+                    User.is_active == True
+                )
+            ).first()
             if not caregiver:
                 continue
             
@@ -373,8 +385,13 @@ async def accept_connection(
     connection.status = ConnectionStatus.ACTIVE
     connection.updated_at = datetime.utcnow()
     
-    # 보호자에게 알림 생성
-    caregiver = db.query(User).filter(User.user_id == connection.caregiver_id).first()
+    # 보호자에게 알림 생성 (활성화된 계정만)
+    caregiver = db.query(User).filter(
+        and_(
+            User.user_id == connection.caregiver_id,
+            User.is_active == True
+        )
+    ).first()
     if caregiver:
         notification = Notification(
             notification_id=str(uuid.uuid4()),
@@ -555,9 +572,14 @@ async def delete_connection(
             detail="활성 연결만 해제할 수 있습니다."
         )
     
-    # 상대방 정보 저장 (알림 전송용)
+    # 상대방 정보 저장 (알림 전송용, 활성화된 계정만)
     other_user_id = connection.caregiver_id if current_user.user_id == connection.elderly_id else connection.elderly_id
-    other_user = db.query(User).filter(User.user_id == other_user_id).first()
+    other_user = db.query(User).filter(
+        and_(
+            User.user_id == other_user_id,
+            User.is_active == True
+        )
+    ).first()
     current_user_name = current_user.name
     
     # 연결 해제
@@ -633,10 +655,15 @@ async def get_connected_elderly(
         )
     ).all()
     
-    # 어르신 정보 수집
+    # 어르신 정보 수집 (활성화된 계정만)
     elderly_list = []
     for conn in connections:
-        elderly = db.query(User).filter(User.user_id == conn.elderly_id).first()
+        elderly = db.query(User).filter(
+            and_(
+                User.user_id == conn.elderly_id,
+                User.is_active == True
+            )
+        ).first()
         if elderly:
             elderly_list.append(UserResponse.from_orm(elderly))
     
@@ -936,7 +963,7 @@ async def change_password(
 
 # ==================== 계정 삭제 ====================
 class DeleteAccountRequest(BaseModel):
-    password: str
+    password: str | None = None
     reason: str | None = None
 
 
@@ -954,27 +981,27 @@ async def delete_account(
     - 관련 데이터 익명화
     """
     # 소셜 로그인이 아닌 경우 비밀번호 확인
-    if current_user.password_hash:
-        if not pwd_context.verify(request.password, current_user.password_hash):
-            raise HTTPException(
-                status_code=400,
-                detail="비밀번호가 일치하지 않습니다"
-            )
+    # if current_user.password_hash:
+    #     if not pwd_context.verify(request.password, current_user.password_hash):
+    #         raise HTTPException(
+    #             status_code=400,
+    #             detail="비밀번호가 일치하지 않습니다"
+    #         )
     
     # Soft Delete 처리
     current_user.is_active = False
     current_user.deleted_at = datetime.utcnow()
     current_user.updated_at = datetime.utcnow()
     
-    # 프로필 이미지 삭제
-    if current_user.profile_image_url:
-        await delete_profile_image(current_user.profile_image_url)
-        current_user.profile_image_url = None
+    # # 프로필 이미지 삭제
+    # if current_user.profile_image_url:
+    #     await delete_profile_image(current_user.profile_image_url)
+    #     current_user.profile_image_url = None
     
-    # 개인정보 익명화
-    current_user.email = f"deleted_{current_user.user_id}@deleted.com"
-    current_user.name = "탈퇴한 사용자"
-    current_user.phone_number = None
+    # # 개인정보 익명화
+    # current_user.email = f"deleted_{current_user.user_id}@deleted.com"
+    # current_user.name = "탈퇴한 사용자"
+    # current_user.phone_number = None
     
     db.commit()
     

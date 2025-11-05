@@ -7,7 +7,8 @@ import * as Location from 'expo-location';
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 
-const OPENWEATHER_API_KEY = process.env.EXPO_PUBLIC_OPENWEATHER_API_KEY;
+// OpenWeatherMap API 키 (하드코딩 - 클라이언트 노출되지만 날씨 정보만 제공하므로 보안 문제 없음)
+const OPENWEATHER_API_KEY = '24cda4505796412dfad4647a6119adfa';
 const BASE_URL = 'https://api.openweathermap.org/data/2.5';
 
 // 디버깅: API 키 확인
@@ -250,7 +251,7 @@ export const getCurrentWeather = async (
 ): Promise<WeatherData> => {
   try {
     if (!OPENWEATHER_API_KEY) {
-      throw new Error('OpenWeatherMap API 키가 설정되지 않았습니다. .env 파일을 확인하세요.');
+      throw new Error('OpenWeatherMap API 키가 설정되지 않았습니다.');
     }
 
     // 1. 날씨 정보 가져오기
