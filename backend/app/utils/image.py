@@ -8,7 +8,11 @@ import os
 from pathlib import Path
 from fastapi import UploadFile, HTTPException
 from app.config import settings
+from app.utils.s3 import upload_file_to_s3, delete_file_from_s3, get_s3_key_from_url
 import uuid
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # 허용된 이미지 확장자
@@ -87,25 +91,31 @@ async def save_profile_image(file: UploadFile, user_id: str) -> str:
             detail=f"이미지 처리 중 오류가 발생했습니다: {str(e)}"
         )
     
-    # 저장 디렉토리 생성
-    upload_dir = Path(settings.UPLOAD_DIR)
-    upload_dir.mkdir(parents=True, exist_ok=True)
+    # 이미지를 메모리에 JPEG로 저장
+    image_bytes = io.BytesIO()
+    image.save(image_bytes, 'JPEG', quality=85, optimize=True)
+    image_bytes.seek(0)
+    file_data = image_bytes.read()
     
     # 고유 파일명 생성
     filename = f"{user_id}_{uuid.uuid4().hex[:8]}.jpg"
-    file_path = upload_dir / filename
+    s3_key = f"profiles/{filename}"
     
-    # 이미지 저장 (JPEG, 품질 85)
+    # S3에 업로드
     try:
-        image.save(file_path, 'JPEG', quality=85, optimize=True)
+        s3_url = upload_file_to_s3(
+            file_data=file_data,
+            s3_key=s3_key,
+            content_type="image/jpeg"
+        )
+        logger.info(f"✅ 프로필 이미지 S3 업로드 완료: {s3_url}")
+        return s3_url
     except Exception as e:
+        logger.error(f"❌ 프로필 이미지 S3 업로드 실패: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"이미지 저장 중 오류가 발생했습니다: {str(e)}"
+            detail=f"이미지 업로드 중 오류가 발생했습니다: {str(e)}"
         )
-    
-    # URL 반환 (프론트엔드에서 접근 가능한 경로)
-    return f"/uploads/profiles/{filename}"
 
 
 def _correct_image_orientation(image: Image.Image) -> Image.Image:
@@ -204,46 +214,58 @@ async def save_diary_image(file: UploadFile, diary_id: str, user_id: str) -> str
             detail=f"이미지 처리 중 오류가 발생했습니다: {str(e)}"
         )
     
-    # 저장 디렉토리 생성
-    upload_dir = Path(settings.UPLOAD_DIR) / "diaries"
-    upload_dir.mkdir(parents=True, exist_ok=True)
+    # 이미지를 메모리에 JPEG로 저장
+    image_bytes = io.BytesIO()
+    image.save(image_bytes, 'JPEG', quality=90, optimize=True)
+    image_bytes.seek(0)
+    file_data = image_bytes.read()
     
     # 고유 파일명 생성
     filename = f"{diary_id}_{user_id}_{uuid.uuid4().hex[:8]}.jpg"
-    file_path = upload_dir / filename
+    s3_key = f"diaries/{filename}"
     
-    # 이미지 저장 (JPEG, 품질 90)
+    # S3에 업로드
     try:
-        image.save(file_path, 'JPEG', quality=90, optimize=True)
+        s3_url = upload_file_to_s3(
+            file_data=file_data,
+            s3_key=s3_key,
+            content_type="image/jpeg"
+        )
+        logger.info(f"✅ 일기 이미지 S3 업로드 완료: {s3_url}")
+        return s3_url
     except Exception as e:
+        logger.error(f"❌ 일기 이미지 S3 업로드 실패: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"이미지 저장 중 오류가 발생했습니다: {str(e)}"
+            detail=f"이미지 업로드 중 오류가 발생했습니다: {str(e)}"
         )
-    
-    # URL 반환 (프론트엔드에서 접근 가능한 경로)
-    return f"/uploads/diaries/{filename}"
 
 
 async def delete_profile_image(image_url: str) -> None:
     """
-    프로필 이미지 파일 삭제
+    프로필 이미지 파일 삭제 (S3 또는 로컬)
     
     Args:
-        image_url: 삭제할 이미지 URL
+        image_url: 삭제할 이미지 URL (S3 URL 또는 로컬 경로)
     """
     if not image_url:
         return
     
     try:
-        # URL에서 파일명 추출
-        filename = os.path.basename(image_url)
-        file_path = Path(settings.UPLOAD_DIR) / filename
-        
-        # 파일 존재 확인 후 삭제
-        if file_path.exists() and file_path.is_file():
-            file_path.unlink()
+        # S3 URL인지 확인
+        s3_key = get_s3_key_from_url(image_url)
+        if s3_key:
+            # S3에서 삭제
+            delete_file_from_s3(s3_key)
+            logger.info(f"✅ S3 프로필 이미지 삭제 완료: {s3_key}")
+        else:
+            # 로컬 파일 삭제 (하위 호환성)
+            filename = os.path.basename(image_url)
+            file_path = Path(settings.UPLOAD_DIR) / filename
+            if file_path.exists() and file_path.is_file():
+                file_path.unlink()
+                logger.info(f"✅ 로컬 프로필 이미지 삭제 완료: {filename}")
     except Exception as e:
         # 파일 삭제 실패해도 계속 진행 (로그만 남김)
-        print(f"이미지 삭제 실패: {str(e)}")
+        logger.warning(f"⚠️ 이미지 삭제 실패: {str(e)}")
 
