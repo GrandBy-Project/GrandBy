@@ -1106,16 +1106,18 @@ export const GuardianHomeScreen = () => {
     if (!mood) return { name: 'help-circle-outline', color: '#999999' };
     
     const moodLower = mood.toLowerCase();
-    if (moodLower.includes('happy') || moodLower.includes('excited')) {
-      return { name: 'happy', color: '#4CAF50' };
-    } else if (moodLower.includes('calm') || moodLower.includes('content') || moodLower.includes('peaceful')) {
-      return { name: 'happy-outline', color: '#66BB6A' };
-    } else if (moodLower.includes('sad') || moodLower.includes('depressed')) {
-      return { name: 'sad', color: '#FF9800' };
-    } else if (moodLower.includes('angry') || moodLower.includes('frustrated')) {
-      return { name: 'flame', color: '#FF5722' };
-    } else if (moodLower.includes('anxious') || moodLower.includes('worried')) {
-      return { name: 'alert-circle-outline', color: '#FF9800' };
+    if (moodLower.includes('happy')) {
+      return { name: 'happy', color: '#FFD700' };
+    } else if (moodLower.includes('excited')) {
+      return { name: 'happy', color: '#FF6B6B' };
+    } else if (moodLower.includes('calm')) {
+      return { name: 'happy-outline', color: '#4ECDC4' };
+    } else if (moodLower.includes('sad')) {
+      return { name: 'sad', color: '#5499C7' };
+    } else if (moodLower.includes('angry')) {
+      return { name: 'flame', color: '#E74C3C' };
+    } else if (moodLower.includes('tired')) {
+      return { name: 'moon', color: '#9B59B6' };
     }
     return { name: 'help-circle-outline', color: '#999999' };
   };
@@ -1127,13 +1129,9 @@ export const GuardianHomeScreen = () => {
     if (moodLower.includes('happy')) return '행복함';
     if (moodLower.includes('excited')) return '신남';
     if (moodLower.includes('calm')) return '평온함';
-    if (moodLower.includes('content')) return '만족';
     if (moodLower.includes('sad')) return '슬픔';
-    if (moodLower.includes('depressed')) return '우울';
     if (moodLower.includes('angry')) return '화남';
-    if (moodLower.includes('frustrated')) return '답답함';
-    if (moodLower.includes('anxious')) return '불안';
-    if (moodLower.includes('worried')) return '걱정';
+    if (moodLower.includes('tired')) return '피곤함';
     return mood;
   };
   
@@ -1163,7 +1161,7 @@ export const GuardianHomeScreen = () => {
               <Text style={styles.commCardContent}>다이어리를 불러오는 중...</Text>
             </View>
           ) : recentDiaries.length > 0 ? (
-            recentDiaries.slice(0, 3).map((diary) => {
+            recentDiaries.slice(0, 5).map((diary) => {
               const moodIcon = getMoodIcon(diary.mood);
               return (
                 <TouchableOpacity
@@ -1190,7 +1188,7 @@ export const GuardianHomeScreen = () => {
                     <View style={styles.moodContainer}>
                       <Ionicons name={moodIcon.name as any} size={16} color={moodIcon.color} />
                       <Text style={[styles.commCardMood, { color: moodIcon.color }]}>
-                        감정: {getMoodLabel(diary.mood)}
+                        {getMoodLabel(diary.mood)}
                       </Text>
                     </View>
                   )}
@@ -1204,7 +1202,7 @@ export const GuardianHomeScreen = () => {
           )}
 
           {/* 감정 분석 */}
-          {emotionAnalysis.total && emotionAnalysis.total > 0 && (
+          {/* {emotionAnalysis.total && emotionAnalysis.total > 0 && (
             <View style={styles.commCard}>
               <View style={styles.commCardHeader}>
                 <View style={styles.commCardTitleContainer}>
@@ -1230,7 +1228,7 @@ export const GuardianHomeScreen = () => {
                 </View>
               )}
             </View>
-          )}
+          )} */}
           
           {/* 일기장 바로가기 */}
           {currentElderly && (
