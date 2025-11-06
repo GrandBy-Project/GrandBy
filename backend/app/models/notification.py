@@ -20,6 +20,7 @@ class NotificationType(str, enum.Enum):
     EMOTION_ALERT = "emotion_alert"  # 감정 경고
     CALL_MISSED = "call_missed"  # 부재중 전화
     COMMENT_ADDED = "comment_added"  # 댓글 추가됨
+    CALL_SCHEDULE_UPDATED = "call_schedule_updated"  # 자동 통화 스케줄 업데이트
 
 
 class Notification(Base):

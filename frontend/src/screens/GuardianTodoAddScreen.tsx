@@ -44,14 +44,27 @@ export const GuardianTodoAddScreen = () => {
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
   const { show } = useAlert();
-  const [isSaving, setIsSaving] = useState(false);
-  
-  // 쿼리 파라미터로 어르신 ID와 이름, 수정할 TODO ID 받기
   const { elderlyId, elderlyName, todoId } = useLocalSearchParams<{
     elderlyId: string;
     elderlyName: string;
     todoId?: string;
   }>();
+  const [isSaving, setIsSaving] = useState(false);
+  const [isLoadingTodo, setIsLoadingTodo] = useState(false);
+  const [newTodo, setNewTodo] = useState({
+    title: '',
+    description: '',
+    category: '',
+    time: '', // "오전/오후 X시" 형식 (표시용)
+    timeValue: '12:00', // "HH:MM" 형식 (TimePicker용)
+    date: new Date().toISOString().split('T')[0], // YYYY-MM-DD
+    elderlyId: elderlyId || '', // 쿼리 파라미터에서 받은 어르신 ID 사용
+    isRecurring: false,
+    recurringType: 'daily' as 'daily' | 'weekly' | 'monthly',
+    reminderEnabled: true,
+    reminderTime: '',
+    recurringDays: [] as number[], // 주간 반복 요일: [0,1,2,3,4,5,6] (월~일)
+  });
   
   const isEditMode = !!todoId;
 
@@ -119,30 +132,12 @@ export const GuardianTodoAddScreen = () => {
   // 로딩 중일 때 표시
   if (isLoadingTodo) {
     return (
-      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center', paddingTop: 100 }]}>
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center', paddingTop: 100 }]}> 
         <ActivityIndicator size="large" color="#34B79F" />
         <Text style={{ marginTop: 16, color: '#666666' }}>할일 정보를 불러오는 중...</Text>
       </View>
     );
   }
-
-  // 폼 상태
-  const [newTodo, setNewTodo] = useState({
-    title: '',
-    description: '',
-    category: '',
-    time: '', // "오전/오후 X시" 형식 (표시용)
-    timeValue: '12:00', // "HH:MM" 형식 (TimePicker용)
-    date: new Date().toISOString().split('T')[0], // YYYY-MM-DD
-    elderlyId: elderlyId || '', // 쿼리 파라미터에서 받은 어르신 ID 사용
-    isRecurring: false,
-    recurringType: 'daily' as 'daily' | 'weekly' | 'monthly',
-    reminderEnabled: true,
-    reminderTime: '',
-    recurringDays: [] as number[], // 주간 반복 요일: [0,1,2,3,4,5,6] (월~일)
-  });
-  
-  const [isLoadingTodo, setIsLoadingTodo] = useState(false);
 
   // 모달 상태
   const [showRecurringModal, setShowRecurringModal] = useState(false);
