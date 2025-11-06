@@ -2121,8 +2121,7 @@ export const GuardianHomeScreen = () => {
       label: 'AI 통화 설정',
       icon: <PhoneIcon size={24} color="#34B79F" />,
       onPress: () => {
-        // TODO: AI 통화 설정 화면으로 이동
-        show('준비중', 'AI 통화 설정 기능은 개발 중입니다.');
+        router.push('/guardian-ai-call');
       },
     },
     {

@@ -771,6 +771,44 @@ async def update_call_schedule(
         
         logger.info(f"✅ 자동 통화 스케줄 업데이트 완료: {current_user.user_id} - {settings.call_time} (활성화: {settings.is_active})")
         
+        # 어르신이 자신의 스케줄을 업데이트할 때 연결된 보호자들에게 푸시 알림 전송
+        if current_user.role == UserRole.ELDERLY:
+            try:
+                from app.services.notification_service import NotificationService
+                from app.tasks.notification_sender import send_push_notification_task
+                
+                # 연결된 보호자 목록 조회
+                connections = db.query(UserConnection).filter(
+                    and_(
+                        UserConnection.elderly_id == current_user.user_id,
+                        UserConnection.status == ConnectionStatus.ACTIVE
+                    )
+                ).all()
+                
+                # 알림 메시지 생성
+                if schedule_data.is_active:
+                    time_str = schedule_data.call_time or "14:00"
+                    title = "자동 통화 시간이 변경되었습니다"
+                    message = f"어르신이 자동 통화 시간을 {time_str}로 변경했습니다."
+                else:
+                    title = "자동 통화가 비활성화되었습니다"
+                    message = "어르신이 자동 통화를 비활성화했습니다."
+                
+                # 각 보호자에게 푸시 알림 전송
+                for connection in connections:
+                    send_push_notification_task.delay(
+                        user_id=connection.caregiver_id,
+                        notification_type=NotificationType.CALL_SCHEDULE_UPDATED.value,
+                        title=title,
+                        message=message,
+                        related_id=settings.setting_id,
+                        notification_type_key="push_call_enabled"
+                    )
+                
+                logger.info(f"📤 연결된 보호자들에게 푸시 알림 전송 요청: {len(connections)}명")
+            except Exception as notification_error:
+                logger.error(f"⚠️ 푸시 알림 전송 실패: {str(notification_error)}")
+        
         return CallScheduleResponse(
             is_active=settings.is_active,
             call_time=settings.call_time.strftime("%H:%M") if settings.call_time else None
@@ -780,6 +818,240 @@ async def update_call_schedule(
         raise
     except Exception as e:
         logger.error(f"❌ 자동 통화 스케줄 업데이트 실패: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail="설정을 저장하는 중 오류가 발생했습니다.")
+
+
+# ==================== 보호자용 어르신 스케줄 관리 ====================
+
+@router.get("/elderly/{elderly_id}/call-schedule", response_model=CallScheduleResponse)
+async def get_elderly_call_schedule(
+    elderly_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    보호자가 어르신의 자동 통화 스케줄 설정 조회
+    
+    Args:
+        elderly_id: 어르신 사용자 ID
+    
+    Returns:
+        CallScheduleResponse: 자동 통화 활성화 여부 및 예약 시간
+    
+    - 보호자만 사용 가능
+    - ACTIVE 상태인 연결이 있어야 함
+    """
+    # 보호자만 조회 가능
+    if current_user.role != UserRole.CAREGIVER:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="보호자만 어르신의 스케줄을 조회할 수 있습니다."
+        )
+    
+    # 어르신 존재 확인
+    elderly = db.query(User).filter(
+        and_(
+            User.user_id == elderly_id,
+            User.role == UserRole.ELDERLY,
+            User.is_active == True
+        )
+    ).first()
+    
+    if not elderly:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="어르신을 찾을 수 없습니다."
+        )
+    
+    # 연결 상태 확인 (ACTIVE 상태만 허용)
+    connection = db.query(UserConnection).filter(
+        and_(
+            UserConnection.caregiver_id == current_user.user_id,
+            UserConnection.elderly_id == elderly_id,
+            UserConnection.status == ConnectionStatus.ACTIVE
+        )
+    ).first()
+    
+    if not connection:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="연결된 어르신만 조회할 수 있습니다."
+        )
+    
+    try:
+        # CallSettings 조회 또는 기본값 반환
+        settings = db.query(CallSettings).filter(
+            CallSettings.elderly_id == elderly_id
+        ).first()
+        
+        if not settings:
+            return CallScheduleResponse(
+                is_active=False,
+                call_time=None
+            )
+        
+        return CallScheduleResponse(
+            is_active=settings.is_active,
+            call_time=settings.call_time.strftime("%H:%M") if settings.call_time else None
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ 어르신 자동 통화 스케줄 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail="설정을 불러오는 중 오류가 발생했습니다.")
+
+
+@router.put("/elderly/{elderly_id}/call-schedule", response_model=CallScheduleResponse)
+async def update_elderly_call_schedule(
+    elderly_id: str,
+    schedule_data: CallScheduleUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    보호자가 어르신의 자동 통화 스케줄 설정 업데이트
+    
+    Args:
+        elderly_id: 어르신 사용자 ID
+        schedule_data: 자동 통화 활성화 여부 및 예약 시간 (HH:MM 형식)
+    
+    Returns:
+        CallScheduleResponse: 업데이트된 설정
+    
+    - 보호자만 사용 가능
+    - ACTIVE 상태인 연결이 있어야 함
+    - 업데이트 시 어르신에게 푸시 알림 전송
+    """
+    # 보호자만 업데이트 가능
+    if current_user.role != UserRole.CAREGIVER:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="보호자만 어르신의 스케줄을 업데이트할 수 있습니다."
+        )
+    
+    # 어르신 존재 확인
+    elderly = db.query(User).filter(
+        and_(
+            User.user_id == elderly_id,
+            User.role == UserRole.ELDERLY,
+            User.is_active == True
+        )
+    ).first()
+    
+    if not elderly:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="어르신을 찾을 수 없습니다."
+        )
+    
+    # 연결 상태 확인 (ACTIVE 상태만 허용)
+    connection = db.query(UserConnection).filter(
+        and_(
+            UserConnection.caregiver_id == current_user.user_id,
+            UserConnection.elderly_id == elderly_id,
+            UserConnection.status == ConnectionStatus.ACTIVE
+        )
+    ).first()
+    
+    if not connection:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="연결된 어르신만 스케줄을 업데이트할 수 있습니다."
+        )
+    
+    try:
+        # 시간 형식 검증 (HH:MM)
+        if schedule_data.is_active and schedule_data.call_time:
+            time_pattern = re.compile(r'^([01]\d|2[0-3]):([0-5]\d)$')
+            if not time_pattern.match(schedule_data.call_time):
+                raise HTTPException(
+                    status_code=400,
+                    detail="시간 형식이 올바르지 않습니다. HH:MM 형식으로 입력해주세요. (예: 14:30)"
+                )
+        
+        # 자동 통화를 활성화하는데 시간이 없으면 에러
+        if schedule_data.is_active and not schedule_data.call_time:
+            raise HTTPException(
+                status_code=400,
+                detail="자동 통화를 활성화하려면 통화 시간을 설정해야 합니다."
+            )
+        
+        # CallSettings 조회 또는 생성
+        settings = db.query(CallSettings).filter(
+            CallSettings.elderly_id == elderly_id
+        ).first()
+        
+        old_time = None
+        old_active = False
+        if settings:
+            old_time = settings.call_time.strftime("%H:%M") if settings.call_time else None
+            old_active = settings.is_active
+        
+        if not settings:
+            # HH:MM 문자열을 Time 객체로 변환
+            if schedule_data.call_time:
+                time_parts = schedule_data.call_time.split(":")
+                call_time = time(hour=int(time_parts[0]), minute=int(time_parts[1]))
+            else:
+                call_time = time(hour=14, minute=0)  # 기본값: 14:00
+            
+            # CallSettings 생성
+            settings = CallSettings(
+                setting_id=str(uuid.uuid4()),
+                elderly_id=elderly_id,
+                call_time=call_time,
+                is_active=schedule_data.is_active
+            )
+            db.add(settings)
+        else:
+            # 기존 설정 업데이트
+            if schedule_data.call_time:
+                time_parts = schedule_data.call_time.split(":")
+                settings.call_time = time(hour=int(time_parts[0]), minute=int(time_parts[1]))
+            settings.is_active = schedule_data.is_active
+        
+        db.commit()
+        db.refresh(settings)
+        
+        logger.info(f"✅ 어르신 자동 통화 스케줄 업데이트 완료: {elderly_id} - {settings.call_time} (활성화: {settings.is_active})")
+        
+        # 어르신에게 푸시 알림 전송
+        try:
+            from app.services.notification_service import NotificationService
+            from app.tasks.notification_sender import send_push_notification_task
+            
+            # 알림 메시지 생성
+            if schedule_data.is_active:
+                time_str = schedule_data.call_time or "14:00"
+                title = "자동 통화 시간이 설정되었습니다"
+                message = f"보호자가 자동 통화 시간을 {time_str}로 설정했습니다."
+            else:
+                title = "자동 통화가 비활성화되었습니다"
+                message = "보호자가 자동 통화를 비활성화했습니다."
+            
+            # 비동기로 푸시 알림 전송
+            send_push_notification_task.delay(
+                user_id=elderly_id,
+                notification_type=NotificationType.CALL_SCHEDULE_UPDATED.value,
+                title=title,
+                message=message,
+                related_id=settings.setting_id,
+                notification_type_key="push_call_enabled"
+            )
+            
+            logger.info(f"📤 어르신에게 푸시 알림 전송 요청: {elderly_id}")
+        except Exception as notification_error:
+            logger.error(f"⚠️ 푸시 알림 전송 실패: {str(notification_error)}")
+        
+        return CallScheduleResponse(
+            is_active=settings.is_active,
+            call_time=settings.call_time.strftime("%H:%M") if settings.call_time else None
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 어르신 자동 통화 스케줄 업데이트 실패: {e}")
         db.rollback()
         raise HTTPException(status_code=500, detail="설정을 저장하는 중 오류가 발생했습니다.")
 

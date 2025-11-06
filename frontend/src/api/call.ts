@@ -67,6 +67,31 @@ export const updateCallSchedule = async (schedule: CallSchedule): Promise<CallSc
   return response.data;
 };
 
+// ==================== 보호자용 어르신 스케줄 관리 ====================
+
+/**
+ * 보호자가 어르신의 자동 통화 스케줄 설정 조회
+ * 
+ * @param elderlyId - 어르신 사용자 ID
+ * @returns 자동 통화 설정
+ */
+export const getElderlyCallSchedule = async (elderlyId: string): Promise<CallSchedule> => {
+  const response = await apiClient.get<CallSchedule>(`/api/users/elderly/${elderlyId}/call-schedule`);
+  return response.data;
+};
+
+/**
+ * 보호자가 어르신의 자동 통화 스케줄 설정 업데이트
+ * 
+ * @param elderlyId - 어르신 사용자 ID
+ * @param schedule - 자동 통화 설정 (is_active, call_time)
+ * @returns 업데이트된 설정
+ */
+export const updateElderlyCallSchedule = async (elderlyId: string, schedule: CallSchedule): Promise<CallSchedule> => {
+  const response = await apiClient.put<CallSchedule>(`/api/users/elderly/${elderlyId}/call-schedule`, schedule);
+  return response.data;
+};
+
 // ==================== 통화 상태 조회 ====================
 
 export interface CallStatus {
