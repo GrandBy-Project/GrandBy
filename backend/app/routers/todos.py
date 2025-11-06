@@ -70,21 +70,25 @@ async def get_todos(
     import logging
     logger = logging.getLogger(__name__)
     
+    effective_shared_only = False
+    if current_user.role == UserRole.CAREGIVER:
+        effective_shared_only = True
+
     logger.info(f"📥 get_todos API 호출:")
     logger.info(f"   - current_user: {current_user.user_id} ({current_user.role})")
     logger.info(f"   - elderly_id 파라미터: {elderly_id}")
     logger.info(f"   - target_elderly_id: {target_elderly_id}")
     logger.info(f"   - date_filter: {date_filter}")
     logger.info(f"   - target_date: {target_date}")
-    logger.info(f"   - shared_only: {shared_only}")
-    logger.info(f"   - 최종 shared_only: {shared_only if current_user.role != UserRole.ELDERLY else False}")
+    logger.info(f"   - 요청 shared_only: {shared_only}")
+    logger.info(f"   - 적용 shared_only: {effective_shared_only}")
     
     todos = TodoService.get_todos_by_date(
         db=db,
         elderly_id=target_elderly_id,
         target_date=target_date,
         status_filter=status,
-        shared_only=shared_only if current_user.role != UserRole.ELDERLY else False
+        shared_only=effective_shared_only
     )
     
     logger.info(f"📤 get_todos API 응답: {len(todos)}개")
@@ -119,13 +123,17 @@ async def get_todos_by_range(
             )
         target_elderly_id = elderly_id
     
+    shared_only = False
+    if current_user.role == UserRole.CAREGIVER:
+        shared_only = True
+    
     todos = TodoService.get_todos_by_date_range(
         db=db,
         elderly_id=target_elderly_id,
         start_date=start_date,
         end_date=end_date,
         status_filter=status,
-        shared_only=False  # 범위 조회는 필터 적용 안 함 (캘린더용)
+        shared_only=shared_only
     )
     
     return todos
@@ -252,6 +260,28 @@ async def get_todo_stats(
     )
     
     return stats
+
+
+@router.get("/{todo_id}", response_model=TodoResponse)
+async def get_todo_by_id(
+    todo_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    TODO 상세 조회
+    
+    - **어르신**: 본인의 TODO만 조회 가능
+    - **보호자**: 공유된 TODO만 조회 가능
+    """
+    todo = TodoService.get_todo_by_id(
+        db=db,
+        todo_id=todo_id,
+        user_id=current_user.user_id,
+        user_role=current_user.role
+    )
+    
+    return todo
 
 
 @router.post("/", response_model=TodoResponse)

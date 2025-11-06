@@ -20,12 +20,24 @@ import { Ionicons } from '@expo/vector-icons';
 import { Calendar } from 'react-native-calendars';
 import { useAuthStore } from '../store/authStore';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { BottomNavigationBar, Header, QuickActionGrid, type QuickAction, CheckIcon, PhoneIcon, DiaryIcon, TimePicker } from '../components';
+import { BottomNavigationBar, Header, QuickActionGrid, type QuickAction, CheckIcon, PhoneIcon, DiaryIcon, TimePicker, CategorySelector } from '../components';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as todoApi from '../api/todo';
 import * as connectionsApi from '../api/connections';
 import * as diaryApi from '../api/diary';
 import { useAlert } from '../components/GlobalAlertProvider';
+import {
+  formatDateForDisplay,
+  formatTimeAmPm,
+  formatTimeToDisplay,
+  parseDisplayTimeToApi,
+} from '../utils/dateUtils';
+import {
+  TODO_CATEGORIES,
+  getCategoryName,
+  getCategoryIcon,
+  getCategoryColor,
+} from '../constants/TodoCategories';
 
 interface ElderlyProfile {
   id: string;
@@ -1372,15 +1384,9 @@ export const GuardianHomeScreen = () => {
       // 백엔드에서 해당 날짜만 조회 (반복 일정 자동 생성 포함)
       const todos = await todoApi.getTodos(dateFilter, elderlyId);
       
-      console.log(`✅ 보호자: TODO 로딩 성공 - ${todos.length}개 (${targetDayTab === 'today' ? '오늘' : '내일'})`);
+      console.log(`✅ 보호자: TODO 목록 불러오기 완료 - ${todos.length}개 (${targetDayTab === 'today' ? '오늘' : '내일'})`);
       console.log('📊 완료된 TODO:', todos.filter(t => t.status === 'completed').length);
-      console.log('📊 TODO 목록:', todos.map(t => ({
-        id: t.todo_id,
-        title: t.title,
-        date: t.due_date,
-        is_recurring: t.is_recurring,
-        is_shared: t.is_shared_with_caregiver
-      })));
+
       
       // 성공 시에만 상태 업데이트 (로딩 중에도 이전 데이터 유지)
       setTodayTodos(todos);
@@ -1494,6 +1500,33 @@ export const GuardianHomeScreen = () => {
       dominantEmotion,
       total,
     };
+  };
+
+  // 통계 데이터 불러오기
+  const loadStatsForElderly = async (
+    elderlyId: string,
+    period: 'month' | 'last_month',
+    skipLoadingState: boolean = false
+  ) => {
+    if (!skipLoadingState) {
+      setIsLoadingStats(true);
+    }
+    try {
+      const stats = await todoApi.getDetailedStats(period, elderlyId);
+      
+      if (period === 'month') {
+        setMonthlyStats(stats);
+      } else {
+        setLastMonthStats(stats);
+      }
+    } catch (error: any) {
+      console.error(`통계 로딩 실패:`, error);
+      show('오류', '통계를 불러오는데 실패했습니다.');
+    } finally {
+      if (!skipLoadingState) {
+        setIsLoadingStats(false);
+      }
+    }
   };
 
   // 하위 호환성을 위한 별칭 함수들 (기존 코드 호환성 유지)
@@ -1646,47 +1679,8 @@ export const GuardianHomeScreen = () => {
     return formatDateWithDay(tomorrow);
   };
 
-  // 카테고리 아이콘 매핑 (Ionicons 사용)
-  const getCategoryIcon = (category: string | null) => {
-    const iconMap: Record<string, any> = {
-      'medicine': 'medical',
-      'MEDICINE': 'medical',
-      'exercise': 'fitness',
-      'EXERCISE': 'fitness',
-      'meal': 'restaurant',
-      'MEAL': 'restaurant',
-      'hospital': 'medical-outline',
-      'HOSPITAL': 'medical-outline',
-      'other': 'list',
-      'OTHER': 'list',
-    };
-    return iconMap[category || 'other'] || 'list';
-  };
-
-  // 카테고리 한국어 이름
-  // 시간 포맷 변환 (HH:MM -> 오전/오후)
-  const formatTime = (timeStr: string): string => {
-    const [hours, minutes] = timeStr.split(':').map(Number);
-    const period = hours < 12 ? '오전' : '오후';
-    const displayHours = hours % 12 || 12;
-    return `${period} ${displayHours}:${minutes.toString().padStart(2, '0')}`;
-  };
-
-  const getCategoryName = (category: string | null): string => {
-    const nameMap: Record<string, string> = {
-      'medicine': '약 복용',
-      'MEDICINE': '약 복용',
-      'exercise': '운동',
-      'EXERCISE': '운동',
-      'meal': '식사',
-      'MEAL': '식사',
-      'hospital': '병원 방문',
-      'HOSPITAL': '병원 방문',
-      'other': '기타',
-      'OTHER': '기타',
-    };
-    return nameMap[category || 'other'] || '기타';
-  };
+  // getCategoryIcon, formatTime, getCategoryName 함수는 공통 유틸리티/상수 사용
+  // formatTime → formatTimeAmPm로 대체
 
   // 건강 알림 생성 (다정한 문구로 변경)
   const generateHealthAlerts = (stats: todoApi.TodoDetailedStats | null) => {
@@ -1789,14 +1783,8 @@ export const GuardianHomeScreen = () => {
     return recommendations;
   };
 
-  // 카테고리 옵션 (GuardianTodoAddScreen과 동일)
-  const categories = [
-    { id: 'MEDICINE', name: '약 복용', icon: 'medical', color: '#FF6B6B' },
-    { id: 'HOSPITAL', name: '병원 방문', icon: 'medical-outline', color: '#4ECDC4' },
-    { id: 'EXERCISE', name: '운동', icon: 'fitness', color: '#45B7D1' },
-    { id: 'MEAL', name: '식사', icon: 'restaurant', color: '#96CEB4' },
-    { id: 'OTHER', name: '기타', icon: 'list', color: '#95A5A6' },
-  ];
+  // 카테고리 옵션 (공통 상수 사용)
+  const categories = TODO_CATEGORIES;
 
   // 시간 옵션
   const timeOptions = [
@@ -1806,24 +1794,7 @@ export const GuardianHomeScreen = () => {
     '오후 9시', '오후 10시'
   ];
 
-  // 시간을 "오전/오후 X시" 형식으로 변환
-  const formatTimeToDisplay = (time24: string | null): string => {
-    if (!time24) return '';
-    const [hour] = time24.split(':').map(Number);
-    if (hour === 0) return '오전 12시';
-    if (hour < 12) return `오전 ${hour}시`;
-    if (hour === 12) return '오후 12시';
-    return `오후 ${hour - 12}시`;
-  };
-
-  // "오전/오후 X시"를 24시간 형식으로 변환
-  const parseDisplayTimeToApi = (displayTime: string): string => {
-    const timeStr = displayTime.replace(/[^0-9]/g, '');
-    const hour = displayTime.includes('오후')
-      ? (parseInt(timeStr) === 12 ? 12 : parseInt(timeStr) + 12)
-      : (parseInt(timeStr) === 12 ? 0 : parseInt(timeStr));
-    return `${hour.toString().padStart(2, '0')}:00`;
-  };
+  // formatTimeToDisplay, parseDisplayTimeToApi 함수는 공통 유틸리티 사용
 
   // 반복 옵션
   const recurringOptions = [
@@ -1832,15 +1803,7 @@ export const GuardianHomeScreen = () => {
     { id: 'monthly', name: '매월' },
   ];
 
-  // 날짜 포맷팅
-  const formatDateForDisplay = (dateString: string) => {
-    const date = new Date(dateString);
-    const month = date.getMonth() + 1;
-    const day = date.getDate();
-    const weekdays = ['일', '월', '화', '수', '목', '금', '토'];
-    const weekday = weekdays[date.getDay()];
-    return `${month}월 ${day}일 (${weekday})`;
-  };
+  // formatDateForDisplay 함수는 공통 유틸리티 사용
 
   // TODO 수정 저장
   const handleSaveEdit = async () => {
@@ -2239,36 +2202,10 @@ export const GuardianHomeScreen = () => {
                     {/* 카테고리 선택 - 그리드 형식 */}
                     <View style={styles.inputSection}>
                       <Text style={styles.inputLabel}>카테고리 *</Text>
-                      <View style={styles.categoryGridInline}>
-                        {categories.map((category) => (
-                          <TouchableOpacity
-                            key={category.id}
-                            style={[
-                              styles.categoryCardInline,
-                              editedTodo.category === category.id && styles.categoryCardInlineSelected,
-                            ]}
-                            onPress={() => setEditedTodo({ ...editedTodo, category: category.id })}
-                            activeOpacity={0.7}
-                          >
-                            <View style={[
-                              styles.categoryCardIconContainerInline,
-                              { backgroundColor: category.color + '15' }
-                            ]}>
-                              <Ionicons 
-                                name={category.icon as any} 
-                                size={28} 
-                                color={category.color} 
-                              />
-                            </View>
-                            <Text style={[
-                              styles.categoryCardTextInline,
-                              editedTodo.category === category.id && styles.categoryCardTextInlineSelected
-                            ]}>
-                              {category.name}
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
-                      </View>
+                      <CategorySelector
+                        selectedCategory={editedTodo.category}
+                        onSelect={(categoryId) => setEditedTodo({ ...editedTodo, category: categoryId })}
+                      />
                     </View>
 
                     {/* 날짜 선택 */}
@@ -2313,6 +2250,18 @@ export const GuardianHomeScreen = () => {
                         />
                       </View>
                     </View>
+
+                    {/* 등록자 정보 */}
+                    {selectedTodo && (
+                      <View style={styles.inputSection}>
+                        <Text style={styles.inputLabel}>등록자</Text>
+                        <Text style={styles.todoDetailValue}>
+                          {selectedTodo.creator_type === 'elderly' ? '어르신이 등록' : 
+                           selectedTodo.creator_type === 'ai' ? 'AI가 추출' : 
+                           '보호자가 등록'}
+                        </Text>
+                      </View>
+                    )}
 
                     {/* 반복 설정 */}
                     <View style={styles.inputSection}>

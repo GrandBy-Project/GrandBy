@@ -15,7 +15,7 @@ import {
   Image,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { Header, BottomNavigationBar, TimePicker } from '../components';
+import { Header, BottomNavigationBar, TimePicker, CategorySelector } from '../components';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Calendar } from 'react-native-calendars';
 import { Ionicons } from '@expo/vector-icons';
@@ -23,6 +23,8 @@ import * as todoApi from '../api/todo';
 import { useAuthStore } from '../store/authStore';
 import { Colors } from '../constants/Colors';
 import { useAlert } from '../components/GlobalAlertProvider';
+import { formatDateForDisplayWithRelative } from '../utils/dateUtils';
+import { TODO_CATEGORIES } from '../constants/TodoCategories';
 
 interface TodoItem {
   id: string;
@@ -151,13 +153,8 @@ export const GuardianTodoAddScreen = () => {
   const [focusedField, setFocusedField] = useState<string | null>(null);
 
   // 카테고리 옵션 (Backend Enum과 일치)
-  const categories = [
-    { id: 'MEDICINE', name: '약 복용', icon: 'medical', color: '#FF6B6B' },
-    { id: 'HOSPITAL', name: '병원 방문', icon: 'medical-outline', color: '#4ECDC4' },
-    { id: 'EXERCISE', name: '운동', icon: 'fitness', color: '#45B7D1' },
-    { id: 'MEAL', name: '식사', icon: 'restaurant', color: '#96CEB4' },
-    { id: 'OTHER', name: '기타', icon: 'list', color: '#95A5A6' },
-  ];
+  // 카테고리 옵션 (공통 상수 사용)
+  const categories = TODO_CATEGORIES;
 
   // 반복 옵션
   const recurringOptions = [
@@ -290,42 +287,8 @@ export const GuardianTodoAddScreen = () => {
     return categories.find(cat => cat.id === id);
   };
 
-  const formatDate = (dateString?: string) => {
-    const date = dateString ? new Date(dateString) : new Date(newTodo.date);
-    const month = date.getMonth() + 1;
-    const day = date.getDate();
-    const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
-    const dayName = dayNames[date.getDay()];
-    return `${month}월 ${day}일 ${dayName}`;
-  };
-
-  const formatDateForDisplay = (dateString: string): string => {
-    const date = new Date(dateString);
-    const today = new Date();
-    const isToday = dateString === today.toISOString().split('T')[0];
-    
-    if (isToday) {
-      return `오늘 ${formatDate(dateString)}`;
-    }
-    
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-    const isYesterday = dateString === yesterday.toISOString().split('T')[0];
-    
-    if (isYesterday) {
-      return `어제 ${formatDate(dateString)}`;
-    }
-    
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const isTomorrow = dateString === tomorrow.toISOString().split('T')[0];
-    
-    if (isTomorrow) {
-      return `내일 ${formatDate(dateString)}`;
-    }
-    
-    return formatDate(dateString);
-  };
+  // formatDate, formatDateForDisplay 함수는 공통 유틸리티 사용
+  // formatDateForDisplay → formatDateForDisplayWithRelative로 대체
 
   return (
     <View style={styles.container}>
@@ -373,34 +336,10 @@ export const GuardianTodoAddScreen = () => {
         <View style={styles.inputSection}>
           <Text style={styles.inputLabel}>카테고리 *</Text>
           <View style={styles.categoryGridInline}>
-            {categories.map((category) => (
-              <TouchableOpacity
-                key={category.id}
-                style={[
-                  styles.categoryCardInline,
-                  newTodo.category === category.id && styles.categoryCardInlineSelected,
-                ]}
-                onPress={() => setNewTodo({ ...newTodo, category: category.id })}
-                activeOpacity={0.7}
-              >
-                <View style={[
-                  styles.categoryCardIconContainerInline,
-                  { backgroundColor: category.color + '15' }
-                ]}>
-                  <Ionicons 
-                    name={category.icon as any} 
-                    size={28} 
-                    color={category.color} 
-                  />
-                </View>
-                <Text style={[
-                  styles.categoryCardTextInline,
-                  newTodo.category === category.id && styles.categoryCardTextInlineSelected
-                ]}>
-                  {category.name}
-                </Text>
-              </TouchableOpacity>
-            ))}
+            <CategorySelector
+              selectedCategory={newTodo.category}
+              onSelect={(categoryId) => setNewTodo({ ...newTodo, category: categoryId })}
+            />
             {/* 장식용 캐릭터 카드 (3x2 그리드를 채우기 위해) */}
             <View style={styles.categoryCardInlineDisabled}>
               <Image 
@@ -423,7 +362,7 @@ export const GuardianTodoAddScreen = () => {
             <View style={styles.dateButtonContent}>
               <Ionicons name="calendar-outline" size={20} color="#34B79F" />
               <Text style={styles.dateButtonText}>
-                {formatDateForDisplay(newTodo.date)}
+                {formatDateForDisplayWithRelative(newTodo.date)}
               </Text>
             </View>
             <Text style={styles.dropdownIcon}>▼</Text>
