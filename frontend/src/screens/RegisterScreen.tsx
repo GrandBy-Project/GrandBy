@@ -34,6 +34,7 @@ import apiClient, { TokenManager } from '../api/client';
 import { TermsModal } from '../components/TermsModal';
 import { useAuthStore } from '../store/authStore';
 import { useAlert } from '../components/GlobalAlertProvider';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export const RegisterScreen = () => {
   const router = useRouter();
@@ -277,9 +278,20 @@ export const RegisterScreen = () => {
       // Zustand 스토어에 사용자 정보 저장
       setUser(response.data.user);
 
-      // 회원가입 완료
-      show('환영합니다!', '회원가입이 완료되었습니다.');
-      router.replace('/home');
+      // 튜토리얼 표시 플래그 저장 (최초 회원가입 시)
+      await AsyncStorage.setItem('showTutorial', 'true');
+      await AsyncStorage.setItem('showAICallTutorial', 'true');
+
+      // 회원가입 완료 - 알림창의 확인 버튼을 누른 후 홈 화면으로 이동
+      show('환영합니다!', '회원가입이 완료되었습니다.', [
+        {
+          text: '확인',
+          onPress: () => {
+            // 확인 버튼을 누른 후 홈 화면으로 이동
+            router.replace('/home');
+          },
+        },
+      ]);
     } catch (error: any) {
       const errorDetail = error.response?.data?.detail || '회원가입에 실패했습니다.';
       
