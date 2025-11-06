@@ -960,6 +960,342 @@ async def privacy_policy():
     return HTMLResponse(content=html_content)
 
 
+@app.get("/account-deletion", response_class=HTMLResponse, tags=["Legal"])
+async def account_deletion():
+    """
+    계정 및 데이터 삭제 안내 페이지 (구글 플레이 콘솔 제출용)
+    
+    URL: https://api.grandby-app.store/account-deletion
+    """
+    html_content = """
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>그랜비 계정 및 데이터 삭제 안내</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Malgun Gothic', sans-serif;
+            line-height: 1.8;
+            color: #333;
+            background-color: #f5f5f5;
+            padding: 20px;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 40px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+            font-size: 28px;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #34495e;
+            margin-top: 30px;
+            margin-bottom: 15px;
+            font-size: 22px;
+            padding-left: 10px;
+            border-left: 4px solid #3498db;
+        }
+        h3 {
+            color: #555;
+            margin-top: 20px;
+            margin-bottom: 10px;
+            font-size: 18px;
+        }
+        p {
+            margin-bottom: 15px;
+            text-align: justify;
+        }
+        ul, ol {
+            margin-left: 30px;
+            margin-bottom: 15px;
+        }
+        li {
+            margin-bottom: 8px;
+        }
+        .app-name {
+            color: #3498db;
+            font-weight: bold;
+            font-size: 24px;
+        }
+        .method-box {
+            background-color: #ecf0f1;
+            padding: 20px;
+            border-radius: 5px;
+            margin: 20px 0;
+            border-left: 4px solid #3498db;
+        }
+        .method-box h3 {
+            margin-top: 0;
+            color: #2c3e50;
+        }
+        .step {
+            background-color: #fff;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+            border: 1px solid #ddd;
+        }
+        .step-number {
+            display: inline-block;
+            background-color: #3498db;
+            color: white;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            text-align: center;
+            line-height: 30px;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        .contact-info {
+            background-color: #ecf0f1;
+            padding: 20px;
+            border-radius: 5px;
+            margin-top: 20px;
+        }
+        .contact-info h3 {
+            margin-top: 0;
+        }
+        .warning-box {
+            background-color: #fff3cd;
+            border: 2px solid #ffc107;
+            padding: 20px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        .warning-box h3 {
+            color: #856404;
+            margin-top: 0;
+        }
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        .data-table th,
+        .data-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        .data-table th {
+            background-color: #3498db;
+            color: white;
+        }
+        .data-table tr:hover {
+            background-color: #f5f5f5;
+        }
+        @media (max-width: 768px) {
+            .container {
+                padding: 20px;
+            }
+            h1 {
+                font-size: 24px;
+            }
+            h2 {
+                font-size: 20px;
+            }
+            .data-table {
+                font-size: 14px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>계정 및 데이터 삭제 안내</h1>
+        <p class="app-name">그랜비 (Grandby)</p>
+        <p>그랜비 앱에서 계정 및 관련 데이터를 삭제하는 방법을 안내합니다.</p>
+        
+        <h2>계정 삭제 방법</h2>
+        <p>그랜비 앱에서 계정을 삭제하는 방법은 다음과 같습니다:</p>
+        
+        <div class="method-box">
+            <h3>📱 방법 1: 앱 내에서 직접 삭제 (권장)</h3>
+            <div class="step">
+                <span class="step-number">1</span>
+                <strong>앱 실행</strong> → 하단 메뉴에서 <strong>"마이페이지"</strong> 탭 선택
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <strong>"계정 삭제"</strong> 또는 <strong>"회원 탈퇴"</strong> 메뉴 선택
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <strong>비밀번호 확인</strong> (이메일 로그인 사용자의 경우)
+            </div>
+            <div class="step">
+                <span class="step-number">4</span>
+                <strong>삭제 확인</strong> → 계정 삭제 완료
+            </div>
+        </div>
+        
+        <div class="method-box">
+            <h3>📧 방법 2: 이메일로 삭제 요청</h3>
+            <p>앱 접근이 어려운 경우, 아래 이메일로 계정 삭제를 요청하실 수 있습니다.</p>
+            <div class="step">
+                <span class="step-number">1</span>
+                <strong>이메일 작성</strong><br>
+                받는 사람: <strong>privacy@grandby.kr</strong><br>
+                제목: <strong>[계정 삭제 요청]</strong>
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <strong>본인 확인 정보 포함</strong><br>
+                - 가입 시 사용한 이메일 주소<br>
+                - 가입 시 사용한 전화번호 (선택사항)<br>
+                - 계정 삭제 사유 (선택사항)
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <strong>이메일 발송</strong> → 영업일 기준 7일 이내 처리
+            </div>
+        </div>
+        
+        <div class="warning-box">
+            <h3>⚠️ 계정 삭제 시 주의사항</h3>
+            <ul>
+                <li><strong>복구 불가:</strong> 계정 삭제 후 30일 이내에 다시 로그인하시면 계정을 복구할 수 있습니다. 30일이 지나면 모든 데이터가 영구적으로 삭제되며 복구가 불가능합니다.</li>
+                <li><strong>연결 해제:</strong> 보호자-어르신 연결 관계가 자동으로 해제됩니다.</li>
+                <li><strong>서비스 이용 불가:</strong> 계정 삭제 후 앱의 모든 기능을 이용하실 수 없습니다.</li>
+            </ul>
+        </div>
+        
+        <h2>삭제되는 데이터</h2>
+        <p>계정 삭제 시 다음 데이터가 삭제됩니다:</p>
+        
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>데이터 유형</th>
+                    <th>삭제 시점</th>
+                    <th>비고</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>계정 정보</strong><br>(이메일, 이름, 전화번호, 생년월일, 성별)</td>
+                    <td>즉시 삭제</td>
+                    <td>익명화 처리</td>
+                </tr>
+                <tr>
+                    <td><strong>프로필 이미지</strong></td>
+                    <td>즉시 삭제</td>
+                    <td>서버에서 완전 삭제</td>
+                </tr>
+                <tr>
+                    <td><strong>다이어리</strong><br>(일기 내용, 사진)</td>
+                    <td>즉시 삭제</td>
+                    <td>복구 불가</td>
+                </tr>
+                <tr>
+                    <td><strong>할 일 (TODO)</strong></td>
+                    <td>즉시 삭제</td>
+                    <td>복구 불가</td>
+                </tr>
+                <tr>
+                    <td><strong>AI 통화 기록</strong><br>(통화 내용, 녹음 파일)</td>
+                    <td>즉시 삭제</td>
+                    <td>복구 불가</td>
+                </tr>
+                <tr>
+                    <td><strong>알림 설정</strong></td>
+                    <td>즉시 삭제</td>
+                    <td>-</td>
+                </tr>
+                <tr>
+                    <td><strong>보호자-어르신 연결 정보</strong></td>
+                    <td>즉시 삭제</td>
+                    <td>연결 관계 해제</td>
+                </tr>
+            </tbody>
+        </table>
+        
+        <h2>보관되는 데이터</h2>
+        <p>법령에 따라 다음 데이터는 일정 기간 보관 후 삭제됩니다:</p>
+        
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>데이터 유형</th>
+                    <th>보관 기간</th>
+                    <th>법적 근거</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>서비스 이용 기록</strong><br>(접속 로그, IP 주소)</td>
+                    <td>3개월</td>
+                    <td>통신비밀보호법</td>
+                </tr>
+                <tr>
+                    <td><strong>계약 또는 청약철회 등에 관한 기록</strong></td>
+                    <td>5년</td>
+                    <td>전자상거래법</td>
+                </tr>
+                <tr>
+                    <td><strong>대금결제 및 재화의 공급에 관한 기록</strong></td>
+                    <td>5년</td>
+                    <td>전자상거래법</td>
+                </tr>
+                <tr>
+                    <td><strong>소비자 불만 또는 분쟁 처리에 관한 기록</strong></td>
+                    <td>3년</td>
+                    <td>전자상거래법</td>
+                </tr>
+            </tbody>
+        </table>
+        
+        <h2>데이터 삭제 처리 기간</h2>
+        <ul>
+            <li><strong>앱 내 삭제:</strong> 즉시 처리 (30일 유예 기간 후 완전 삭제)</li>
+            <li><strong>이메일 요청:</strong> 영업일 기준 최대 7일 이내 처리</li>
+            <li><strong>법령에 따른 보관 데이터:</strong> 보관 기간 경과 후 자동 삭제</li>
+        </ul>
+        
+        <h2>문의처</h2>
+        <div class="contact-info">
+            <h3>개인정보 보호책임자</h3>
+            <p><strong>이메일:</strong> privacy@grandby.kr</p>
+            <p><strong>전화번호:</strong> 02-1234-5678</p>
+            <p><strong>처리 시간:</strong> 평일 09:00 ~ 18:00 (주말 및 공휴일 제외)</p>
+        </div>
+        
+        <div class="warning-box" style="margin-top: 30px;">
+            <h3>📌 중요 안내</h3>
+            <p>계정 삭제 전에 다음 사항을 확인해주세요:</p>
+            <ul>
+                <li>보관하고 싶은 다이어리나 할 일이 있다면 미리 백업하세요.</li>
+                <li>연결된 보호자 또는 어르신에게 계정 삭제 사실을 알려주세요.</li>
+                <li>30일 이내에 다시 로그인하시면 계정을 복구할 수 있습니다.</li>
+            </ul>
+        </div>
+        
+        <p style="margin-top: 30px; color: #7f8c8d; font-size: 14px; text-align: right;">
+            최종 수정일: 2024년 1월 1일
+        </p>
+    </div>
+</body>
+</html>
+    """
+    return HTMLResponse(content=html_content)
+
+
 # ==================== Static Files (이미지 업로드) ====================
 # 업로드 디렉토리 생성
 upload_dir = Path(settings.UPLOAD_DIR)
