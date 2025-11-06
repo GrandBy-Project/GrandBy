@@ -1168,7 +1168,7 @@ export const GuardianHomeScreen = () => {
                   key={diary.diary_id}
                   style={styles.commCard}
                   activeOpacity={0.7}
-                  onPress={() => router.push(`/diary-detail?id=${diary.diary_id}`)}
+                  onPress={() => router.push(`/diary-detail?diaryId=${diary.diary_id}`)}
                 >
                   <View style={styles.commCardHeader}>
                     <View style={styles.commCardTitleContainer}>
