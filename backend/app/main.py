@@ -28,6 +28,7 @@ from app.routers import auth, users, calls, diaries, todos, notifications, dashb
 from app.config import settings, is_development
 from app.database import test_db_connection, get_db
 from app.services.ai_call.llm_service import LLMService
+from app.services.ai_call.session_store import get_session_store
 from app.services.ai_call.twilio_service import TwilioService
 from app.services.ai_call.rtzr_stt_realtime import RTZRRealtimeSTT, LLMPartialCollector
 from app.services.ai_call.naver_clova_tts_service import naver_clova_tts_service
@@ -43,6 +44,7 @@ logger = logging.getLogger(__name__)
 
 # OpenAI 클라이언트 및 서비스 초기화
 llm_service = LLMService()
+session_store = get_session_store()
 
 # WebSocket 연결 및 대화 세션 관리
 active_connections: Dict[str, WebSocket] = {}
@@ -175,7 +177,7 @@ async def save_conversation_to_db(call_sid: str, conversation: list):
         conversation: 대화 내용 리스트 [{"role": "user", "content": "..."}, ...]
     """
     # 이미 저장되었으면 스킵 (중복 방지)
-    if call_sid in saved_calls:
+    if session_store.is_saved(call_sid):
         logger.info(f"⏭️  이미 저장된 통화: {call_sid}")
         return
     
@@ -223,7 +225,7 @@ async def save_conversation_to_db(call_sid: str, conversation: list):
         logger.info(f"✅ 대화 내용 {len(conversation)}개 저장 완료")
         
         # 저장 성공 플래그 설정
-        saved_calls.add(call_sid)
+        session_store.mark_saved(call_sid)
         
         db.close()
         
@@ -1517,6 +1519,7 @@ async def media_stream_handler(
     rtzr_stt = None  # RTZR 실시간 STT
     llm_collector = None  # LLM 부분 결과 수집기
     elderly_id = None  # 통화 대상 어르신 ID
+    log_prefix = ""
     
     try:
         async for message in websocket.iter_text():
@@ -1531,6 +1534,10 @@ async def media_stream_handler(
                 # customParameters에서 elderly_id 추출 (Twilio 통화 시작 시 전달)
                 custom_params = data['start'].get('customParameters', {})
                 elderly_id = custom_params.get('elderly_id', 'unknown')
+                log_prefix = f"[call={call_sid} stream={stream_sid} elderly={elderly_id}]"
+                
+                def lp(msg: str):
+                    logger.info(f"{log_prefix} {msg}")
                 
                 active_connections[call_sid] = websocket
                 
@@ -1552,7 +1559,7 @@ async def media_stream_handler(
                 # 성능 메트릭 수집기 초기화
                 metrics_collector = PerformanceMetricsCollector(call_sid)
                 performance_collectors[call_sid] = metrics_collector
-                logger.info(f"📊 성능 메트릭 수집 시작: {call_sid}")
+                lp("📊 성능 메트릭 수집 시작")
                 
                 # DB에 통화 시작 기록 저장 (status: initiated만)
                 try:
@@ -1572,24 +1579,24 @@ async def media_stream_handler(
                         db.add(call_log)
                         db.commit()
                         db.refresh(call_log)
-                        logger.info(f"✅ DB에 통화 시작 기록 저장: {call_sid}")
+                        lp("✅ DB에 통화 시작 기록 저장")
                     else:
-                        logger.info(f"⏭️  이미 존재하는 통화 기록: {call_sid}")
+                        lp("⏭️  이미 존재하는 통화 기록")
                     
                     db.close()
                 except Exception as e:
                     logger.error(f"❌ 통화 시작 기록 저장 실패: {e}")
                 
                 logger.info(f"┌{'─'*58}┐")
-                logger.info(f"│ 🎙️  Twilio 통화 시작 (RTZR STT)                     │")
-                logger.info(f"│ Call SID: {call_sid:43} │")
-                logger.info(f"│ Stream SID: {stream_sid:41} │")
-                logger.info(f"│ Elderly ID: {elderly_id:41} │")
+                lp("│ 🎙️  Twilio 통화 시작 (RTZR STT)                     │")
+                lp(f"│ Call SID: {call_sid:43} │")
+                lp(f"│ Stream SID: {stream_sid:41} │")
+                lp(f"│ Elderly ID: {elderly_id:41} │")
                 logger.info(f"└{'─'*58}┘")
                 
                 # 🚀 개선: 시간대별 환영 메시지 랜덤 선택
                 welcome_text = get_time_based_welcome_message()
-                logger.info(f"💬 환영 메시지: {welcome_text}")
+                lp(f"💬 환영 메시지: {welcome_text}")
 
                 try:
                     # 에코 방지
@@ -1618,7 +1625,7 @@ async def media_stream_handler(
                         rtzr_stt.stop_bot_speaking()
                 
                 # ========== RTZR 스트리밍 시작 ==========
-                logger.info("🎤 RTZR 실시간 STT 스트리밍 시작")
+                lp("🎤 RTZR 실시간 STT 스트리밍 시작")
                 
                 # STT 응답 속도 측정 변수
                 last_partial_time = None
@@ -1666,12 +1673,8 @@ async def media_stream_handler(
                                 # 종료 안내 멘트
                                 warning_message = "오늘 대화 시간이 다 되었어요. 잠시 후 통화가 마무리됩니다."
                                 
-                                # 대화 세션에 추가
-                                if call_sid in conversation_sessions:
-                                    conversation_sessions[call_sid].append({
-                                        "role": "assistant",
-                                        "content": warning_message
-                                    })
+                                # 대화 세션에 추가 (스토어)
+                                session_store.append_message(call_sid, "assistant", warning_message)
                                 
                                 logger.info(f"🔊 [TTS] 종료 안내 메시지 전송: {warning_message}")
                                 
@@ -1697,7 +1700,7 @@ async def media_stream_handler(
                                     
                                     # 종료 안내 후 1초 추가 대기 (사용자가 인지할 시간)
                                     await asyncio.sleep(1.0)
-                                    logger.info("⏳ [MAX TIME WARNING] 종료 안내 후 대기 완료, 통화 종료 진행")
+                                    logger.info(f"{log_prefix} ⏳ [MAX TIME WARNING] 종료 안내 후 대기 완료, 통화 종료 진행")
                                 else:
                                     logger.error("❌ [MAX TIME WARNING] TTS 변환 실패")
                                     await asyncio.sleep(1.0)
@@ -1705,7 +1708,7 @@ async def media_stream_handler(
                                 # 종료 안내 후 즉시 통화 종료
                                 try:
                                     await websocket.close()
-                                    logger.info("✅ [MAX TIME WARNING] 통화 종료 완료")
+                                    logger.info(f"{log_prefix} ✅ [MAX TIME WARNING] 통화 종료 완료")
                                 except Exception as e:
                                     logger.error(f"❌ [MAX TIME WARNING] 통화 종료 오류: {e}")
                                 break
@@ -1768,13 +1771,10 @@ async def media_stream_handler(
                                 if '그랜비 통화를 종료합니다' in text:
                                     logger.info(f"🛑 종료 키워드 감지")
                                     
-                                    # 대화 세션에 사용자 메시지 추가
-                                    if call_sid not in conversation_sessions:
-                                        conversation_sessions[call_sid] = []
-                                    conversation_sessions[call_sid].append({"role": "user", "content": text})
-                                    
+                                    # 대화 세션에 사용자/AI 메시지 추가 (스토어)
+                                    session_store.append_message(call_sid, "user", text)
                                     goodbye_text = "그랜비 통화를 종료합니다. 감사합니다. 좋은 하루 보내세요!"
-                                    conversation_sessions[call_sid].append({"role": "assistant", "content": goodbye_text})
+                                    session_store.append_message(call_sid, "assistant", goodbye_text)
                                     
                                     logger.info("🔊 [TTS] 종료 메시지 전송")
                                     await asyncio.sleep(2)
@@ -1805,11 +1805,9 @@ async def media_stream_handler(
                                     metrics_collector.record_stt_final(turn_index, stt_complete_time)
                                 
                                 # 대화 세션에 사용자 메시지 추가
-                                if call_sid not in conversation_sessions:
-                                    conversation_sessions[call_sid] = []
-                                conversation_sessions[call_sid].append({"role": "user", "content": text})
+                                session_store.append_message(call_sid, "user", text)
                                 
-                                conversation_history = conversation_sessions[call_sid]
+                                conversation_history = session_store.get_conversation(call_sid)
                                 
                                 # LLM 전달까지의 시간 측정
                                 llm_delivery_start = time.time()
@@ -1855,13 +1853,7 @@ async def media_stream_handler(
                                 # AI 응답을 대화 세션에 추가 (안전하게)
                                 try:
                                     if ai_response and ai_response.strip():
-                                        # conversation_sessions에 여전히 존재하는지 확인
-                                        if call_sid in conversation_sessions:
-                                            conversation_sessions[call_sid].append({"role": "assistant", "content": ai_response})
-                                        
-                                        # 대화 히스토리 관리
-                                        if call_sid in conversation_sessions and len(conversation_sessions[call_sid]) > 20:
-                                            conversation_sessions[call_sid] = conversation_sessions[call_sid][-20:]
+                                        session_store.append_message(call_sid, "assistant", ai_response)
                                     
                                     total_cycle_time = time.time() - turn_start_time
                                     logger.info(f"⏱️  전체 응답 사이클: {total_cycle_time:.2f}초")
@@ -1931,20 +1923,27 @@ async def media_stream_handler(
                     logger.info(f"📊 성능 메트릭 최종 저장 완료: {metrics_file}")
                     del performance_collectors[call_sid]
                 
-                # ✅ 대화 세션을 DB에 저장 (함수 호출)
-                if call_sid in conversation_sessions:
-                    conversation = conversation_sessions[call_sid]
-                    
-                    # 대화 내용 출력
-                    if conversation:
-                        logger.info(f"\n📋 전체 대화 내용:")
-                        logger.info(f"─" * 60)
-                        for msg in conversation:
-                            role = "👤 사용자" if msg['role'] == 'user' else "🤖 AI"
-                            logger.info(f"{role}: {msg['content']}")
-                        logger.info(f"─" * 60)
-                    
-                    await save_conversation_to_db(call_sid, conversation)
+                # ✅ 멱등/락: 통화 종료 처리 (DB 저장 + 세션 정리)
+                if session_store.acquire_finalize_lock(call_sid):
+                    try:
+                        if not session_store.is_finalized(call_sid):
+                            conversation = session_store.get_conversation(call_sid)
+
+                            # 대화 내용 출력
+                            if conversation:
+                                logger.info(f"\n📋 전체 대화 내용:")
+                                logger.info(f"─" * 60)
+                                for msg in conversation:
+                                    role = "👤 사용자" if msg['role'] == 'user' else "🤖 AI"
+                                    logger.info(f"{role}: {msg['content']}")
+                                logger.info(f"─" * 60)
+
+                            await save_conversation_to_db(call_sid, conversation)
+                            session_store.mark_finalized(call_sid)
+                        # 항상 세션 정리 시도 (멱등)
+                        session_store.clear_session(call_sid)
+                    finally:
+                        session_store.release_finalize_lock(call_sid)
                 
                 logger.info(f"┌{'─'*58}┐")
                 logger.info(f"│ ✅ Twilio 통화 정리 완료                               │")
@@ -1956,15 +1955,20 @@ async def media_stream_handler(
         import traceback
         logger.error(traceback.format_exc())
     finally:
-        # ✅ 연결 종료 시 항상 DB 저장 (핵심!)
-        # 사용자가 직접 전화를 끊어도 대화 내용 보존
-        if call_sid and call_sid in conversation_sessions:
-            try:
-                conversation = conversation_sessions[call_sid]
-                await save_conversation_to_db(call_sid, conversation)
-                logger.info(f"🔄 Finally 블록에서 DB 저장 완료: {call_sid}")
-            except Exception as e:
-                logger.error(f"❌ Finally 블록 DB 저장 실패: {e}")
+        # ✅ 연결 종료 시 멱등/락으로 최종 처리 보장
+        if call_sid:
+            if session_store.acquire_finalize_lock(call_sid):
+                try:
+                    if not session_store.is_finalized(call_sid):
+                        conversation = session_store.get_conversation(call_sid)
+                        await save_conversation_to_db(call_sid, conversation)
+                        session_store.mark_finalized(call_sid)
+                        logger.info(f"🔄 Finally 블록에서 최종 저장 완료: {call_sid}")
+                    session_store.clear_session(call_sid)
+                except Exception as e:
+                    logger.error(f"❌ Finally 블록 최종 처리 실패: {e}")
+                finally:
+                    session_store.release_finalize_lock(call_sid)
         
         # 정리 작업 (메모리에서 제거)
         if call_sid and call_sid in active_connections:
@@ -1972,8 +1976,8 @@ async def media_stream_handler(
         if call_sid and call_sid in active_tts_completions:
             del active_tts_completions[call_sid]
             logger.debug(f"🗑️ TTS 추적 정보 삭제: {call_sid}")
-        if call_sid and call_sid in conversation_sessions:
-            del conversation_sessions[call_sid]
+        if call_sid:
+            session_store.clear_session(call_sid)
         if call_sid and call_sid in performance_collectors:
             # 최종 저장 (예외 발생 시에도)
             try:
@@ -1996,7 +2000,8 @@ async def call_status_handler(
     Twilio 통화 상태 업데이트 콜백
     통화 상태: initiated, ringing, answered, completed, no-answer, busy, failed, canceled
     """
-    logger.info(f"📞 통화 상태 업데이트 콜백 수신: CallSid={CallSid}, CallStatus={CallStatus}")
+    log_prefix = f"[call={CallSid}]"
+    logger.info(f"{log_prefix} 📞 통화 상태 업데이트 콜백 수신: CallStatus={CallStatus}")
     
     # 통화 상태에 따른 DB 업데이트
     try:
@@ -2010,23 +2015,23 @@ async def call_status_handler(
             db.close()
             return {"status": "ok", "call_sid": CallSid, "call_status": CallStatus}
         
-        logger.info(f"📋 CallLog 찾음: {CallSid} (현재 상태: {call_log.call_status}, 새 상태: {CallStatus})")
+        logger.info(f"{log_prefix} 📋 CallLog 찾음: 현재 상태={call_log.call_status}, 새 상태={CallStatus}")
         
         # 통화 상태에 따른 처리
         if CallStatus == 'answered':
             # 통화 연결 시 시작 시간 설정
-            logger.info(f"📞 [answered 상태 처리] 통화 연결됨: {CallSid}")
+            logger.info(f"{log_prefix} 📞 [answered 상태 처리] 통화 연결됨")
             if not call_log.call_start_time:
                 call_log.call_start_time = datetime.utcnow()
                 call_log.call_status = CallStatusEnum.ANSWERED
                 db.commit()
-                logger.info(f"✅ 통화 시작 시간 설정: {CallSid} (상태: ANSWERED로 변경)")
+                logger.info(f"{log_prefix} ✅ 통화 시작 시간 설정 (상태: ANSWERED로 변경)")
             else:
                 logger.info(f"ℹ️ 통화 시작 시간이 이미 설정되어 있음: {CallSid}")
         
         elif CallStatus == 'completed':
             # 통화 종료 시 종료 시간 설정
-            logger.info(f"✅ [completed 상태 처리] 통화 종료됨: {CallSid}")
+            logger.info(f"{log_prefix} ✅ [completed 상태 처리] 통화 종료됨")
             call_log.call_end_time = datetime.utcnow()
             call_log.call_status = CallStatusEnum.COMPLETED
             
@@ -2034,25 +2039,30 @@ async def call_status_handler(
             if call_log.call_start_time:
                 duration = (call_log.call_end_time - call_log.call_start_time).total_seconds()
                 call_log.call_duration = int(duration)
-                logger.info(f"✅ 통화 종료 시간 설정: {CallSid}, 지속시간: {duration}초 (상태: COMPLETED로 변경)")
+                logger.info(f"{log_prefix} ✅ 통화 종료 시간 설정, 지속시간: {duration}초 (상태: COMPLETED)")
             
             db.commit()
             
-            # ✅ 통화 종료 시 DB 저장 (백업용 - 중복 방지 로직 포함)
-            if CallSid in conversation_sessions:
+            # ✅ 통화 종료 시 멱등/락으로 한 번만 처리
+            if session_store.acquire_finalize_lock(CallSid):
                 try:
-                    conversation = conversation_sessions[CallSid]
-                    await save_conversation_to_db(CallSid, conversation)
-                    logger.info(f"💾 콜백에서 통화 기록 저장 완료: {CallSid}")
+                    if not session_store.is_finalized(CallSid):
+                        conversation = session_store.get_conversation(CallSid)
+                        await save_conversation_to_db(CallSid, conversation)
+                        session_store.mark_finalized(CallSid)
+                    logger.info(f"{log_prefix} 💾 콜백에서 통화 기록 저장 완료")
+                    session_store.clear_session(CallSid)
                 except Exception as e:
-                    logger.error(f"❌ 콜백 DB 저장 실패: {e}")
+                    logger.error(f"❌ 콜백 최종 처리 실패: {e}")
+                finally:
+                    session_store.release_finalize_lock(CallSid)
             
             # 세션 정리
             session_cleaned = False
-            if CallSid in conversation_sessions:
-                del conversation_sessions[CallSid]
-                session_cleaned = True
-                logger.info(f"🧹 conversation_sessions에서 제거: {CallSid}")
+            # 세션 스토어 정리
+            session_store.clear_session(CallSid)
+            session_cleaned = True
+            logger.info(f"{log_prefix} 🧹 세션 스토어에서 제거")
             if CallSid in active_connections:
                 del active_connections[CallSid]
                 session_cleaned = True
@@ -2060,7 +2070,7 @@ async def call_status_handler(
             
             if not session_cleaned:
                 logger.info(f"ℹ️ 세션 정리 불필요 (세션에 없음): {CallSid}")
-            logger.info(f"✅ [completed 상태 처리 종료] 모든 처리가 완료되었습니다: {CallSid}")
+            logger.info(f"{log_prefix} ✅ [completed 상태 처리 종료] 모든 처리 완료")
         
         # ✅ 통화 거절/부재중/실패 처리 추가
         elif CallStatus in ['busy', 'canceled', 'failed', 'no-answer']:
@@ -2078,14 +2088,13 @@ async def call_status_handler(
             call_log.call_status = db_status
             call_log.call_end_time = datetime.utcnow()
             db.commit()
-            logger.info(f"✅ [거절/실패 처리 완료] 통화 처리 완료: {CallSid} (상태: {status_name}로 변경)")
+            logger.info(f"{log_prefix} ✅ [거절/실패 처리 완료] 통화 처리 완료 (상태: {status_name}로 변경)")
             
             # 세션 정리
             session_cleaned = False
-            if CallSid in conversation_sessions:
-                del conversation_sessions[CallSid]
-                session_cleaned = True
-                logger.info(f"🧹 conversation_sessions에서 제거: {CallSid}")
+            session_store.clear_session(CallSid)
+            session_cleaned = True
+            logger.info(f"{log_prefix} 🧹 세션 스토어에서 제거")
             if CallSid in active_connections:
                 del active_connections[CallSid]
                 session_cleaned = True
@@ -2093,10 +2102,10 @@ async def call_status_handler(
             
             if not session_cleaned:
                 logger.info(f"ℹ️ 세션 정리 불필요 (세션에 없음): {CallSid}")
-            logger.info(f"✅ [거절/실패 처리 종료] 모든 처리가 완료되었습니다: {CallSid} (상태: {CallStatus})")
+            logger.info(f"{log_prefix} ✅ [거절/실패 처리 종료] 모든 처리 완료 (상태: {CallStatus})")
         
         db.close()
-        logger.info(f"📞 통화 상태 업데이트 콜백 처리 완료: {CallSid} - {CallStatus}")
+        logger.info(f"{log_prefix} 📞 통화 상태 업데이트 콜백 처리 완료: {CallStatus}")
         
     except Exception as e:
         logger.error(f"❌ 통화 상태 업데이트 실패: {CallSid} - {CallStatus}, 오류: {e}")
