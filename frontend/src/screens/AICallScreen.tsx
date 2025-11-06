@@ -20,7 +20,8 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { makeRealtimeAICall, getCallSchedule, updateCallSchedule, CallSchedule, getCallStatus } from '../api/call';
 import { useAuthStore } from '../store/authStore';
-import { BottomNavigationBar, TimePicker, Header } from '../components';
+import { BottomNavigationBar, TimePicker, Header, TutorialModal } from '../components';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // 통화 상태 타입
 type CallStatus = 'idle' | 'calling' | 'in_progress' | 'completed' | 'error';
@@ -47,6 +48,42 @@ export const AICallScreen = () => {
   // 애니메이션 관련
   const animatedHeight = useRef(new Animated.Value(0)).current;
   const [timePickerContainerHeight, setTimePickerContainerHeight] = useState(0);
+  
+  // 튜토리얼 관련 state
+  const [showAICallTutorial, setShowAICallTutorial] = useState(false);
+  
+  // 튜토리얼 체크 함수
+  const checkAICallTutorial = async () => {
+    try {
+      const shouldShow = await AsyncStorage.getItem('showAICallTutorial');
+      
+      // 기존 사용자 처리: 값이 없거나 'true'가 아니면 'false'로 설정
+      if (shouldShow === null || shouldShow !== 'true') {
+        await AsyncStorage.setItem('showAICallTutorial', 'false');
+        return;
+      }
+      
+      // 신규 회원가입 사용자만 튜토리얼 표시
+      if (shouldShow === 'true') {
+        // 약간의 지연 후 튜토리얼 표시 (화면 렌더링 완료 후)
+        setTimeout(() => {
+          setShowAICallTutorial(true);
+        }, 500);
+      }
+    } catch (error) {
+      console.error('AI 통화 튜토리얼 체크 실패:', error);
+    }
+  };
+
+  // 튜토리얼 완료 처리
+  const handleAICallTutorialComplete = async () => {
+    try {
+      await AsyncStorage.setItem('showAICallTutorial', 'false');
+      setShowAICallTutorial(false);
+    } catch (error) {
+      console.error('AI 통화 튜토리얼 플래그 저장 실패:', error);
+    }
+  };
   
   /**
    * 자동 통화 스케줄 설정 로드
@@ -81,6 +118,13 @@ export const AICallScreen = () => {
   useEffect(() => {
     loadCallSchedule();
   }, [loadCallSchedule]);
+  
+  /**
+   * 튜토리얼 체크 (최초 마운트 시 한 번만)
+   */
+  useEffect(() => {
+    checkAICallTutorial();
+  }, []);
   
   /**
    * 통화 상태 폴링 훅
@@ -598,6 +642,14 @@ export const AICallScreen = () => {
       
       {/* 하단 네비게이션 바 */}
       <BottomNavigationBar />
+      
+      {/* AI 통화 튜토리얼 모달 */}
+      <TutorialModal
+        type="ai-call"
+        visible={showAICallTutorial}
+        onClose={() => setShowAICallTutorial(false)}
+        onComplete={handleAICallTutorialComplete}
+      />
     </View>
   );
 };
