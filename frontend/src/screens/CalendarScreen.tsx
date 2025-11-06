@@ -106,6 +106,8 @@ export const CalendarScreen = () => {
   const [connectedElderly, setConnectedElderly] = useState<any[]>([]);
   const [selectedElderlyId, setSelectedElderlyId] = useState<string | null>(null);
   
+  // 어르신용: 연결된 보호자 목록
+  const [connectedCaregivers, setConnectedCaregivers] = useState<any[]>([]);
 
   // 필터링된 일정 가져오기
   const getFilteredSchedules = (schedules: TodoItem[]) => {
@@ -253,6 +255,23 @@ export const CalendarScreen = () => {
     }
   };
 
+  /**
+   * 연결된 보호자 목록 로드 (어르신용)
+   */
+  const loadConnectedCaregivers = async () => {
+    try {
+      const connections = await connectionsApi.getConnections();
+      // 연결된 보호자 정보 추출 (active 상태만)
+      const caregivers = connections.active.map(conn => ({
+        user_id: conn.user_id,
+        name: conn.name,
+      }));
+      setConnectedCaregivers(caregivers);
+    } catch (error) {
+      console.error('연결된 보호자 로드 실패:', error);
+    }
+  };
+
   // 날짜 범위별 일정 조회
   const loadSchedules = async (baseDate?: Date) => {
     if (!user) {
@@ -381,10 +400,12 @@ export const CalendarScreen = () => {
     }
   };
 
-  // 화면 마운트 시 연결된 어르신 로드 (보호자용)
+  // 화면 마운트 시 연결된 사용자 목록 로드
   useEffect(() => {
     if (user?.role === 'caregiver') {
       loadConnectedElderly();
+    } else if (user?.role === 'elderly') {
+      loadConnectedCaregivers();
     }
   }, [user]);
 
@@ -512,6 +533,35 @@ export const CalendarScreen = () => {
   };
 
   /**
+   * 작성자 이름 가져오기
+   */
+  const getAuthorName = (diary: Diary): string => {
+    // 현재 사용자가 작성자인 경우
+    if (diary.author_id === user?.user_id) {
+      return user.name;
+    }
+    
+    // 보호자인 경우: 연결된 어르신 중에서 작성자를 찾기
+    if (user?.role === 'caregiver') {
+      const author = connectedElderly.find(elderly => elderly.user_id === diary.author_id);
+      if (author) {
+        return author.name;
+      }
+    }
+    
+    // 어르신인 경우: 연결된 보호자 중에서 작성자를 찾기
+    if (user?.role === 'elderly') {
+      const author = connectedCaregivers.find(caregiver => caregiver.user_id === diary.author_id);
+      if (author) {
+        return author.name;
+      }
+    }
+    
+    // 찾을 수 없는 경우 빈 문자열 반환
+    return '';
+  };
+
+  /**
    * 작성자 배지 정보 가져오기
    */
   const getAuthorBadgeInfo = (diary: Diary) => {
@@ -525,11 +575,13 @@ export const CalendarScreen = () => {
       };
     }
     
+    const authorName = getAuthorName(diary);
+    
     if (diary.author_type === 'caregiver') {
       return {
         icon: 'medical' as const,
         iconFamily: 'Ionicons' as const,
-        text: '보호자 작성',
+        text: authorName ? `${authorName}님 작성` : '보호자 작성',
         color: '#2196F3',
         bgColor: '#E3F2FD',
       };
@@ -539,7 +591,7 @@ export const CalendarScreen = () => {
       return {
         icon: 'pencil' as const,
         iconFamily: 'Ionicons' as const,
-        text: '어르신 작성',
+        text: authorName ? `${authorName}님 작성` : '어르신 작성',
         color: '#4CAF50',
         bgColor: '#E8F5E9',
       };
