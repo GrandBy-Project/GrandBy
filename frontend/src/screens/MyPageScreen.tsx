@@ -31,6 +31,7 @@ import { useFontSizeStore } from '../store/fontSizeStore';
 import { useResponsive, getResponsiveFontSize, getResponsivePadding, getResponsiveSize } from '../hooks/useResponsive';
 import { getConnections, deleteConnection, ConnectionWithUserInfo } from '../api/connections';
 import { Colors } from '../constants/Colors';
+import { formatPhoneNumber } from '../utils/validation';
 
 export const MyPageScreen = () => {
   const router = useRouter();
@@ -816,7 +817,7 @@ export const MyPageScreen = () => {
     {
       id: 'phone',
       label: '전화번호',
-      value: user?.phone_number || '전화번호 없음',
+      value: user?.phone_number ? formatPhoneNumber(user.phone_number) : '전화번호 없음',
       iconName: 'call-outline' as const,
       iconLibrary: 'Ionicons' as const,
     },
@@ -1107,7 +1108,7 @@ export const MyPageScreen = () => {
                         )}
                         {caregiver.phone_number && (
                           <Text style={[styles.settingDescription, { fontSize: settingDescriptionFontSize }]} numberOfLines={1}>
-                            {caregiver.phone_number}
+                            {formatPhoneNumber(caregiver.phone_number)}
                           </Text>
                         )}
                       </View>
@@ -1185,7 +1186,7 @@ export const MyPageScreen = () => {
                         )}
                         {elderly.phone_number && (
                           <Text style={[styles.settingDescription, { fontSize: settingDescriptionFontSize }]} numberOfLines={1}>
-                            {elderly.phone_number}
+                            {formatPhoneNumber(elderly.phone_number)}
                           </Text>
                         )}
                       </View>

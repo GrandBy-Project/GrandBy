@@ -20,8 +20,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { getElderlyCallSchedule, updateElderlyCallSchedule, CallSchedule } from '../api/call';
 import { getConnectedElderly } from '../api/connections';
 import { useAuthStore } from '../store/authStore';
+import { useSelectedElderlyStore } from '../store/selectedElderlyStore';
 import { BottomNavigationBar, TimePicker, Header } from '../components';
 import { useAlert } from '../components/GlobalAlertProvider';
+import { formatPhoneNumber } from '../utils/validation';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -35,11 +37,11 @@ interface ElderlyUser {
 export const GuardianAICallScreen = () => {
   const router = useRouter();
   const { user } = useAuthStore();
+  const { selectedElderlyId, setSelectedElderly } = useSelectedElderlyStore();
   const { show } = useAlert();
   
   // 상태 관리
   const [connectedElderly, setConnectedElderly] = useState<ElderlyUser[]>([]);
-  const [selectedElderlyId, setSelectedElderlyId] = useState<string | null>(null);
   const [isLoadingElderly, setIsLoadingElderly] = useState(false);
   
   // 자동 통화 스케줄 설정
@@ -62,9 +64,9 @@ export const GuardianAICallScreen = () => {
       const elderly = await getConnectedElderly();
       setConnectedElderly(elderly);
       
-      // 첫 번째 어르신이 있으면 자동 선택
+      // 전역 스토어에서 선택된 어르신이 없으면 첫 번째 어르신을 기본 선택
       if (elderly.length > 0 && !selectedElderlyId) {
-        setSelectedElderlyId(elderly[0].user_id);
+        setSelectedElderly(elderly[0].user_id, elderly[0].name);
       }
     } catch (error: any) {
       if (__DEV__) {
@@ -302,7 +304,7 @@ export const GuardianAICallScreen = () => {
                         styles.elderlyOption,
                         selectedElderlyId === elderly.user_id && styles.elderlyOptionSelected
                       ]}
-                      onPress={() => setSelectedElderlyId(elderly.user_id)}
+                      onPress={() => setSelectedElderly(elderly.user_id, elderly.name)}
                       activeOpacity={0.7}
                     >
                       <View style={styles.elderlyOptionContent}>
@@ -335,7 +337,7 @@ export const GuardianAICallScreen = () => {
                   </View>
                   {selectedElderly.phone_number && (
                     <Text style={styles.elderlyInfoText}>
-                      전화번호: {selectedElderly.phone_number}
+                      전화번호: {formatPhoneNumber(selectedElderly.phone_number)}
                     </Text>
                   )}
                 </View>

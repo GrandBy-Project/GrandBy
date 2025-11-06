@@ -32,6 +32,8 @@ import { useWeatherStore } from '../store/weatherStore';
 import { elderlyHomeStyles } from './ElderlyHomeScreen.styles';
 import { useAlert } from '../components/GlobalAlertProvider';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { formatPhoneNumber } from '../utils/validation';
+import { TutorialModal } from '../components';
 
 export const ElderlyHomeScreen = () => {
   const router = useRouter();
@@ -65,6 +67,10 @@ export const ElderlyHomeScreen = () => {
 
   // 가장 가까운 일정 state
   const [upcomingTodo, setUpcomingTodo] = useState<any | null>(null);
+
+  // 튜토리얼 관련 state
+  const [showTutorial, setShowTutorial] = useState(false);
+  const aiCallButtonRef = useRef<View>(null);
 
   // 연결 애니메이션
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -409,6 +415,43 @@ export const ElderlyHomeScreen = () => {
     );
   };
 
+  // 튜토리얼 체크 함수
+  const checkTutorial = async () => {
+    try {
+      const shouldShow = await AsyncStorage.getItem('showTutorial');
+      
+      // 기존 사용자 처리: 값이 없거나 'true'가 아니면 'false'로 설정
+      if (shouldShow === null || shouldShow !== 'true') {
+        await AsyncStorage.setItem('showTutorial', 'false');
+        return;
+      }
+      
+      // 신규 회원가입 사용자만 튜토리얼 표시
+      if (shouldShow === 'true') {
+        // 약간의 지연 후 튜토리얼 표시 (화면 렌더링 완료 후)
+        setTimeout(() => {
+          setShowTutorial(true);
+        }, 500);
+      }
+    } catch (error) {
+      console.error('튜토리얼 체크 실패:', error);
+    }
+  };
+
+  // 튜토리얼 완료 처리
+  const handleTutorialComplete = async () => {
+    try {
+      await AsyncStorage.setItem('showTutorial', 'false');
+      setShowTutorial(false);
+      // AI 전화 페이지로 이동
+      setTimeout(() => {
+        router.push('/ai-call');
+      }, 300);
+    } catch (error) {
+      console.error('튜토리얼 플래그 저장 실패:', error);
+    }
+  };
+
   // 화면 포커스 시 데이터 새로고침
   useFocusEffect(
     React.useCallback(() => {
@@ -417,6 +460,7 @@ export const ElderlyHomeScreen = () => {
       loadActiveConnections();
       loadWeather();
       checkRecentCalls();
+      checkTutorial();
     }, [loadWeather, selectedDayTab])
   );
 
@@ -935,7 +979,7 @@ export const ElderlyHomeScreen = () => {
                         numberOfLines={1}
                         ellipsizeMode="tail"
                       >
-                        {caregiver.phone_number || '연락처 없음'}
+                        {caregiver.phone_number ? formatPhoneNumber(caregiver.phone_number) : '연락처 없음'}
                       </Text>
                     </View>
                   </View>
@@ -1130,7 +1174,7 @@ export const ElderlyHomeScreen = () => {
                     <View style={styles.modalInfoRow}>
                       <Ionicons name="call" size={moderateScale(16)} color="#666" style={[styles.modalInfoLabel, fontSizeLevel >= 1 && { fontSize: 16 }]} />
                       <Text style={[styles.modalInfoText, { fontSize: moderateScale(14) }, fontSizeLevel >= 1 && { fontSize: 16 }]}>
-                        {selectedConnection.phone_number}
+                        {formatPhoneNumber(selectedConnection.phone_number)}
                       </Text>
                     </View>
                   )}
@@ -1184,6 +1228,13 @@ export const ElderlyHomeScreen = () => {
 
       {/* 하단 네비게이션 바 */}
       <BottomNavigationBar />
+
+      {/* 튜토리얼 모달 */}
+      <TutorialModal
+        visible={showTutorial}
+        onClose={() => setShowTutorial(false)}
+        onComplete={handleTutorialComplete}
+      />
     </View>
   );
 };

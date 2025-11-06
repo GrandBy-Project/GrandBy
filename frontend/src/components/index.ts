@@ -8,8 +8,10 @@ export { BottomNavigationBar } from './BottomNavigationBar';
 export { ScreenLayout } from './ScreenLayout';
 export { SideMenu } from './SideMenu';
 export { TimePicker } from './TimePicker';
+export { CategorySelector } from './CategorySelector';
 export * from './CustomIcons';
 export { DiaryFilters } from './DiaryFilters';
 export { DiaryInsights, type DiaryInsightsProps } from './DiaryInsights';
 export { QuickActionGrid, type QuickAction } from './QuickActionGrid';
+export { TutorialModal, type TutorialType } from './TutorialModal';
 

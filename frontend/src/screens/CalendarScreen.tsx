@@ -17,25 +17,44 @@ import {
   Dimensions,
   TouchableWithoutFeedback,
   Switch,
+  Image,
 } from 'react-native';
-import { useRouter } from 'expo-router';
-import { Header, BottomNavigationBar, TimePicker } from '../components';
+import { useRouter, useFocusEffect } from 'expo-router';
+import { Header, BottomNavigationBar, TimePicker, CategorySelector } from '../components';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Calendar } from 'react-native-calendars';
-import { TodoItem, getTodosByRange, createTodo, deleteTodo } from '../api/todo';
+import { TodoItem, getTodosByRange, createTodo, deleteTodo, completeTodo, cancelTodo } from '../api/todo';
 import { getDiaries, Diary } from '../api/diary';
 import { useAuthStore } from '../store/authStore';
+import { useSelectedElderlyStore } from '../store/selectedElderlyStore';
 import * as connectionsApi from '../api/connections';
 import { Colors } from '../constants/Colors';
 import { useFontSizeStore } from '../store/fontSizeStore';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useAlert } from '../components/GlobalAlertProvider';
+import {
+  formatDateString,
+  formatDateWithWeekday,
+  formatDateDisplay,
+  formatTimeKorean,
+  formatHHMMToDisplay,
+  formatTimeToHHMM,
+  isToday,
+  isSameDate,
+} from '../utils/dateUtils';
+import {
+  TODO_CATEGORIES,
+  getCategoryName,
+  getCategoryIcon,
+  getCategoryColor,
+} from '../constants/TodoCategories';
 
 export const CalendarScreen = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
+  const { selectedElderlyId, selectedElderlyName, setSelectedElderly } = useSelectedElderlyStore();
   const { fontSizeLevel } = useFontSizeStore();
   const { show } = useAlert();
 
@@ -79,14 +98,8 @@ export const CalendarScreen = () => {
     isShared: false, // 공유 여부 (어르신 직접 등록 시 기본 비공유)
   });
 
-  // 카테고리 옵션 (Backend Enum과 일치)
-  const categories = [
-    { id: 'MEDICINE', name: '약 복용', icon: 'medical', color: '#FF6B6B' },
-    { id: 'HOSPITAL', name: '병원 방문', icon: 'medical-outline', color: '#4ECDC4' },
-    { id: 'EXERCISE', name: '운동', icon: 'fitness', color: '#45B7D1' },
-    { id: 'MEAL', name: '식사', icon: 'restaurant', color: '#96CEB4' },
-    { id: 'OTHER', name: '기타', icon: 'list', color: '#95A5A6' },
-  ];
+  // 카테고리 옵션 (공통 상수 사용)
+  const categories = TODO_CATEGORIES;
   // 시간 선택 상태 (시간, 분) - 기본값 12:00
   const [selectedHour, setSelectedHour] = useState(12);
   const [selectedMinute, setSelectedMinute] = useState(0);
@@ -104,8 +117,9 @@ export const CalendarScreen = () => {
 
   // 보호자용: 연결된 어르신 목록
   const [connectedElderly, setConnectedElderly] = useState<any[]>([]);
-  const [selectedElderlyId, setSelectedElderlyId] = useState<string | null>(null);
   
+  // 어르신용: 연결된 보호자 목록
+  const [connectedCaregivers, setConnectedCaregivers] = useState<any[]>([]);
 
   // 필터링된 일정 가져오기
   const getFilteredSchedules = (schedules: TodoItem[]) => {
@@ -126,6 +140,68 @@ export const CalendarScreen = () => {
     // 'all' 또는 'diary' 필터일 때는 모든 일기 표시
     return diaries;
   };
+
+  // 일정 등록자 표시용 텍스트
+  const getScheduleCreatorLabel = useCallback((schedule: TodoItem) => {
+    if (schedule.creator_type === 'elderly') {
+      return user?.role === 'elderly' ? '내가 등록' : '어르신이 등록';
+    }
+    if (schedule.creator_type === 'caregiver') {
+      const isMySchedule = user?.role === 'caregiver' && schedule.creator_id === user?.user_id;
+      if (isMySchedule) {
+        return '내가 등록';
+      }
+      return '보호자가 등록';
+    }
+    if (schedule.creator_type === 'ai') {
+      return 'AI가 추천';
+    }
+    return '등록자 정보 없음';
+  }, [user?.role, user?.user_id]);
+
+  const getScheduleShareLabel = useCallback((schedule: TodoItem) => {
+    return schedule.is_shared_with_caregiver ? '보호자와 공유' : '나만 보기';
+  }, []);
+
+  const getScheduleIconName = useCallback((schedule: TodoItem) => {
+    if (schedule.category === 'MEDICINE' || schedule.title?.includes('약')) {
+      return 'medical';
+    }
+    if (schedule.category === 'HOSPITAL' || schedule.title?.includes('병원')) {
+      return 'medical-outline';
+    }
+    if (schedule.category === 'EXERCISE' || schedule.title?.includes('운동')) {
+      return 'fitness-outline';
+    }
+    if (schedule.category === 'MEAL' || schedule.title?.includes('식사')) {
+      return 'restaurant-outline';
+    }
+    return 'calendar-outline';
+  }, []);
+
+  const canElderlyModifySchedule = useCallback((schedule: TodoItem) => {
+    if (user?.role !== 'elderly') {
+      return false;
+    }
+
+    if (schedule.creator_type === 'elderly') {
+      return schedule.creator_id === user?.user_id;
+    }
+
+    if (schedule.creator_type === 'ai') {
+      return true;
+    }
+
+    return false;
+  }, [user?.role, user?.user_id]);
+
+  const canCaregiverModifySchedule = useCallback((schedule: TodoItem) => {
+    if (user?.role !== 'caregiver') {
+      return false;
+    }
+
+    return schedule.creator_type === 'caregiver' && schedule.creator_id === user?.user_id;
+  }, [user?.role, user?.user_id]);
 
   // 월간 달력용 마킹 데이터 생성
   const getMarkedDates = () => {
@@ -224,17 +300,7 @@ export const CalendarScreen = () => {
     return '00:00';
   };
 
-  const convertHHMMToKoreanTime = (timeStr: string | null): string => {
-    if (!timeStr) return '시간 미정';
-
-    const [hourStr, minuteStr] = timeStr.split(':');
-    const hour = parseInt(hourStr, 10);
-    const minute = parseInt(minuteStr, 10);
-
-    if (hour === 0 && minute === 0) return '하루 종일';
-
-    return `${hour}시 ${minute}분`;
-  };
+  // convertHHMMToKoreanTime 함수는 formatTimeKorean으로 대체됨 (공통 유틸리티 사용)
 
   // 연결된 어르신 목록 로드 (보호자용)
   const loadConnectedElderly = async () => {
@@ -244,12 +310,29 @@ export const CalendarScreen = () => {
       const elderly = await connectionsApi.getConnectedElderly();
       setConnectedElderly(elderly);
       
-      // 첫 번째 어르신을 기본 선택
+      // 전역 스토어에서 선택된 어르신이 없으면 첫 번째 어르신을 기본 선택
       if (elderly.length > 0 && !selectedElderlyId) {
-        setSelectedElderlyId(elderly[0].user_id);
+        setSelectedElderly(elderly[0].user_id, elderly[0].name);
       }
     } catch (error) {
       console.error('연결된 어르신 로드 실패:', error);
+    }
+  };
+
+  /**
+   * 연결된 보호자 목록 로드 (어르신용)
+   */
+  const loadConnectedCaregivers = async () => {
+    try {
+      const connections = await connectionsApi.getConnections();
+      // 연결된 보호자 정보 추출 (active 상태만)
+      const caregivers = connections.active.map(conn => ({
+        user_id: conn.user_id,
+        name: conn.name,
+      }));
+      setConnectedCaregivers(caregivers);
+    } catch (error) {
+      console.error('연결된 보호자 로드 실패:', error);
     }
   };
 
@@ -309,9 +392,12 @@ export const CalendarScreen = () => {
 
       // 보호자인 경우 어르신 ID 전달
       if (user.role === 'caregiver' && selectedElderlyId) {
-        // 보호자인 경우
+        // 보호자인 경우: 본인이 등록했거나 공유된 일정만 유지
         const todos = await getTodosByRange(startDateStr, endDateStr, selectedElderlyId);
-        setSchedules(todos);
+        const filtered = todos.filter(todo =>
+          todo.creator_type === 'caregiver' || todo.is_shared_with_caregiver === true
+        );
+        setSchedules(filtered);
       } else {
         // 어르신인 경우: 모든 일정 조회
         const todos = await getTodosByRange(startDateStr, endDateStr);
@@ -381,10 +467,12 @@ export const CalendarScreen = () => {
     }
   };
 
-  // 화면 마운트 시 연결된 어르신 로드 (보호자용)
+  // 화면 마운트 시 연결된 사용자 목록 로드
   useEffect(() => {
     if (user?.role === 'caregiver') {
       loadConnectedElderly();
+    } else if (user?.role === 'elderly') {
+      loadConnectedCaregivers();
     }
   }, [user]);
 
@@ -412,6 +500,22 @@ export const CalendarScreen = () => {
     scrollToDate(selectedDay, dates);
   }, [selectedDay]);
 
+  // 화면 포커스 시 일정 목록 새로고침 (수정 후 복귀 시 자동 업데이트)
+  useFocusEffect(
+    useCallback(() => {
+      // 보호자인 경우 어르신이 선택되어 있을 때만 로드
+      if (user?.role === 'caregiver' && selectedElderlyId) {
+        loadSchedules();
+        loadDiaries();
+      } else if (user?.role === 'elderly') {
+        // 어르신인 경우 바로 로드
+        loadSchedules();
+        loadDiaries();
+      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [user?.role, selectedElderlyId])
+  );
+
   // 주간 캘린더 유틸리티 함수들
   const getWeekDates = (date: Date) => {
     const week = [];
@@ -428,28 +532,8 @@ export const CalendarScreen = () => {
     return week;
   };
 
-  const formatDate = (date: Date) => {
-    const month = date.getMonth() + 1;
-    const day = date.getDate();
-    const dayOfWeek = ['일', '월', '화', '수', '목', '금', '토'][date.getDay()];
-    return `${month}월 ${day}일 (${dayOfWeek})`;
-  };
-
-  const formatDateString = (date: Date) => {
-    const year = date.getFullYear();
-    const month = (date.getMonth() + 1).toString().padStart(2, '0');
-    const day = date.getDate().toString().padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  };
-
-  const isToday = (date: Date) => {
-    const today = new Date();
-    return date.toDateString() === today.toDateString();
-  };
-
-  const isSameDate = (date1: Date, date2: Date) => {
-    return date1.toDateString() === date2.toDateString();
-  };
+  // formatDate, formatDateString, isToday, isSameDate 함수는 공통 유틸리티 사용
+  // formatDate → formatDateWithWeekday로 대체
 
   const getSchedulesForDate = (date: Date) => {
     const dateString = formatDateString(date);
@@ -512,6 +596,35 @@ export const CalendarScreen = () => {
   };
 
   /**
+   * 작성자 이름 가져오기
+   */
+  const getAuthorName = (diary: Diary): string => {
+    // 현재 사용자가 작성자인 경우
+    if (diary.author_id === user?.user_id) {
+      return user.name;
+    }
+    
+    // 보호자인 경우: 연결된 어르신 중에서 작성자를 찾기
+    if (user?.role === 'caregiver') {
+      const author = connectedElderly.find(elderly => elderly.user_id === diary.author_id);
+      if (author) {
+        return author.name;
+      }
+    }
+    
+    // 어르신인 경우: 연결된 보호자 중에서 작성자를 찾기
+    if (user?.role === 'elderly') {
+      const author = connectedCaregivers.find(caregiver => caregiver.user_id === diary.author_id);
+      if (author) {
+        return author.name;
+      }
+    }
+    
+    // 찾을 수 없는 경우 빈 문자열 반환
+    return '';
+  };
+
+  /**
    * 작성자 배지 정보 가져오기
    */
   const getAuthorBadgeInfo = (diary: Diary) => {
@@ -525,11 +638,13 @@ export const CalendarScreen = () => {
       };
     }
     
+    const authorName = getAuthorName(diary);
+    
     if (diary.author_type === 'caregiver') {
       return {
         icon: 'medical' as const,
         iconFamily: 'Ionicons' as const,
-        text: '보호자 작성',
+        text: authorName ? `${authorName}님 작성` : '보호자 작성',
         color: '#2196F3',
         bgColor: '#E3F2FD',
       };
@@ -539,7 +654,7 @@ export const CalendarScreen = () => {
       return {
         icon: 'pencil' as const,
         iconFamily: 'Ionicons' as const,
-        text: '어르신 작성',
+        text: authorName ? `${authorName}님 작성` : '어르신 작성',
         color: '#4CAF50',
         bgColor: '#E8F5E9',
       };
@@ -690,21 +805,7 @@ export const CalendarScreen = () => {
   };
 
   // 시간을 HH:MM 형식으로 변환
-  const formatTimeToHHMM = (hour: number, minute: number): string => {
-    return `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
-  };
-
-  // HH:MM을 "14시 36분" 형식으로 변환
-  const formatHHMMToDisplay = (timeStr: string): string => {
-    if (!timeStr) return '시간을 선택해주세요';
-    const [hourStr, minuteStr] = timeStr.split(':');
-    const hour = parseInt(hourStr || '0', 10);
-    const minute = parseInt(minuteStr || '0', 10);
-    if (isNaN(hour) || isNaN(minute)) {
-      return '시간을 선택해주세요';
-    }
-    return `${hour}시 ${minute}분`;
-  };
+  // formatTimeToHHMM, formatHHMMToDisplay 함수는 공통 유틸리티 사용
 
   const handleAddSchedule = () => {
     // 보호자인 경우 GuardianTodoAddScreen으로 이동
@@ -755,15 +856,7 @@ export const CalendarScreen = () => {
   };
 
   // 날짜 표시 포맷팅 (예: 2024년 10월 31일 (목))
-  const formatDateDisplay = (dateString: string): string => {
-    if (!dateString) return '날짜 선택';
-    const date = new Date(dateString + 'T00:00:00'); // 로컬 시간으로 파싱
-    const year = date.getFullYear();
-    const month = date.getMonth() + 1;
-    const day = date.getDate();
-    const dayOfWeek = ['일', '월', '화', '수', '목', '금', '토'][date.getDay()];
-    return `${year}년 ${month}월 ${day}일 (${dayOfWeek})`;
-  };
+  // formatDateDisplay 함수는 공통 유틸리티 사용
 
   // 날짜 선택 핸들러 (일정 추가 모달용)
   const handleDateSelectInModal = (day: { dateString: string }) => {
@@ -877,16 +970,66 @@ export const CalendarScreen = () => {
   };
 
   const handleEditSchedule = () => {
+    if (!selectedSchedule) {
+      return;
+    }
+
+    const elderlyCanModify = canElderlyModifySchedule(selectedSchedule);
+    const caregiverCanModify = canCaregiverModifySchedule(selectedSchedule);
+
+    // 어르신인 경우 권한 체크
+    if (user?.role === 'elderly' && !elderlyCanModify) {
+      show('수정 불가', '보호자가 할당한 일정은 수정할 수 없습니다.');
+      return;
+    }
+
+    // 보호자인 경우 권한 체크
+    if (user?.role === 'caregiver' && !caregiverCanModify) {
+      show('수정 불가', '어르신이 등록한 일정은 수정할 수 없습니다.');
+      return;
+    }
+
     setShowDetailModal(false);
-    // TODO: 일정 수정 기능 구현
-    console.log('일정 수정:', selectedSchedule?.todo_id);
+
+    // 보호자인 경우 GuardianTodoAddScreen으로 이동 (수정 모드)
+    if (user?.role === 'caregiver') {
+      // 연결된 어르신 목록에서 이름 찾기
+      const elderly = connectedElderly.find(e => e.user_id === selectedSchedule.elderly_id);
+      const elderlyName = elderly?.name || '어르신';
+
+      router.push(
+        `/guardian-todo-add?elderlyId=${selectedSchedule.elderly_id}&elderlyName=${encodeURIComponent(elderlyName)}&todoId=${selectedSchedule.todo_id}`
+      );
+      return;
+    }
+
+    // 어르신인 경우: 본인이 작성한 일정이거나 AI가 추출한 일정만 수정 가능
+    if (user?.role === 'elderly' && elderlyCanModify) {
+      router.push(
+        `/guardian-todo-add?elderlyId=${selectedSchedule.elderly_id}&elderlyName=나&todoId=${selectedSchedule.todo_id}`
+      );
+      return;
+    }
   };
 
   const handleDeleteFromDetail = () => {
-    setShowDetailModal(false);
-    if (selectedSchedule) {
-      handleDeleteSchedule(selectedSchedule.todo_id);
+    if (!selectedSchedule) {
+      return;
     }
+
+    // 권한 체크
+    if (user?.role === 'elderly' && !canElderlyModifySchedule(selectedSchedule)) {
+      show('삭제 불가', '보호자가 할당한 일정은 삭제할 수 없습니다.');
+      return;
+    }
+
+    if (user?.role === 'caregiver' && !canCaregiverModifySchedule(selectedSchedule)) {
+      show('삭제 불가', '어르신이 등록한 일정은 삭제할 수 없습니다.');
+      return;
+    }
+
+    setShowDetailModal(false);
+    handleDeleteSchedule(selectedSchedule.todo_id);
   };
 
   const handleDeleteSchedule = (todoId: string) => {
@@ -924,6 +1067,34 @@ export const CalendarScreen = () => {
     );
   };
 
+  // TODO 완료 처리 (어르신 전용)
+  const handleCompleteTodo = async (todoId: string) => {
+    try {
+      await completeTodo(todoId);
+      show('완료!', '할 일을 완료했습니다.');
+      // 일정 목록 새로고침
+      await loadSchedules();
+      setShowDetailModal(false);
+    } catch (error: any) {
+      console.error('할 일 완료 실패:', error);
+      show('오류', '할 일 완료에 실패했습니다.');
+    }
+  };
+
+  // TODO 완료 취소 (어르신 전용)
+  const handleCancelTodo = async (todoId: string) => {
+    try {
+      await cancelTodo(todoId);
+      show('취소됨', '할 일 완료를 취소했습니다.');
+      // 일정 목록 새로고침
+      await loadSchedules();
+      setShowDetailModal(false);
+    } catch (error: any) {
+      console.error('할 일 취소 실패:', error);
+      show('오류', '할 일 취소에 실패했습니다.');
+    }
+  };
+
 
   return (
     <View style={styles.container}>
@@ -949,32 +1120,6 @@ export const CalendarScreen = () => {
         }
       />
 
-      {/* 보호자용 어르신 선택 (연결된 어르신이 여러 명인 경우) */}
-      {user?.role === 'caregiver' && connectedElderly.length > 1 && (
-        <View style={styles.elderlySelectorContainer}>
-          <Text style={styles.elderlySelectorLabel}>어르신 선택:</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.elderlySelectorScroll}>
-            {connectedElderly.map((elderly) => (
-              <TouchableOpacity
-                key={elderly.user_id}
-                style={[
-                  styles.elderlySelectorButton,
-                  selectedElderlyId === elderly.user_id && styles.elderlySelectorButtonActive
-                ]}
-                onPress={() => setSelectedElderlyId(elderly.user_id)}
-                activeOpacity={0.7}
-              >
-                <Text style={[
-                  styles.elderlySelectorButtonText,
-                  selectedElderlyId === elderly.user_id && styles.elderlySelectorButtonTextActive
-                ]}>
-                  {elderly.name}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
-      )}
 
       {/* 보호자인데 어르신이 선택되지 않은 경우 안내 */}
       {user?.role === 'caregiver' && !selectedElderlyId && connectedElderly.length === 0 && (
@@ -1017,7 +1162,7 @@ export const CalendarScreen = () => {
               styles.filterTabText,
               selectedFilter === 'schedule' && styles.filterTabTextActive
             ]}>
-              내 일정
+              일정
             </Text>
           </TouchableOpacity>
 
@@ -1033,7 +1178,7 @@ export const CalendarScreen = () => {
               styles.filterTabText,
               selectedFilter === 'diary' && styles.filterTabTextActive
             ]}>
-              내 일기
+              일기
             </Text>
           </TouchableOpacity>
         </View>
@@ -1380,7 +1525,11 @@ export const CalendarScreen = () => {
               <View style={styles.scheduleSection}>
                 <View style={styles.scheduleHeader}>
                   <Text style={styles.scheduleSectionTitle}>
-                    {selectedDate ? `${formatDate(selectedDate)} 일정` : '오늘의 일정'}
+                    {selectedDate 
+                      ? `${formatDateWithWeekday(selectedDate)} 일정` 
+                      : user?.role === 'caregiver' && selectedElderlyName
+                        ? `${selectedElderlyName}님의 일정`
+                        : '오늘의 일정'}
                   </Text>
                 </View>
 
@@ -1403,7 +1552,7 @@ export const CalendarScreen = () => {
                     return (
                       <View style={styles.emptyState}>
                         <Text style={styles.emptyText}>
-                          {selectedDate ? `${formatDate(selectedDate)} 등록된 일정이 없습니다` : '오늘 등록된 일정이 없습니다'}
+                          {selectedDate ? `${formatDateWithWeekday(selectedDate)} 등록된 일정이 없습니다` : '오늘 등록된 일정이 없습니다'}
                         </Text>
                         <Text style={styles.emptySubText}>+ 버튼을 눌러 일정을 추가해보세요</Text>
                       </View>
@@ -1417,15 +1566,24 @@ export const CalendarScreen = () => {
                     return a.due_time.localeCompare(b.due_time);
                   });
 
-                  return (
-                    <View style={styles.timeScheduleContainer}>
-                      {sortedSchedules.map((schedule, index) => (
-                        <TouchableOpacity
-                          key={schedule.todo_id}
-                          style={styles.scheduleCard}
-                          onPress={() => handleSchedulePress(schedule)}
-                          activeOpacity={0.7}
-                        >
+                  const pendingSchedules = sortedSchedules.filter(schedule => schedule.status !== 'completed' && schedule.status !== 'cancelled');
+                  const completedSchedules = sortedSchedules.filter(schedule => schedule.status === 'completed' || schedule.status === 'cancelled');
+
+                  const renderScheduleCard = (schedule: TodoItem) => {
+                    const isCompleted = schedule.status === 'completed';
+                    const isCancelled = schedule.status === 'cancelled';
+
+                    return (
+                      <TouchableOpacity
+                        key={schedule.todo_id}
+                        style={[
+                          styles.scheduleCard,
+                          (isCompleted || isCancelled) && styles.scheduleCardCompleted,
+                          isCancelled && styles.scheduleCardCancelled,
+                        ]}
+                        onPress={() => handleSchedulePress(schedule)}
+                        activeOpacity={0.7}
+                      >
                         <View style={styles.scheduleIconContainer}>
                           <View style={[
                             styles.scheduleIcon,
@@ -1433,35 +1591,87 @@ export const CalendarScreen = () => {
                             schedule.category === 'HOSPITAL' && styles.scheduleIconHospital,
                             schedule.category === 'EXERCISE' && styles.scheduleIconExercise,
                             schedule.category === 'MEAL' && styles.scheduleIconMeal,
-                            !schedule.category && styles.scheduleIconDefault,
+                            (!schedule.category || schedule.category === 'OTHER') && styles.scheduleIconDefault,
                           ]}>
                             <Ionicons
-                              name={
-                                schedule.title.includes('약') || schedule.category === 'MEDICINE' ? 'medical' :
-                                  schedule.title.includes('병원') || schedule.category === 'HOSPITAL' ? 'medical-outline' :
-                                    schedule.category === 'EXERCISE' ? 'fitness-outline' :
-                                      schedule.category === 'MEAL' ? 'restaurant-outline' :
-                                        'calendar-outline'
-                              }
+                              name={getScheduleIconName(schedule) as any}
                               size={24}
                               color={Colors.textWhite}
                             />
                           </View>
                         </View>
 
-                          <View style={styles.scheduleContent}>
-                            <Text style={styles.scheduleTitle}>{schedule.title}</Text>
-                            <Text style={styles.scheduleTime}>{convertHHMMToKoreanTime(schedule.due_time)}</Text>
-                            {schedule.description && (
-                              <Text style={styles.scheduleDescription}>{schedule.description}</Text>
-                            )}
+                        <View style={styles.scheduleContent}>
+                          <View style={styles.scheduleMetaRow}>
+                            <View style={[
+                              styles.scheduleStatusBadge,
+                              isCompleted && styles.scheduleStatusBadgeCompleted,
+                              isCancelled && styles.scheduleStatusBadgeCancelled,
+                            ]}>
+                              <Text
+                                style={[
+                                  styles.scheduleStatusBadgeText,
+                                  isCompleted && styles.scheduleStatusBadgeTextCompleted,
+                                  isCancelled && styles.scheduleStatusBadgeTextCancelled,
+                                ]}
+                              >
+                                {isCompleted ? '완료' : isCancelled ? '취소' : '예정'}
+                              </Text>
+                            </View>
+                            <View style={[
+                              styles.scheduleShareBadge,
+                              schedule.is_shared_with_caregiver ? styles.scheduleShareBadgeOn : styles.scheduleShareBadgeOff,
+                            ]}>
+                              <Ionicons
+                                name={schedule.is_shared_with_caregiver ? 'people' : 'lock-closed'}
+                                size={12}
+                                color={schedule.is_shared_with_caregiver ? Colors.primary : Colors.textSecondary}
+                                style={{ marginRight: 4 }}
+                              />
+                              <Text
+                                style={[
+                                  styles.scheduleShareBadgeText,
+                                  schedule.is_shared_with_caregiver ? styles.scheduleShareBadgeTextOn : styles.scheduleShareBadgeTextOff,
+                                ]}
+                              >
+                                {schedule.is_shared_with_caregiver ? '공유' : '비공유'}
+                              </Text>
+                            </View>
                           </View>
 
-                          <View style={styles.scheduleArrow}>
-                            <Ionicons name="chevron-forward" size={20} color={Colors.textLight} />
-                          </View>
-                        </TouchableOpacity>
-                      ))}
+                          <Text style={[styles.scheduleTitle, (isCompleted || isCancelled) && styles.scheduleTitleCompleted]}>{schedule.title}</Text>
+                          <Text style={[styles.scheduleTime, (isCompleted || isCancelled) && styles.scheduleTimeCompleted]}>
+                            {formatTimeKorean(schedule.due_time)}
+                          </Text>
+                          {schedule.description && (
+                            <Text style={[styles.scheduleDescription, (isCompleted || isCancelled) && styles.scheduleDescriptionCompleted]}>
+                              {schedule.description}
+                            </Text>
+                          )}
+                        </View>
+
+                        <View style={styles.scheduleArrow}>
+                          <Ionicons name="chevron-forward" size={20} color={Colors.textLight} />
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  };
+
+                  return (
+                    <View style={styles.timeScheduleContainer}>
+                      {pendingSchedules.length > 0 && (
+                        <View style={styles.scheduleSubsection}>
+                          <Text style={styles.scheduleSubsectionTitle}>예정된 일정</Text>
+                          {pendingSchedules.map(renderScheduleCard)}
+                        </View>
+                      )}
+
+                      {completedSchedules.length > 0 && (
+                        <View style={styles.scheduleSubsection}>
+                          <Text style={styles.scheduleSubsectionTitle}>완료된 일정</Text>
+                          {completedSchedules.map(renderScheduleCard)}
+                        </View>
+                      )}
                     </View>
                   );
                 })()}
@@ -1473,7 +1683,7 @@ export const CalendarScreen = () => {
               <View style={styles.scheduleSection}>
                 <View style={styles.scheduleHeader}>
                   <Text style={styles.scheduleSectionTitle}>
-                    {selectedDate ? `${formatDate(selectedDate)} 일기` : '오늘의 일기'}
+                    {selectedDate ? `${formatDateWithWeekday(selectedDate)} 일기` : '오늘의 일기'}
                   </Text>
                 </View>
 
@@ -1495,7 +1705,7 @@ export const CalendarScreen = () => {
                       <View style={styles.emptyState}>
                         <Ionicons name="book-outline" size={48} color="#CCCCCC" style={{ marginBottom: 12 }} />
                         <Text style={styles.emptyText}>
-                          {selectedDate ? `${formatDate(selectedDate)} 작성된 일기가 없습니다` : '오늘 작성된 일기가 없습니다'}
+                          {selectedDate ? `${formatDateWithWeekday(selectedDate)} 작성된 일기가 없습니다` : '오늘 작성된 일기가 없습니다'}
                         </Text>
                       </View>
                     );
@@ -1734,35 +1944,19 @@ export const CalendarScreen = () => {
               <View style={styles.inputSection}>
                 <Text style={styles.inputLabel}>카테고리</Text>
                 <View style={styles.categoryGridInline}>
-                  {categories.map((category) => (
-                    <TouchableOpacity
-                      key={category.id}
-                      style={[
-                        styles.categoryCardInline,
-                        newSchedule.category === category.id && styles.categoryCardInlineSelected,
-                      ]}
-                      onPress={() => setNewSchedule({ ...newSchedule, category: category.id })}
-                      activeOpacity={0.7}
-                      disabled={showDatePicker}
-                    >
-                      <View style={[
-                        styles.categoryCardIconContainerInline,
-                        { backgroundColor: category.color + '15' }
-                      ]}>
-                        <Ionicons 
-                          name={category.icon as any} 
-                          size={28} 
-                          color={category.color} 
-                        />
-                      </View>
-                      <Text style={[
-                        styles.categoryCardTextInline,
-                        newSchedule.category === category.id && styles.categoryCardTextInlineSelected
-                      ]}>
-                        {category.name}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
+                  <CategorySelector
+                    selectedCategory={newSchedule.category}
+                    onSelect={(categoryId) => setNewSchedule({ ...newSchedule, category: categoryId })}
+                    disabled={showDatePicker}
+                  />
+                  {/* 장식용 캐릭터 카드 (3x2 그리드를 채우기 위해) */}
+                  <View style={styles.categoryCardInlineDisabled}>
+                    <Image 
+                      source={require('../../assets/haru-character.png')} 
+                      style={styles.decorativeCharacterImage}
+                      resizeMode="contain"
+                    />
+                  </View>
                 </View>
               </View>
 
@@ -1968,7 +2162,7 @@ export const CalendarScreen = () => {
                       <View style={styles.detailInfoRow}>
                         <Text style={styles.detailInfoLabel}>시간</Text>
                         <Text style={styles.detailInfoValue}>
-                          {convertHHMMToKoreanTime(selectedSchedule.due_time)}
+                          {formatTimeKorean(selectedSchedule.due_time)}
                         </Text>
                       </View>
                     )}
@@ -1992,33 +2186,156 @@ export const CalendarScreen = () => {
                     </View>
 
                     <View style={styles.detailInfoRow}>
+                      <Text style={styles.detailInfoLabel}>상태</Text>
+                      <View
+                        style={[
+                          styles.detailStatusBadge,
+                          selectedSchedule.status === 'completed' && styles.detailStatusBadgeCompleted,
+                          selectedSchedule.status === 'cancelled' && styles.detailStatusBadgeCancelled,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.detailStatusBadgeText,
+                            selectedSchedule.status === 'completed' && styles.detailStatusBadgeTextCompleted,
+                            selectedSchedule.status === 'cancelled' && styles.detailStatusBadgeTextCancelled,
+                          ]}
+                        >
+                          {selectedSchedule.status === 'completed'
+                            ? '완료'
+                            : selectedSchedule.status === 'cancelled'
+                              ? '취소'
+                              : '예정'}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.detailInfoRow}>
                       <Text style={styles.detailInfoLabel}>등록자</Text>
                       <Text style={styles.detailInfoValue}>
-                        {selectedSchedule.creator_type === 'elderly' ? '내가 등록' : '보호자가 등록'}
+                        {getScheduleCreatorLabel(selectedSchedule)}
                       </Text>
+                    </View>
+
+                    <View style={styles.detailInfoRow}>
+                      <Text style={styles.detailInfoLabel}>공유 상태</Text>
+                      <View
+                        style={[
+                          styles.detailShareBadge,
+                          selectedSchedule.is_shared_with_caregiver ? styles.detailShareBadgeOn : styles.detailShareBadgeOff,
+                        ]}
+                      >
+                        <Ionicons
+                          name={selectedSchedule.is_shared_with_caregiver ? 'people' : 'lock-closed'}
+                          size={14}
+                          color={selectedSchedule.is_shared_with_caregiver ? Colors.primary : Colors.textSecondary}
+                          style={{ marginRight: 4 }}
+                        />
+                        <Text
+                          style={[
+                            styles.detailShareBadgeText,
+                            selectedSchedule.is_shared_with_caregiver ? styles.detailShareBadgeTextOn : styles.detailShareBadgeTextOff,
+                          ]}
+                        >
+                          {getScheduleShareLabel(selectedSchedule)}
+                        </Text>
+                      </View>
                     </View>
                   </View>
                 </ScrollView>
 
                 {/* 하단 버튼 */}
                 <View style={[styles.detailModalFooter, { paddingBottom: insets.bottom }]}>
-                  <TouchableOpacity
-                    style={styles.detailEditButton}
-                    onPress={handleEditSchedule}
-                    activeOpacity={0.7}
-                  >
-                    <Ionicons name="create-outline" size={18} color={Colors.primary} />
-                    <Text style={styles.detailEditButtonText}>수정</Text>
-                  </TouchableOpacity>
+                  {(() => {
+                    // 어르신인 경우: 보호자가 할당한 TODO는 완료 버튼만 표시
+                    if (user?.role === 'elderly' && selectedSchedule.creator_type === 'caregiver') {
+                      const isCompleted = selectedSchedule.status === 'completed';
+                      return (
+                        <>
+                          {!isCompleted ? (
+                            <TouchableOpacity
+                              style={styles.detailCompleteButton}
+                              onPress={() => handleCompleteTodo(selectedSchedule.todo_id)}
+                              activeOpacity={0.7}
+                            >
+                              <Ionicons name="checkmark-circle" size={18} color={Colors.primary} />
+                              <Text style={styles.detailCompleteButtonText}>완료</Text>
+                            </TouchableOpacity>
+                          ) : (
+                            <TouchableOpacity
+                              style={styles.detailCancelButton}
+                              onPress={() => handleCancelTodo(selectedSchedule.todo_id)}
+                              activeOpacity={0.7}
+                            >
+                              <Ionicons name="close-circle" size={18} color={Colors.textSecondary} />
+                              <Text style={styles.detailCancelButtonText}>완료 취소</Text>
+                            </TouchableOpacity>
+                          )}
+                        </>
+                      );
+                    }
+                    
+                    // 어르신인 경우: 본인이 작성한 일정이거나 AI가 추출한 일정은 수정/삭제 가능
+                    if (user?.role === 'elderly' && canElderlyModifySchedule(selectedSchedule)) {
+                      return (
+                        <>
+                          <TouchableOpacity
+                            style={styles.detailEditButton}
+                            onPress={handleEditSchedule}
+                            activeOpacity={0.7}
+                          >
+                            <Ionicons name="create-outline" size={18} color={Colors.primary} />
+                            <Text style={styles.detailEditButtonText}>수정</Text>
+                          </TouchableOpacity>
 
-                  <TouchableOpacity
-                    style={styles.detailDeleteButton}
-                    onPress={handleDeleteFromDetail}
-                    activeOpacity={0.7}
-                  >
-                    <Ionicons name="trash-outline" size={18} color={Colors.error} />
-                    <Text style={styles.detailDeleteButtonText}>삭제</Text>
-                  </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.detailDeleteButton}
+                            onPress={handleDeleteFromDetail}
+                            activeOpacity={0.7}
+                          >
+                            <Ionicons name="trash-outline" size={18} color={Colors.error} />
+                            <Text style={styles.detailDeleteButtonText}>삭제</Text>
+                          </TouchableOpacity>
+                        </>
+                      );
+                    }
+
+                    // 보호자인 경우: 수정/삭제 버튼 표시
+                    if (user?.role === 'caregiver') {
+                      if (!canCaregiverModifySchedule(selectedSchedule)) {
+                        return (
+                          <View style={styles.detailNoticeBox}>
+                            <Ionicons name="information-circle-outline" size={18} color={Colors.textSecondary} style={{ marginRight: 6 }} />
+                            <Text style={styles.detailNoticeText}>어르신이 등록한 일정입니다. 보호자는 수정하거나 삭제할 수 없습니다.</Text>
+                          </View>
+                        );
+                      }
+
+                      return (
+                        <>
+                          <TouchableOpacity
+                            style={styles.detailEditButton}
+                            onPress={handleEditSchedule}
+                            activeOpacity={0.7}
+                          >
+                            <Ionicons name="create-outline" size={18} color={Colors.primary} />
+                            <Text style={styles.detailEditButtonText}>수정</Text>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            style={styles.detailDeleteButton}
+                            onPress={handleDeleteFromDetail}
+                            activeOpacity={0.7}
+                          >
+                            <Ionicons name="trash-outline" size={18} color={Colors.error} />
+                            <Text style={styles.detailDeleteButtonText}>삭제</Text>
+                          </TouchableOpacity>
+                        </>
+                      );
+                    }
+
+                    return null;
+                  })()}
                 </View>
               </>
             )}
@@ -2359,17 +2676,81 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 2,
   },
+  scheduleCardCompleted: {
+    backgroundColor: '#F7F8FA',
+  },
+  scheduleCardCancelled: {
+    backgroundColor: '#FBF3F3',
+  },
   scheduleIconContainer: {
     marginRight: 16,
   },
   scheduleContent: {
     flex: 1,
   },
+  scheduleMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  scheduleStatusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    backgroundColor: '#E8F5E8',
+  },
+  scheduleStatusBadgeCompleted: {
+    backgroundColor: '#E0F2F1',
+  },
+  scheduleStatusBadgeCancelled: {
+    backgroundColor: '#FFE0E0',
+  },
+  scheduleStatusBadgeText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#2B6CB0',
+  },
+  scheduleStatusBadgeTextCompleted: {
+    color: '#2C7A4B',
+  },
+  scheduleStatusBadgeTextCancelled: {
+    color: '#C53030',
+  },
+  scheduleShareBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+    backgroundColor: '#F1F3F5',
+  },
+  scheduleShareBadgeOn: {
+    backgroundColor: '#E8F9F5',
+  },
+  scheduleShareBadgeOff: {
+    backgroundColor: '#F3F4F6',
+  },
+  scheduleShareBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#4A5568',
+  },
+  scheduleShareBadgeTextOn: {
+    color: Colors.primary,
+  },
+  scheduleShareBadgeTextOff: {
+    color: Colors.textSecondary,
+  },
   scheduleTime: {
     fontSize: 14,
     color: '#666666',
     marginTop: 4,
     marginBottom: 4,
+  },
+  scheduleTimeCompleted: {
+    color: '#A0AEC0',
+    textDecorationLine: 'line-through',
   },
   scheduleArrow: {
     marginLeft: 16,
@@ -2392,10 +2773,26 @@ const styles = StyleSheet.create({
     color: '#2C3E50',
     marginBottom: 6,
   },
+  scheduleTitleCompleted: {
+    color: '#718096',
+    textDecorationLine: 'line-through',
+  },
   scheduleDescription: {
     fontSize: 15,
     color: '#5A6C7D',
     lineHeight: 20,
+  },
+  scheduleDescriptionCompleted: {
+    color: '#A0AEC0',
+  },
+  scheduleSubsection: {
+    marginBottom: 16,
+  },
+  scheduleSubsectionTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#2C3E50',
+    marginBottom: 12,
   },
   scheduleIcon: {
     width: 48,
@@ -3177,14 +3574,16 @@ const styles = StyleSheet.create({
   detailModalOverlay: {
     flex: 1,
     backgroundColor: Colors.overlay,
-    justifyContent: 'flex-end',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   detailModalContent: {
     backgroundColor: Colors.background,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    borderRadius: 20,
     maxHeight: '80%',
     minHeight: '50%',
+    width: '90%',
+    alignSelf: 'center',
   },
   detailModalHeader: {
     flexDirection: 'row',
@@ -3248,6 +3647,62 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: Colors.text,
   },
+  detailStatusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    backgroundColor: '#E3F2FD',
+  },
+  detailStatusBadgeCompleted: {
+    backgroundColor: '#E0F2F1',
+  },
+  detailStatusBadgeCancelled: {
+    backgroundColor: '#FFE0E0',
+  },
+  detailStatusBadgeText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#2B6CB0',
+  },
+  detailStatusBadgeTextCompleted: {
+    color: '#2C7A4B',
+  },
+  detailStatusBadgeTextCancelled: {
+    color: '#C53030',
+  },
+  detailShareBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    backgroundColor: '#F8FAFC',
+  },
+  detailShareBadgeOn: {
+    borderColor: Colors.primary,
+    backgroundColor: '#E8F9F5',
+  },
+  detailShareBadgeOff: {
+    borderColor: '#CBD5E0',
+    backgroundColor: '#F1F3F5',
+  },
+  detailShareBadgeText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+  },
+  detailShareBadgeTextOn: {
+    color: Colors.primary,
+  },
+  detailShareBadgeTextOff: {
+    color: Colors.textSecondary,
+  },
   detailModalFooter: {
     flexDirection: 'row',
     paddingHorizontal: 20,
@@ -3288,6 +3743,58 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: Colors.error,
+    marginLeft: 6,
+  },
+  detailNoticeBox: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    backgroundColor: '#F8F9FA',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  detailNoticeText: {
+    flex: 1,
+    fontSize: 14,
+    color: Colors.textSecondary,
+    lineHeight: 20,
+  },
+  detailCompleteButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.primaryPale,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.primary,
+  },
+  detailCompleteButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.primary,
+    marginLeft: 6,
+  },
+  detailCancelButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F5F5F5',
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.textSecondary,
+  },
+  detailCancelButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.textSecondary,
     marginLeft: 6,
   },
 
@@ -3439,8 +3946,8 @@ const styles = StyleSheet.create({
   categoryGridInline: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
+    // gap 대신 margin을 사용하여 정확한 3x2 배치
   },
   categoryCardInline: {
     width: '31%',
@@ -3448,13 +3955,27 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 12,
     alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#F0F0F0',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
+    borderWidth: 1.5,
+    borderColor: '#E8E8E8',
+    // margin은 CategorySelector 내부에서 처리
+  },
+  categoryCardInlineDisabled: {
+    width: '31%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: '#E8E8E8',
+    // CategorySelector 카드와 동일하게 그림자 제거
+    overflow: 'hidden',
+    marginRight: 0, // 마지막 카드이므로 marginRight 제거
+    marginBottom: 10,
+  },
+  decorativeCharacterImage: {
+    width: 75,
+    height: 75,
   },
   categoryCardInlineSelected: {
     borderColor: '#34B79F',
