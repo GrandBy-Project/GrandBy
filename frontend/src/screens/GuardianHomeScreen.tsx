@@ -19,13 +19,26 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { Calendar } from 'react-native-calendars';
 import { useAuthStore } from '../store/authStore';
+import { useSelectedElderlyStore } from '../store/selectedElderlyStore';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { BottomNavigationBar, Header, QuickActionGrid, type QuickAction, CheckIcon, PhoneIcon, DiaryIcon, TimePicker } from '../components';
+import { BottomNavigationBar, Header, QuickActionGrid, type QuickAction, CheckIcon, PhoneIcon, DiaryIcon, TimePicker, CategorySelector } from '../components';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as todoApi from '../api/todo';
 import * as connectionsApi from '../api/connections';
 import * as diaryApi from '../api/diary';
 import { useAlert } from '../components/GlobalAlertProvider';
+import {
+  formatDateForDisplay,
+  formatTimeAmPm,
+  formatTimeToDisplay,
+  parseDisplayTimeToApi,
+} from '../utils/dateUtils';
+import {
+  TODO_CATEGORIES,
+  getCategoryName,
+  getCategoryIcon,
+  getCategoryColor,
+} from '../constants/TodoCategories';
 import { formatPhoneNumber } from '../utils/validation';
 
 interface ElderlyProfile {
@@ -52,6 +65,7 @@ interface Task {
 export const GuardianHomeScreen = () => {
   const router = useRouter();
   const { user, logout } = useAuthStore();
+  const { setSelectedElderly } = useSelectedElderlyStore();
   const insets = useSafeAreaInsets();
   const { show } = useAlert();
   const [currentElderlyIndex, setCurrentElderlyIndex] = useState(0);
@@ -99,6 +113,11 @@ export const GuardianHomeScreen = () => {
   
   // 스크롤 관련 ref
   const scrollViewRef = useRef<ScrollView>(null);
+  
+  // 초기 마운트 여부 추적 (useFocusEffect 중복 호출 방지)
+  const isFirstMount = useRef(true);
+  // 초기 데이터 로딩 완료 여부 추적 (useEffect 중복 호출 방지)
+  const isInitialDataLoaded = useRef(false);
   
   // 전체보기 토글 상태
   const [showAllTodos, setShowAllTodos] = useState(false);
@@ -338,9 +357,7 @@ export const GuardianHomeScreen = () => {
                 style={[styles.dayTab, selectedDayTab === 'today' && styles.dayTabActive]}
                 onPress={() => {
                   setSelectedDayTab('today');
-                  if (currentElderly) {
-                    loadTodosForElderly(currentElderly.id, false, 'today');
-                  }
+                  // useEffect가 자동으로 selectedDayTab 변경을 감지하여 loadTodosForElderly 호출
                 }}
                 activeOpacity={0.7}
               >
@@ -352,9 +369,7 @@ export const GuardianHomeScreen = () => {
                 style={[styles.dayTab, selectedDayTab === 'tomorrow' && styles.dayTabActive]}
                 onPress={() => {
                   setSelectedDayTab('tomorrow');
-                  if (currentElderly) {
-                    loadTodosForElderly(currentElderly.id, false, 'tomorrow');
-                  }
+                  // useEffect가 자동으로 selectedDayTab 변경을 감지하여 loadTodosForElderly 호출
                 }}
                 activeOpacity={0.7}
               >
@@ -1423,10 +1438,25 @@ export const GuardianHomeScreen = () => {
       }));
       
       setConnectedElderly(elderlyProfiles);
+      
+      // 첫 번째 어르신을 전역 스토어에 저장 (초기 로딩 시)
+      if (elderlyProfiles.length > 0 && !isInitialDataLoaded.current) {
+        const firstElderly = elderlyProfiles[0];
+        setSelectedElderly(firstElderly.id, firstElderly.name);
+      }
+      
+      // 초기 데이터 로딩 완료 플래그 설정 (이제 useEffect가 실행될 수 있음)
+      if (!isInitialDataLoaded.current) {
+        isInitialDataLoaded.current = true;
+      }
     } catch (error: any) {
       console.error('❌ 연결된 어르신 로딩 실패:', error);
       setConnectedElderly([]);
       show('오류', '연결된 어르신 목록을 불러오는데 실패했습니다.');
+      // 에러 시에도 플래그 설정 (다음 시도 시 정상 동작하도록)
+      if (!isInitialDataLoaded.current) {
+        isInitialDataLoaded.current = true;
+      }
     } finally {
       setIsLoadingElderly(false);
     }
@@ -1464,15 +1494,9 @@ export const GuardianHomeScreen = () => {
       // 백엔드에서 해당 날짜만 조회 (반복 일정 자동 생성 포함)
       const todos = await todoApi.getTodos(dateFilter, elderlyId);
       
-      console.log(`✅ 보호자: TODO 로딩 성공 - ${todos.length}개 (${targetDayTab === 'today' ? '오늘' : '내일'})`);
+      console.log(`✅ 보호자: TODO 목록 불러오기 완료 - ${todos.length}개 (${targetDayTab === 'today' ? '오늘' : '내일'})`);
       console.log('📊 완료된 TODO:', todos.filter(t => t.status === 'completed').length);
-      console.log('📊 TODO 목록:', todos.map(t => ({
-        id: t.todo_id,
-        title: t.title,
-        date: t.due_date,
-        is_recurring: t.is_recurring,
-        is_shared: t.is_shared_with_caregiver
-      })));
+
       
       // 성공 시에만 상태 업데이트 (로딩 중에도 이전 데이터 유지)
       setTodayTodos(todos);
@@ -1615,7 +1639,6 @@ export const GuardianHomeScreen = () => {
       }
     } catch (error: any) {
       console.error('❌ 통계 로딩 실패:', error);
-      // 에러 시 null로 설정하여 빈 상태 표시
       if (period === 'month') {
         setMonthlyStats(null);
       } else if (period === 'last_month') {
@@ -1711,8 +1734,21 @@ export const GuardianHomeScreen = () => {
     }
   };
 
+  // 현재 어르신 변경 시 전역 스토어에 저장 및 TODO 및 다이어리 다시 로딩
+  useEffect(() => {
+    if (currentElderly) {
+      // 전역 스토어에 선택된 어르신 정보 저장
+      setSelectedElderly(currentElderly.id, currentElderly.name);
+    }
+  }, [currentElderly?.id, currentElderly?.name, setSelectedElderly]);
+
   // 현재 어르신 변경 시 TODO 및 다이어리 다시 로딩
   useEffect(() => {
+    // 초기 데이터 로딩이 완료되지 않았으면 스킵 (loadConnectedElderly 완료 후 실행되도록)
+    if (!isInitialDataLoaded.current) {
+      return;
+    }
+    
     if (currentElderly) {
       // selectedDayTab을 명시적으로 전달하여 최신 값 사용
       loadTodosForElderly(currentElderly.id, false, selectedDayTab);
@@ -1726,6 +1762,12 @@ export const GuardianHomeScreen = () => {
     useCallback(() => {
       // user가 없으면 데이터 로딩 안함 (로그아웃 시)
       if (!user) return;
+      
+      // 초기 마운트 시에는 스킵 (useEffect에서 이미 처리함)
+      if (isFirstMount.current) {
+        isFirstMount.current = false;
+        return;
+      }
       
       let isMounted = true;
       
@@ -1754,7 +1796,7 @@ export const GuardianHomeScreen = () => {
         isMounted = false;
         clearTimeout(refreshTimer);
       };
-    }, [user, currentElderly?.id, selectedDayTab]) // selectedDayTab도 의존성에 포함
+    }, [user]) // currentElderly?.id, selectedDayTab 제거 (useEffect에서 이미 처리)
   );
 
   // 날짜 포맷팅 유틸리티 함수들
@@ -1779,47 +1821,8 @@ export const GuardianHomeScreen = () => {
     return formatDateWithDay(tomorrow);
   };
 
-  // 카테고리 아이콘 매핑 (Ionicons 사용)
-  const getCategoryIcon = (category: string | null) => {
-    const iconMap: Record<string, any> = {
-      'medicine': 'medical',
-      'MEDICINE': 'medical',
-      'exercise': 'fitness',
-      'EXERCISE': 'fitness',
-      'meal': 'restaurant',
-      'MEAL': 'restaurant',
-      'hospital': 'medical-outline',
-      'HOSPITAL': 'medical-outline',
-      'other': 'list',
-      'OTHER': 'list',
-    };
-    return iconMap[category || 'other'] || 'list';
-  };
-
-  // 카테고리 한국어 이름
-  // 시간 포맷 변환 (HH:MM -> 오전/오후)
-  const formatTime = (timeStr: string): string => {
-    const [hours, minutes] = timeStr.split(':').map(Number);
-    const period = hours < 12 ? '오전' : '오후';
-    const displayHours = hours % 12 || 12;
-    return `${period} ${displayHours}:${minutes.toString().padStart(2, '0')}`;
-  };
-
-  const getCategoryName = (category: string | null): string => {
-    const nameMap: Record<string, string> = {
-      'medicine': '약 복용',
-      'MEDICINE': '약 복용',
-      'exercise': '운동',
-      'EXERCISE': '운동',
-      'meal': '식사',
-      'MEAL': '식사',
-      'hospital': '병원 방문',
-      'HOSPITAL': '병원 방문',
-      'other': '기타',
-      'OTHER': '기타',
-    };
-    return nameMap[category || 'other'] || '기타';
-  };
+  // getCategoryIcon, formatTime, getCategoryName 함수는 공통 유틸리티/상수 사용
+  // formatTime → formatTimeAmPm로 대체
 
   // 건강 알림 생성 (다정한 문구로 변경)
   const generateHealthAlerts = (stats: todoApi.TodoDetailedStats | null) => {
@@ -1922,14 +1925,8 @@ export const GuardianHomeScreen = () => {
     return recommendations;
   };
 
-  // 카테고리 옵션 (GuardianTodoAddScreen과 동일)
-  const categories = [
-    { id: 'MEDICINE', name: '약 복용', icon: 'medical', color: '#FF6B6B' },
-    { id: 'HOSPITAL', name: '병원 방문', icon: 'medical-outline', color: '#4ECDC4' },
-    { id: 'EXERCISE', name: '운동', icon: 'fitness', color: '#45B7D1' },
-    { id: 'MEAL', name: '식사', icon: 'restaurant', color: '#96CEB4' },
-    { id: 'OTHER', name: '기타', icon: 'list', color: '#95A5A6' },
-  ];
+  // 카테고리 옵션 (공통 상수 사용)
+  const categories = TODO_CATEGORIES;
 
   // 시간 옵션
   const timeOptions = [
@@ -1939,24 +1936,7 @@ export const GuardianHomeScreen = () => {
     '오후 9시', '오후 10시'
   ];
 
-  // 시간을 "오전/오후 X시" 형식으로 변환
-  const formatTimeToDisplay = (time24: string | null): string => {
-    if (!time24) return '';
-    const [hour] = time24.split(':').map(Number);
-    if (hour === 0) return '오전 12시';
-    if (hour < 12) return `오전 ${hour}시`;
-    if (hour === 12) return '오후 12시';
-    return `오후 ${hour - 12}시`;
-  };
-
-  // "오전/오후 X시"를 24시간 형식으로 변환
-  const parseDisplayTimeToApi = (displayTime: string): string => {
-    const timeStr = displayTime.replace(/[^0-9]/g, '');
-    const hour = displayTime.includes('오후')
-      ? (parseInt(timeStr) === 12 ? 12 : parseInt(timeStr) + 12)
-      : (parseInt(timeStr) === 12 ? 0 : parseInt(timeStr));
-    return `${hour.toString().padStart(2, '0')}:00`;
-  };
+  // formatTimeToDisplay, parseDisplayTimeToApi 함수는 공통 유틸리티 사용
 
   // 반복 옵션
   const recurringOptions = [
@@ -1965,15 +1945,7 @@ export const GuardianHomeScreen = () => {
     { id: 'monthly', name: '매월' },
   ];
 
-  // 날짜 포맷팅
-  const formatDateForDisplay = (dateString: string) => {
-    const date = new Date(dateString);
-    const month = date.getMonth() + 1;
-    const day = date.getDate();
-    const weekdays = ['일', '월', '화', '수', '목', '금', '토'];
-    const weekday = weekdays[date.getDay()];
-    return `${month}월 ${day}일 (${weekday})`;
-  };
+  // formatDateForDisplay 함수는 공통 유틸리티 사용
 
   // TODO 수정 저장
   const handleSaveEdit = async () => {
@@ -2371,36 +2343,10 @@ export const GuardianHomeScreen = () => {
                     {/* 카테고리 선택 - 그리드 형식 */}
                     <View style={styles.inputSection}>
                       <Text style={styles.inputLabel}>카테고리 *</Text>
-                      <View style={styles.categoryGridInline}>
-                        {categories.map((category) => (
-                          <TouchableOpacity
-                            key={category.id}
-                            style={[
-                              styles.categoryCardInline,
-                              editedTodo.category === category.id && styles.categoryCardInlineSelected,
-                            ]}
-                            onPress={() => setEditedTodo({ ...editedTodo, category: category.id })}
-                            activeOpacity={0.7}
-                          >
-                            <View style={[
-                              styles.categoryCardIconContainerInline,
-                              { backgroundColor: category.color + '15' }
-                            ]}>
-                              <Ionicons 
-                                name={category.icon as any} 
-                                size={28} 
-                                color={category.color} 
-                              />
-                            </View>
-                            <Text style={[
-                              styles.categoryCardTextInline,
-                              editedTodo.category === category.id && styles.categoryCardTextInlineSelected
-                            ]}>
-                              {category.name}
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
-                      </View>
+                      <CategorySelector
+                        selectedCategory={editedTodo.category}
+                        onSelect={(categoryId) => setEditedTodo({ ...editedTodo, category: categoryId })}
+                      />
                     </View>
 
                     {/* 날짜 선택 */}
@@ -2445,6 +2391,18 @@ export const GuardianHomeScreen = () => {
                         />
                       </View>
                     </View>
+
+                    {/* 등록자 정보 */}
+                    {selectedTodo && (
+                      <View style={styles.inputSection}>
+                        <Text style={styles.inputLabel}>등록자</Text>
+                        <Text style={styles.todoDetailValue}>
+                          {selectedTodo.creator_type === 'elderly' ? '어르신이 등록' : 
+                           selectedTodo.creator_type === 'ai' ? 'AI가 추출' : 
+                           '보호자가 등록'}
+                        </Text>
+                      </View>
+                    )}
 
                     {/* 반복 설정 */}
                     <View style={styles.inputSection}>

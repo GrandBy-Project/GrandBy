@@ -750,6 +750,50 @@ class TodoService:
         return todo
     
     @staticmethod
+    def get_todo_by_id(
+        db: Session,
+        todo_id: str,
+        user_id: str,
+        user_role: UserRole
+    ) -> Todo:
+        """
+        TODO 상세 조회
+        
+        Args:
+            db: DB 세션
+            todo_id: TODO ID
+            user_id: 사용자 ID
+            user_role: 사용자 역할 (ELDERLY 또는 CAREGIVER)
+        
+        Returns:
+            TODO 객체
+        """
+        todo = db.query(Todo).filter(Todo.todo_id == todo_id).first()
+        if not todo:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="TODO를 찾을 수 없습니다."
+            )
+        
+        # 권한 확인
+        if user_role == UserRole.ELDERLY:
+            # 어르신인 경우: 본인의 TODO만 조회 가능
+            if todo.elderly_id != user_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="본인의 TODO만 조회할 수 있습니다."
+                )
+        else:
+            # 보호자인 경우: 공유된 TODO만 조회 가능
+            if not todo.is_shared_with_caregiver:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="공유된 TODO만 조회할 수 있습니다."
+                )
+        
+        return todo
+    
+    @staticmethod
     def delete_todo(
         db: Session,
         todo_id: str,

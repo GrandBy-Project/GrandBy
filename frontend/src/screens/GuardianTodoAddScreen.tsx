@@ -15,7 +15,7 @@ import {
   Image,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { Header, BottomNavigationBar, TimePicker } from '../components';
+import { Header, BottomNavigationBar, TimePicker, CategorySelector } from '../components';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Calendar } from 'react-native-calendars';
 import { Ionicons } from '@expo/vector-icons';
@@ -23,6 +23,8 @@ import * as todoApi from '../api/todo';
 import { useAuthStore } from '../store/authStore';
 import { Colors } from '../constants/Colors';
 import { useAlert } from '../components/GlobalAlertProvider';
+import { formatDateForDisplayWithRelative } from '../utils/dateUtils';
+import { TODO_CATEGORIES } from '../constants/TodoCategories';
 
 interface TodoItem {
   id: string;
@@ -42,14 +44,27 @@ export const GuardianTodoAddScreen = () => {
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
   const { show } = useAlert();
-  const [isSaving, setIsSaving] = useState(false);
-  
-  // 쿼리 파라미터로 어르신 ID와 이름, 수정할 TODO ID 받기
   const { elderlyId, elderlyName, todoId } = useLocalSearchParams<{
     elderlyId: string;
     elderlyName: string;
     todoId?: string;
   }>();
+  const [isSaving, setIsSaving] = useState(false);
+  const [isLoadingTodo, setIsLoadingTodo] = useState(false);
+  const [newTodo, setNewTodo] = useState({
+    title: '',
+    description: '',
+    category: '',
+    time: '', // "오전/오후 X시" 형식 (표시용)
+    timeValue: '12:00', // "HH:MM" 형식 (TimePicker용)
+    date: new Date().toISOString().split('T')[0], // YYYY-MM-DD
+    elderlyId: elderlyId || '', // 쿼리 파라미터에서 받은 어르신 ID 사용
+    isRecurring: false,
+    recurringType: 'daily' as 'daily' | 'weekly' | 'monthly',
+    reminderEnabled: true,
+    reminderTime: '',
+    recurringDays: [] as number[], // 주간 반복 요일: [0,1,2,3,4,5,6] (월~일)
+  });
   
   const isEditMode = !!todoId;
 
@@ -117,30 +132,12 @@ export const GuardianTodoAddScreen = () => {
   // 로딩 중일 때 표시
   if (isLoadingTodo) {
     return (
-      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center', paddingTop: 100 }]}>
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center', paddingTop: 100 }]}> 
         <ActivityIndicator size="large" color="#34B79F" />
         <Text style={{ marginTop: 16, color: '#666666' }}>할일 정보를 불러오는 중...</Text>
       </View>
     );
   }
-
-  // 폼 상태
-  const [newTodo, setNewTodo] = useState({
-    title: '',
-    description: '',
-    category: '',
-    time: '', // "오전/오후 X시" 형식 (표시용)
-    timeValue: '12:00', // "HH:MM" 형식 (TimePicker용)
-    date: new Date().toISOString().split('T')[0], // YYYY-MM-DD
-    elderlyId: elderlyId || '', // 쿼리 파라미터에서 받은 어르신 ID 사용
-    isRecurring: false,
-    recurringType: 'daily' as 'daily' | 'weekly' | 'monthly',
-    reminderEnabled: true,
-    reminderTime: '',
-    recurringDays: [] as number[], // 주간 반복 요일: [0,1,2,3,4,5,6] (월~일)
-  });
-  
-  const [isLoadingTodo, setIsLoadingTodo] = useState(false);
 
   // 모달 상태
   const [showRecurringModal, setShowRecurringModal] = useState(false);
@@ -151,13 +148,8 @@ export const GuardianTodoAddScreen = () => {
   const [focusedField, setFocusedField] = useState<string | null>(null);
 
   // 카테고리 옵션 (Backend Enum과 일치)
-  const categories = [
-    { id: 'MEDICINE', name: '약 복용', icon: 'medical', color: '#FF6B6B' },
-    { id: 'HOSPITAL', name: '병원 방문', icon: 'medical-outline', color: '#4ECDC4' },
-    { id: 'EXERCISE', name: '운동', icon: 'fitness', color: '#45B7D1' },
-    { id: 'MEAL', name: '식사', icon: 'restaurant', color: '#96CEB4' },
-    { id: 'OTHER', name: '기타', icon: 'list', color: '#95A5A6' },
-  ];
+  // 카테고리 옵션 (공통 상수 사용)
+  const categories = TODO_CATEGORIES;
 
   // 반복 옵션
   const recurringOptions = [
@@ -290,42 +282,8 @@ export const GuardianTodoAddScreen = () => {
     return categories.find(cat => cat.id === id);
   };
 
-  const formatDate = (dateString?: string) => {
-    const date = dateString ? new Date(dateString) : new Date(newTodo.date);
-    const month = date.getMonth() + 1;
-    const day = date.getDate();
-    const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
-    const dayName = dayNames[date.getDay()];
-    return `${month}월 ${day}일 ${dayName}`;
-  };
-
-  const formatDateForDisplay = (dateString: string): string => {
-    const date = new Date(dateString);
-    const today = new Date();
-    const isToday = dateString === today.toISOString().split('T')[0];
-    
-    if (isToday) {
-      return `오늘 ${formatDate(dateString)}`;
-    }
-    
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-    const isYesterday = dateString === yesterday.toISOString().split('T')[0];
-    
-    if (isYesterday) {
-      return `어제 ${formatDate(dateString)}`;
-    }
-    
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const isTomorrow = dateString === tomorrow.toISOString().split('T')[0];
-    
-    if (isTomorrow) {
-      return `내일 ${formatDate(dateString)}`;
-    }
-    
-    return formatDate(dateString);
-  };
+  // formatDate, formatDateForDisplay 함수는 공통 유틸리티 사용
+  // formatDateForDisplay → formatDateForDisplayWithRelative로 대체
 
   return (
     <View style={styles.container}>
@@ -373,34 +331,10 @@ export const GuardianTodoAddScreen = () => {
         <View style={styles.inputSection}>
           <Text style={styles.inputLabel}>카테고리 *</Text>
           <View style={styles.categoryGridInline}>
-            {categories.map((category) => (
-              <TouchableOpacity
-                key={category.id}
-                style={[
-                  styles.categoryCardInline,
-                  newTodo.category === category.id && styles.categoryCardInlineSelected,
-                ]}
-                onPress={() => setNewTodo({ ...newTodo, category: category.id })}
-                activeOpacity={0.7}
-              >
-                <View style={[
-                  styles.categoryCardIconContainerInline,
-                  { backgroundColor: category.color + '15' }
-                ]}>
-                  <Ionicons 
-                    name={category.icon as any} 
-                    size={28} 
-                    color={category.color} 
-                  />
-                </View>
-                <Text style={[
-                  styles.categoryCardTextInline,
-                  newTodo.category === category.id && styles.categoryCardTextInlineSelected
-                ]}>
-                  {category.name}
-                </Text>
-              </TouchableOpacity>
-            ))}
+            <CategorySelector
+              selectedCategory={newTodo.category}
+              onSelect={(categoryId) => setNewTodo({ ...newTodo, category: categoryId })}
+            />
             {/* 장식용 캐릭터 카드 (3x2 그리드를 채우기 위해) */}
             <View style={styles.categoryCardInlineDisabled}>
               <Image 
@@ -423,7 +357,7 @@ export const GuardianTodoAddScreen = () => {
             <View style={styles.dateButtonContent}>
               <Ionicons name="calendar-outline" size={20} color="#34B79F" />
               <Text style={styles.dateButtonText}>
-                {formatDateForDisplay(newTodo.date)}
+                {formatDateForDisplayWithRelative(newTodo.date)}
               </Text>
             </View>
             <Text style={styles.dropdownIcon}>▼</Text>
@@ -1030,8 +964,8 @@ const styles = StyleSheet.create({
   categoryGridInline: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
+    // gap 대신 margin을 사용하여 정확한 3x2 배치
   },
   categoryCardInline: {
     width: '31%',
@@ -1039,13 +973,10 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 12,
     alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#F0F0F0',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
+    borderWidth: 1.5,
+    borderColor: '#E8E8E8',
+    // CategorySelector 카드와 동일하게 그림자 제거
+    // margin은 CategorySelector 내부에서 처리하므로 여기서는 제거
   },
   categoryCardInlineSelected: {
     borderColor: '#34B79F',
@@ -1080,14 +1011,12 @@ const styles = StyleSheet.create({
     padding: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: '#F0F0F0',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
+    borderWidth: 1.5,
+    borderColor: '#E8E8E8',
+    // CategorySelector 카드와 동일하게 그림자 제거
     overflow: 'hidden',
+    marginRight: 0, // 마지막 카드이므로 marginRight 제거
+    marginBottom: 10,
   },
   decorativeCharacterImage: {
     width: 75,

@@ -21,6 +21,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { getDiaries, Diary } from '../api/diary';
 import { useAuthStore } from '../store/authStore';
+import { useSelectedElderlyStore } from '../store/selectedElderlyStore';
 import * as connectionsApi from '../api/connections';
 import { BottomNavigationBar, Header } from '../components';
 import { DiaryFilters } from '../components/DiaryFilters';
@@ -32,6 +33,7 @@ export const DiaryListScreen = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
+  const { selectedElderlyId, selectedElderlyName, setSelectedElderly } = useSelectedElderlyStore();
   const { show } = useAlert();
 
   const [activeTab, setActiveTab] = useState<'list' | 'calendar'>('list');
@@ -51,8 +53,6 @@ export const DiaryListScreen = () => {
 
   // 보호자용 상태
   const [connectedElderly, setConnectedElderly] = useState<any[]>([]);
-  const [selectedElderlyId, setSelectedElderlyId] = useState<string | null>(null);
-  const [selectedElderlyName, setSelectedElderlyName] = useState<string>('');
   const [showElderlySelector, setShowElderlySelector] = useState(false);
   
   // 어르신용 상태: 연결된 보호자 목록
@@ -73,10 +73,9 @@ export const DiaryListScreen = () => {
       const elderly = await connectionsApi.getConnectedElderly();
       setConnectedElderly(elderly);
       
-      // 첫 번째 어르신을 기본 선택
+      // 전역 스토어에서 선택된 어르신이 없으면 첫 번째 어르신을 기본 선택
       if (elderly.length > 0 && !selectedElderlyId) {
-        setSelectedElderlyId(elderly[0].user_id);
-        setSelectedElderlyName(elderly[0].name);
+        setSelectedElderly(elderly[0].user_id, elderly[0].name);
       }
     } catch (error) {
       console.error('연결된 어르신 로드 실패:', error);
@@ -339,8 +338,7 @@ export const DiaryListScreen = () => {
    * 어르신 선택
    */
   const handleSelectElderly = (elderly: any) => {
-    setSelectedElderlyId(elderly.user_id);
-    setSelectedElderlyName(elderly.name);
+    setSelectedElderly(elderly.user_id, elderly.name);
     setShowElderlySelector(false);
   };
 
