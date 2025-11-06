@@ -277,13 +277,13 @@ apiClient.interceptors.response.use(
     if (status === 422) {
       const details = error.response.data?.detail;
       // Pydantic detail 배열에서 메시지 추출
-      let message = '입력값을 확인해주세요.';
+      let message = '이메일 혹은 비밀번호 형식이 올바르지 않습니다.';
       if (Array.isArray(details) && details.length > 0) {
         const first = details[0];
         if (first?.loc?.includes('email')) {
           message = '이메일 형식을 확인해주세요.';
         } else if (typeof first?.msg === 'string') {
-          message = '입력값을 확인해주세요.';
+          message = '이메일 혹은 비밀번호 형식이 올바르지 않습니다.';
         }
       }
       if (shouldShowAlert) {
