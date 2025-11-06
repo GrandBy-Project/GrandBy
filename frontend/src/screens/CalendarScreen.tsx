@@ -17,6 +17,7 @@ import {
   Dimensions,
   TouchableWithoutFeedback,
   Switch,
+  Image,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Header, BottomNavigationBar, TimePicker, CategorySelector } from '../components';
@@ -1890,11 +1891,21 @@ export const CalendarScreen = () => {
               {/* 카테고리 선택 */}
               <View style={styles.inputSection}>
                 <Text style={styles.inputLabel}>카테고리</Text>
-                <CategorySelector
-                  selectedCategory={newSchedule.category}
-                  onSelect={(categoryId) => setNewSchedule({ ...newSchedule, category: categoryId })}
-                  disabled={showDatePicker}
-                />
+                <View style={styles.categoryGridInline}>
+                  <CategorySelector
+                    selectedCategory={newSchedule.category}
+                    onSelect={(categoryId) => setNewSchedule({ ...newSchedule, category: categoryId })}
+                    disabled={showDatePicker}
+                  />
+                  {/* 장식용 캐릭터 카드 (3x2 그리드를 채우기 위해) */}
+                  <View style={styles.categoryCardInlineDisabled}>
+                    <Image 
+                      source={require('../../assets/haru-character.png')} 
+                      style={styles.decorativeCharacterImage}
+                      resizeMode="contain"
+                    />
+                  </View>
+                </View>
               </View>
 
               {/* 시간 선택 - AICallScreen과 동일한 TimePicker 사용 */}
@@ -3883,8 +3894,8 @@ const styles = StyleSheet.create({
   categoryGridInline: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
+    // gap 대신 margin을 사용하여 정확한 3x2 배치
   },
   categoryCardInline: {
     width: '31%',
@@ -3892,13 +3903,27 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 12,
     alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#F0F0F0',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
+    borderWidth: 1.5,
+    borderColor: '#E8E8E8',
+    // margin은 CategorySelector 내부에서 처리
+  },
+  categoryCardInlineDisabled: {
+    width: '31%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: '#E8E8E8',
+    // CategorySelector 카드와 동일하게 그림자 제거
+    overflow: 'hidden',
+    marginRight: 0, // 마지막 카드이므로 marginRight 제거
+    marginBottom: 10,
+  },
+  decorativeCharacterImage: {
+    width: 75,
+    height: 75,
   },
   categoryCardInlineSelected: {
     borderColor: '#34B79F',

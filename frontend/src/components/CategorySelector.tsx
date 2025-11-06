@@ -26,15 +26,18 @@ export const CategorySelector: React.FC<CategorySelectorProps> = ({
   disabled = false,
 }) => {
   return (
-    <View style={styles.categoryGridInline}>
-      {TODO_CATEGORIES.map((category) => {
+    <>
+      {TODO_CATEGORIES.map((category, index) => {
         const isSelected = selectedCategory === category.id;
+        // 3개씩 배치하므로 마지막 카드 (index % 3 === 2)는 marginRight 제거
+        const isLastInRow = index % 3 === 2;
         return (
           <TouchableOpacity
             key={category.id}
             style={[
               styles.categoryCardInline,
               isSelected && styles.categoryCardInlineSelected,
+              isLastInRow && styles.categoryCardInlineLastInRow,
             ]}
             onPress={() => onSelect(category.id)}
             activeOpacity={0.7}
@@ -63,7 +66,7 @@ export const CategorySelector: React.FC<CategorySelectorProps> = ({
           </TouchableOpacity>
         );
       })}
-    </View>
+    </>
   );
 };
 
@@ -71,8 +74,9 @@ const styles = StyleSheet.create({
   categoryGridInline: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
+    width: '100%', // 부모 컨테이너의 전체 너비 사용
+    // gap 대신 margin을 사용하여 정확한 3x2 배치
   },
   categoryCardInline: {
     width: '31%',
@@ -82,6 +86,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1.5,
     borderColor: '#E8E8E8',
+    marginRight: '3.33%', // 3개 배치를 위한 간격
+    marginBottom: 10,
+  },
+  categoryCardInlineLastInRow: {
+    marginRight: 0, // 마지막 카드는 marginRight 제거하여 정확한 3x2 배치
   },
   categoryCardInlineSelected: {
     borderColor: '#34B79F',

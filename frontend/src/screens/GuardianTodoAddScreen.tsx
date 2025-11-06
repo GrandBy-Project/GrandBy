@@ -964,8 +964,8 @@ const styles = StyleSheet.create({
   categoryGridInline: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
+    // gap 대신 margin을 사용하여 정확한 3x2 배치
   },
   categoryCardInline: {
     width: '31%',
@@ -973,13 +973,10 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 12,
     alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#F0F0F0',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
+    borderWidth: 1.5,
+    borderColor: '#E8E8E8',
+    // CategorySelector 카드와 동일하게 그림자 제거
+    // margin은 CategorySelector 내부에서 처리하므로 여기서는 제거
   },
   categoryCardInlineSelected: {
     borderColor: '#34B79F',
@@ -1014,14 +1011,12 @@ const styles = StyleSheet.create({
     padding: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: '#F0F0F0',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
+    borderWidth: 1.5,
+    borderColor: '#E8E8E8',
+    // CategorySelector 카드와 동일하게 그림자 제거
     overflow: 'hidden',
+    marginRight: 0, // 마지막 카드이므로 marginRight 제거
+    marginBottom: 10,
   },
   decorativeCharacterImage: {
     width: 75,
