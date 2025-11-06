@@ -26,6 +26,7 @@ import { Calendar } from 'react-native-calendars';
 import { TodoItem, getTodosByRange, createTodo, deleteTodo, completeTodo, cancelTodo } from '../api/todo';
 import { getDiaries, Diary } from '../api/diary';
 import { useAuthStore } from '../store/authStore';
+import { useSelectedElderlyStore } from '../store/selectedElderlyStore';
 import * as connectionsApi from '../api/connections';
 import { Colors } from '../constants/Colors';
 import { useFontSizeStore } from '../store/fontSizeStore';
@@ -52,6 +53,7 @@ export const CalendarScreen = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
+  const { selectedElderlyId, setSelectedElderly } = useSelectedElderlyStore();
   const { fontSizeLevel } = useFontSizeStore();
   const { show } = useAlert();
 
@@ -114,7 +116,6 @@ export const CalendarScreen = () => {
 
   // 보호자용: 연결된 어르신 목록
   const [connectedElderly, setConnectedElderly] = useState<any[]>([]);
-  const [selectedElderlyId, setSelectedElderlyId] = useState<string | null>(null);
   
 
   // 필터링된 일정 가져오기
@@ -306,9 +307,9 @@ export const CalendarScreen = () => {
       const elderly = await connectionsApi.getConnectedElderly();
       setConnectedElderly(elderly);
       
-      // 첫 번째 어르신을 기본 선택
+      // 전역 스토어에서 선택된 어르신이 없으면 첫 번째 어르신을 기본 선택
       if (elderly.length > 0 && !selectedElderlyId) {
-        setSelectedElderlyId(elderly[0].user_id);
+        setSelectedElderly(elderly[0].user_id, elderly[0].name);
       }
     } catch (error) {
       console.error('연결된 어르신 로드 실패:', error);
@@ -1078,7 +1079,7 @@ export const CalendarScreen = () => {
                   styles.elderlySelectorButton,
                   selectedElderlyId === elderly.user_id && styles.elderlySelectorButtonActive
                 ]}
-                onPress={() => setSelectedElderlyId(elderly.user_id)}
+                onPress={() => setSelectedElderly(elderly.user_id, elderly.name)}
                 activeOpacity={0.7}
               >
                 <Text style={[

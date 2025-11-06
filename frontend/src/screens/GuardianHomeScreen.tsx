@@ -19,6 +19,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { Calendar } from 'react-native-calendars';
 import { useAuthStore } from '../store/authStore';
+import { useSelectedElderlyStore } from '../store/selectedElderlyStore';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { BottomNavigationBar, Header, QuickActionGrid, type QuickAction, CheckIcon, PhoneIcon, DiaryIcon, TimePicker, CategorySelector } from '../components';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -64,6 +65,7 @@ interface Task {
 export const GuardianHomeScreen = () => {
   const router = useRouter();
   const { user, logout } = useAuthStore();
+  const { setSelectedElderly } = useSelectedElderlyStore();
   const insets = useSafeAreaInsets();
   const { show } = useAlert();
   const [currentElderlyIndex, setCurrentElderlyIndex] = useState(0);
@@ -1436,6 +1438,13 @@ export const GuardianHomeScreen = () => {
       }));
       
       setConnectedElderly(elderlyProfiles);
+      
+      // 첫 번째 어르신을 전역 스토어에 저장 (초기 로딩 시)
+      if (elderlyProfiles.length > 0 && !isInitialDataLoaded.current) {
+        const firstElderly = elderlyProfiles[0];
+        setSelectedElderly(firstElderly.id, firstElderly.name);
+      }
+      
       // 초기 데이터 로딩 완료 플래그 설정 (이제 useEffect가 실행될 수 있음)
       if (!isInitialDataLoaded.current) {
         isInitialDataLoaded.current = true;
@@ -1724,6 +1733,14 @@ export const GuardianHomeScreen = () => {
       // 전체 할일 조회는 통계용이므로 에러 알림은 생략 (너무 자주 발생할 수 있음)
     }
   };
+
+  // 현재 어르신 변경 시 전역 스토어에 저장 및 TODO 및 다이어리 다시 로딩
+  useEffect(() => {
+    if (currentElderly) {
+      // 전역 스토어에 선택된 어르신 정보 저장
+      setSelectedElderly(currentElderly.id, currentElderly.name);
+    }
+  }, [currentElderly?.id, currentElderly?.name, setSelectedElderly]);
 
   // 현재 어르신 변경 시 TODO 및 다이어리 다시 로딩
   useEffect(() => {
