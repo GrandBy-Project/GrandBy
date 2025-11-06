@@ -30,6 +30,8 @@ services:
         condition: service_healthy
     env_file:
       - ./backend/.env
+    environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/credentials/firebase-admin-key.json
     ports:
       - "127.0.0.1:8000:8000"  # Nginx만 접근 가능하도록 로컬 바인딩
     networks:
@@ -37,6 +39,8 @@ services:
     restart: unless-stopped
     # entrypoint.sh가 자동으로 마이그레이션 실행 후 아래 명령어 실행
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    volumes:
+      - /home/ubuntu/credentials/firebase-admin-key.json:/app/credentials/firebase-admin-key.json:ro
 
   # Celery Worker (비동기 작업 처리)
   celery_worker:
@@ -50,6 +54,8 @@ services:
     entrypoint: []
     env_file:
       - ./backend/.env
+    environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/credentials/firebase-admin-key.json
     networks:
       - grandby_network
     healthcheck:
@@ -60,6 +66,8 @@ services:
       start_period: 40s
     restart: unless-stopped
     command: celery -A app.tasks.celery_app:celery_app worker --loglevel=info --concurrency=2
+    volumes:
+      - /home/ubuntu/credentials/firebase-admin-key.json:/app/credentials/firebase-admin-key.json:ro
 
   # Celery Beat (스케줄러 - AI 자동 전화)
   celery_beat:
@@ -73,6 +81,8 @@ services:
     entrypoint: []
     env_file:
       - ./backend/.env
+    environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/credentials/firebase-admin-key.json
     networks:
       - grandby_network
     healthcheck:
@@ -83,6 +93,8 @@ services:
       start_period: 40s
     restart: unless-stopped
     command: celery -A app.tasks.celery_app:celery_app beat --loglevel=info --pidfile=/tmp/celerybeat.pid
+    volumes:
+      - /home/ubuntu/credentials/firebase-admin-key.json:/app/credentials/firebase-admin-key.json:ro
 
 networks:
   grandby_network:

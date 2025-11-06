@@ -9,7 +9,7 @@
       "ios",
       "android"
     ],
-    "icon": "./assets/icon.png",
+    "icon": "./assets/iconCUT.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
@@ -23,7 +23,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
+        "foregroundImage": "./assets/iconCUT.png",
         "backgroundColor": "#ffffff"
       },
       "package": "com.parad327.grandby",
