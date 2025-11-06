@@ -484,7 +484,7 @@ const styles = StyleSheet.create({
     color: '#666666',
     textAlign: 'center',
     lineHeight: Math.max(20, SCREEN_WIDTH * 0.05),
-    marginBottom: Math.max(24, SCREEN_WIDTH * 0.06),
+    marginBottom: Math.max(40, SCREEN_WIDTH * 0.1),
     paddingHorizontal: 8,
   },
   loadingContainer: {
@@ -517,10 +517,10 @@ const styles = StyleSheet.create({
     marginBottom: Math.max(20, SCREEN_WIDTH * 0.05),
   },
   elderlySelectorLabel: {
-    fontSize: Math.max(15, SCREEN_WIDTH * 0.04),
+    fontSize: Math.max(20, SCREEN_WIDTH * 0.048),
     fontWeight: '600',
     color: '#333333',
-    marginBottom: 10,
+    marginBottom: 16,
     paddingHorizontal: 4,
   },
   elderlySelector: {
