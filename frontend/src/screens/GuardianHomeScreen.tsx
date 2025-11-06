@@ -26,11 +26,12 @@ import * as todoApi from '../api/todo';
 import * as connectionsApi from '../api/connections';
 import * as diaryApi from '../api/diary';
 import { useAlert } from '../components/GlobalAlertProvider';
+import { formatPhoneNumber } from '../utils/validation';
 
 interface ElderlyProfile {
   id: string;
   name: string;
-  age: number;
+  age: number; // 만 나이
   profileImage: string;
   healthStatus: 'good' | 'normal' | 'attention';
   todayTasksCompleted: number;
@@ -183,15 +184,11 @@ export const GuardianHomeScreen = () => {
             <View style={styles.elderlyProfileInfo}>
               <View style={styles.elderlyProfileImageContainer}>
                 <Ionicons name={currentElderly.profileImage as any} size={35} color="#666666" />
-                <View style={[
-                  styles.healthStatusDot,
-                  { backgroundColor: getHealthStatusColor(currentElderly.healthStatus) }
-                ]} />
               </View>
               <View style={styles.elderlyProfileText}>
                 <Text style={styles.elderlyName}>{currentElderly.name}</Text>
                 <Text style={styles.elderlyAge}>{currentElderly.age}세</Text>
-                <Text style={styles.elderlyLastActivity}>마지막 활동: {currentElderly.lastActivity}</Text>
+                <Text style={styles.elderlyLastActivity}>최근 로그인: {currentElderly.lastActivity}</Text>
               </View>
             </View>
             <View style={styles.elderlyHealthStatus}>
@@ -1168,7 +1165,7 @@ export const GuardianHomeScreen = () => {
                   key={diary.diary_id}
                   style={styles.commCard}
                   activeOpacity={0.7}
-                  onPress={() => router.push(`/diary-detail?id=${diary.diary_id}`)}
+                  onPress={() => router.push(`/diary-detail?diaryId=${diary.diary_id}`)}
                 >
                   <View style={styles.commCardHeader}>
                     <View style={styles.commCardTitleContainer}>
@@ -1304,6 +1301,101 @@ export const GuardianHomeScreen = () => {
   ];
 
   // 연결된 어르신 목록 불러오기
+  // 세는 나이 계산 함수 (현재 연도 - 출생 연도 + 1)
+  const calculateCountingAge = (birthDate: string | null | undefined): number => {
+    if (!birthDate) {
+      return 0;
+    }
+    
+    try {
+      const birth = new Date(birthDate);
+      const today = new Date();
+      const countingAge = today.getFullYear() - birth.getFullYear() + 1;
+      
+      return countingAge > 0 ? countingAge : 0;
+    } catch (error) {
+      console.error('세는 나이 계산 실패:', error);
+      return 0;
+    }
+  };
+
+  // 만 나이 계산 함수 (생일이 지나야 +1)
+  const calculateFullAge = (birthDate: string | null | undefined): number => {
+    if (!birthDate) {
+      return 0;
+    }
+    
+    try {
+      const birth = new Date(birthDate);
+      const today = new Date();
+      let age = today.getFullYear() - birth.getFullYear();
+      const monthDiff = today.getMonth() - birth.getMonth();
+      
+      // 생일이 아직 안 지났으면 나이 -1
+      if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
+        age--;
+      }
+      
+      return age > 0 ? age : 0;
+    } catch (error) {
+      console.error('만 나이 계산 실패:', error);
+      return 0;
+    }
+  };
+
+  // 나이 포맷팅 함수 (세는 나이세 (만 나이세) 형식)
+  const formatAge = (birthDate: string | null | undefined): string => {
+    if (!birthDate) {
+      return '0세';
+    }
+    
+    const countingAge = calculateCountingAge(birthDate);
+    const fullAge = calculateFullAge(birthDate);
+    
+    if (countingAge === 0 && fullAge === 0) {
+      return '0세';
+    }
+    
+    return `${fullAge}세`;
+  };
+
+  // 마지막 활동 시간 포맷팅 함수
+  const formatLastActivity = (lastLoginAt: string | null | undefined): string => {
+    if (!lastLoginAt) {
+      return '기록 없음';
+    }
+    
+    try {
+      const lastLogin = new Date(lastLoginAt);
+      const now = new Date();
+      const diffMs = now.getTime() - lastLogin.getTime();
+      
+      // 밀리초를 분으로 변환
+      const diffMinutes = Math.floor(diffMs / (1000 * 60));
+      
+      // 1시간 이내: 분 단위
+      if (diffMinutes < 60) {
+        if (diffMinutes < 1) {
+          return '방금 전';
+        }
+        return `${diffMinutes}분 전`;
+      }
+      
+      // 24시간 이내: 시간 단위
+      const diffHours = Math.floor(diffMinutes / 60);
+      if (diffHours < 24) {
+        return `${diffHours}시간 전`;
+      }
+      
+      // 그 이후: 일 단위
+      const diffDays = Math.floor(diffHours / 24);
+      return `${diffDays}일 전`;
+    } catch (error) {
+      console.error('마지막 활동 시간 포맷팅 실패:', error);
+      return '기록 없음';
+    }
+  };
+
   const loadConnectedElderly = async () => {
     // user가 없으면 API 호출 안함 (로그아웃 시)
     if (!user) {
@@ -1321,12 +1413,12 @@ export const GuardianHomeScreen = () => {
       const elderlyProfiles: ElderlyProfile[] = elderly.map((e: any) => ({
         id: e.user_id,
         name: e.name,
-        age: e.age || 0,
+        age: calculateFullAge(e.birth_date), // 만 나이
         profileImage: 'person-circle',
         healthStatus: 'good', // TODO: 실제 건강 상태 계산
         todayTasksCompleted: 0, // TODO: API에서 계산
         todayTasksTotal: 0, // TODO: API에서 계산
-        lastActivity: '방금', // TODO: API에서 계산
+        lastActivity: formatLastActivity(e.last_login_at),
         emergencyContact: e.phone_number || '010-0000-0000',
       }));
       
@@ -1494,6 +1586,47 @@ export const GuardianHomeScreen = () => {
       dominantEmotion,
       total,
     };
+  };
+
+  // 어르신의 통계 데이터 불러오기 (공통 함수)
+  const loadStatsForElderly = async (
+    elderlyId: string,
+    period: 'month' | 'last_month',
+    skipLoadingState: boolean = false
+  ) => {
+    if (!elderlyId) {
+      console.warn('⚠️ 보호자: elderlyId가 없어서 통계 로딩 스킵');
+      return;
+    }
+
+    if (!skipLoadingState) {
+      setIsLoadingStats(true);
+    }
+
+    try {
+      console.log(`📊 보호자: 통계 로딩 시작 - ${elderlyId} (${period})`);
+      const stats = await todoApi.getDetailedStats(period, elderlyId);
+      console.log('✅ 보호자: 통계 로딩 성공', stats);
+
+      if (period === 'month') {
+        setMonthlyStats(stats);
+      } else if (period === 'last_month') {
+        setLastMonthStats(stats);
+      }
+    } catch (error: any) {
+      console.error('❌ 통계 로딩 실패:', error);
+      // 에러 시 null로 설정하여 빈 상태 표시
+      if (period === 'month') {
+        setMonthlyStats(null);
+      } else if (period === 'last_month') {
+        setLastMonthStats(null);
+      }
+      show('오류', '통계 데이터를 불러오는데 실패했습니다.');
+    } finally {
+      if (!skipLoadingState) {
+        setIsLoadingStats(false);
+      }
+    }
   };
 
   // 하위 호환성을 위한 별칭 함수들 (기존 코드 호환성 유지)
@@ -2693,7 +2826,7 @@ export const GuardianHomeScreen = () => {
                           </Text>
                           {elderly.phone_number && (
                             <Text style={{ fontSize: 14, color: '#666' }}>
-                              번호 : {elderly.phone_number}
+                              번호 : {formatPhoneNumber(elderly.phone_number)}
                             </Text>
                           )}
                         </View>

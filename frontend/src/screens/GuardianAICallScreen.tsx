@@ -22,6 +22,7 @@ import { getConnectedElderly } from '../api/connections';
 import { useAuthStore } from '../store/authStore';
 import { BottomNavigationBar, TimePicker, Header } from '../components';
 import { useAlert } from '../components/GlobalAlertProvider';
+import { formatPhoneNumber } from '../utils/validation';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -335,7 +336,7 @@ export const GuardianAICallScreen = () => {
                   </View>
                   {selectedElderly.phone_number && (
                     <Text style={styles.elderlyInfoText}>
-                      전화번호: {selectedElderly.phone_number}
+                      전화번호: {formatPhoneNumber(selectedElderly.phone_number)}
                     </Text>
                   )}
                 </View>

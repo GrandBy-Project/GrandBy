@@ -53,6 +53,7 @@ class UserResponse(UserBase):
     birth_date: Optional[date] = None
     gender: Optional[Gender] = None
     profile_image_url: Optional[str] = None
+    last_login_at: Optional[datetime] = None
     
     class Config:
         from_attributes = True

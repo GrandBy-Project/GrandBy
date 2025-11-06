@@ -32,6 +32,7 @@ import { useWeatherStore } from '../store/weatherStore';
 import { elderlyHomeStyles } from './ElderlyHomeScreen.styles';
 import { useAlert } from '../components/GlobalAlertProvider';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { formatPhoneNumber } from '../utils/validation';
 
 export const ElderlyHomeScreen = () => {
   const router = useRouter();
@@ -935,7 +936,7 @@ export const ElderlyHomeScreen = () => {
                         numberOfLines={1}
                         ellipsizeMode="tail"
                       >
-                        {caregiver.phone_number || '연락처 없음'}
+                        {caregiver.phone_number ? formatPhoneNumber(caregiver.phone_number) : '연락처 없음'}
                       </Text>
                     </View>
                   </View>
@@ -1130,7 +1131,7 @@ export const ElderlyHomeScreen = () => {
                     <View style={styles.modalInfoRow}>
                       <Ionicons name="call" size={moderateScale(16)} color="#666" style={[styles.modalInfoLabel, fontSizeLevel >= 1 && { fontSize: 16 }]} />
                       <Text style={[styles.modalInfoText, { fontSize: moderateScale(14) }, fontSizeLevel >= 1 && { fontSize: 16 }]}>
-                        {selectedConnection.phone_number}
+                        {formatPhoneNumber(selectedConnection.phone_number)}
                       </Text>
                     </View>
                   )}

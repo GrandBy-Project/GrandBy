@@ -18,7 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { Header, Button, Input } from '../components';
 import { useAlert } from '../components/GlobalAlertProvider';
-import { validatePhoneNumber, validateName, validateVerificationCode, validatePassword } from '../utils/validation';
+import { validatePhoneNumber, validateName, validateVerificationCode, validatePassword, formatPhoneNumber } from '../utils/validation';
 import apiClient from '../api/client';
 import { useFontSizeStore } from '../store/fontSizeStore';
 
@@ -86,6 +86,12 @@ const FindEmailTab = () => {
   const [isLoading, setIsLoading] = useState(false);
   const phoneRef = useRef<TextInput>(null);
   const { show } = useAlert();
+  
+  // 전화번호 입력 처리 (포맷팅 적용)
+  const handlePhoneNumberChange = (text: string) => {
+    const formatted = formatPhoneNumber(text);
+    setPhoneNumber(formatted);
+  };
 
   const handleFindEmail = async () => {
     try {
@@ -106,7 +112,7 @@ const FindEmailTab = () => {
 
       const response = await apiClient.post('/api/auth/find-email', {
         name,
-        phone_number: phoneNumber,
+        phone_number: phoneNumber.replace(/[^\d]/g, ''), // 숫자만 전송
       });
 
       // API는 masked_email 키를 반환하므로 해당 값 사용
@@ -151,7 +157,7 @@ const FindEmailTab = () => {
         ref={phoneRef}
         label="전화번호"
         value={phoneNumber}
-        onChangeText={setPhoneNumber}
+        onChangeText={handlePhoneNumberChange}
         placeholder="010-1234-5678"
         keyboardType="phone-pad"
         returnKeyType="done"

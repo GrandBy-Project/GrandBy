@@ -16,7 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { Header, Button, Input } from '../components';
-import { validateName, validatePhoneNumber, validateBirthDate, formatBirthDate } from '../utils/validation';
+import { validateName, validatePhoneNumber, validateBirthDate, formatBirthDate, formatPhoneNumber } from '../utils/validation';
 import { Gender } from '../types';
 import apiClient from '../api/client';
 import { useAuthStore } from '../store/authStore';
@@ -33,10 +33,16 @@ export const ProfileEditScreen = () => {
   const { show } = useAlert();
   
   const [name, setName] = useState(user?.name || '');
-  const [phoneNumber, setPhoneNumber] = useState(user?.phone_number || '');
+  const [phoneNumber, setPhoneNumber] = useState(user?.phone_number ? formatPhoneNumber(user.phone_number) : '');
   const [birthDate, setBirthDate] = useState(user?.birth_date || '');
   const [gender, setGender] = useState<Gender | undefined>(user?.gender);
   const [isLoading, setIsLoading] = useState(false);
+  
+  // 전화번호 입력 처리 (포맷팅 적용)
+  const handlePhoneNumberChange = (text: string) => {
+    const formatted = formatPhoneNumber(text);
+    setPhoneNumber(formatted);
+  };
 
   const phoneRef = useRef<TextInput>(null);
   const birthDateRef = useRef<TextInput>(null);
@@ -64,7 +70,7 @@ export const ProfileEditScreen = () => {
   useEffect(() => {
     if (user) {
       setName(user.name || '');
-      setPhoneNumber(user.phone_number || '');
+      setPhoneNumber(user.phone_number ? formatPhoneNumber(user.phone_number) : '');
       setBirthDate(user.birth_date || '');
       setGender(user.gender);
     }
@@ -105,7 +111,7 @@ export const ProfileEditScreen = () => {
 
       const response = await apiClient.put('/api/users/profile', {
         name,
-        phone_number: phoneNumber,
+        phone_number: phoneNumber.replace(/[^\d]/g, ''), // 숫자만 전송
         birth_date: birthDate,
         gender,
       });
@@ -195,7 +201,7 @@ export const ProfileEditScreen = () => {
               ref={phoneRef}
               label="전화번호"
               value={phoneNumber}
-              onChangeText={setPhoneNumber}
+              onChangeText={handlePhoneNumberChange}
               placeholder="010-1234-5678"
               keyboardType="phone-pad"
               returnKeyType="next"
