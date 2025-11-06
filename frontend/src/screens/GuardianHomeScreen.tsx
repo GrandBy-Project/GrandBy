@@ -26,6 +26,7 @@ import * as todoApi from '../api/todo';
 import * as connectionsApi from '../api/connections';
 import * as diaryApi from '../api/diary';
 import { useAlert } from '../components/GlobalAlertProvider';
+import { formatPhoneNumber } from '../utils/validation';
 
 interface ElderlyProfile {
   id: string;
@@ -1168,7 +1169,7 @@ export const GuardianHomeScreen = () => {
                   key={diary.diary_id}
                   style={styles.commCard}
                   activeOpacity={0.7}
-                  onPress={() => router.push(`/diary-detail?id=${diary.diary_id}`)}
+                  onPress={() => router.push(`/diary-detail?diaryId=${diary.diary_id}`)}
                 >
                   <View style={styles.commCardHeader}>
                     <View style={styles.commCardTitleContainer}>
@@ -2693,7 +2694,7 @@ export const GuardianHomeScreen = () => {
                           </Text>
                           {elderly.phone_number && (
                             <Text style={{ fontSize: 14, color: '#666' }}>
-                              번호 : {elderly.phone_number}
+                              번호 : {formatPhoneNumber(elderly.phone_number)}
                             </Text>
                           )}
                         </View>
