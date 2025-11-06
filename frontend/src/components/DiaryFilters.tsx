@@ -71,19 +71,19 @@ export const DiaryFilters: React.FC<DiaryFiltersProps> = ({
   };
 
   const getCurrentMonthOptions = () => {
-    // 다이어리가 있는 월만 반환
-    if (availableMonths.length > 0) {
-      return availableMonths;
-    }
-    // availableMonths가 없으면 기존 로직 사용 (초기 로딩 중)
-    const options: string[] = [];
+    // 현재월 계산
     const now = new Date();
-    for (let i = -6; i <= 6; i++) {
-      const date = new Date(now.getFullYear(), now.getMonth() + i, 1);
-      const monthStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-      options.push(monthStr);
-    }
-    return options;
+    const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+    // 현재월 + 일기가 있는 월들을 합치고 중복 제거
+    const monthset = new Set<string>();
+    monthset.add(currentMonthStr); // 현재월은 항상 포함
+
+    // 일기가 있는 월들 추가
+    availableMonths.forEach(month => monthset.add(month));
+
+    // 최신순 정렬
+    return Array.from(monthset).sort((a, b) => b.localeCompare(a));
   };
 
   const formatMonth = (monthStr: string) => {
@@ -137,32 +137,6 @@ export const DiaryFilters: React.FC<DiaryFiltersProps> = ({
                     ]}
                   >
                     {mood.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-
-              {/* 어르신 필터 (보호자용) */}
-              {connectedElderly.map(elderly => (
-                <TouchableOpacity
-                  key={elderly.user_id}
-                  style={[
-                    styles.chip,
-                    selectedElderlyIds.includes(elderly.user_id) && styles.chipSelected,
-                  ]}
-                  onPress={() => toggleElderly(elderly.user_id)}
-                >
-                  <Ionicons
-                    name="person-outline"
-                    size={16}
-                    color={selectedElderlyIds.includes(elderly.user_id) ? Colors.primary : Colors.textSecondary}
-                  />
-                  <Text
-                    style={[
-                      styles.chipText,
-                      selectedElderlyIds.includes(elderly.user_id) && styles.chipTextSelected,
-                    ]}
-                  >
-                    {elderly.name}
                   </Text>
                 </TouchableOpacity>
               ))}

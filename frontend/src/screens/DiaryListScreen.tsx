@@ -13,9 +13,7 @@ import {
   ActivityIndicator,
   RefreshControl,
   Modal,
-  Pressable,
   ScrollView,
-  Animated,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
@@ -56,6 +54,9 @@ export const DiaryListScreen = () => {
   const [selectedElderlyId, setSelectedElderlyId] = useState<string | null>(null);
   const [selectedElderlyName, setSelectedElderlyName] = useState<string>('');
   const [showElderlySelector, setShowElderlySelector] = useState(false);
+  
+  // 어르신용 상태: 연결된 보호자 목록
+  const [connectedCaregivers, setConnectedCaregivers] = useState<any[]>([]);
 
   const flatListRef = useRef<FlatList<Diary>>(null);
 
@@ -65,7 +66,7 @@ export const DiaryListScreen = () => {
   const limit = 20;
 
   /**
-   * 연결된 어르신 목록 로드
+   * 연결된 어르신 목록 로드 (보호자용)
    */
   const loadConnectedElderly = async () => {
     try {
@@ -79,6 +80,23 @@ export const DiaryListScreen = () => {
       }
     } catch (error) {
       console.error('연결된 어르신 로드 실패:', error);
+    }
+  };
+
+  /**
+   * 연결된 보호자 목록 로드 (어르신용)
+   */
+  const loadConnectedCaregivers = async () => {
+    try {
+      const connections = await connectionsApi.getConnections();
+      // 연결된 보호자 정보 추출 (active 상태만)
+      const caregivers = connections.active.map(conn => ({
+        user_id: conn.user_id,
+        name: conn.name,
+      }));
+      setConnectedCaregivers(caregivers);
+    } catch (error) {
+      console.error('연결된 보호자 로드 실패:', error);
     }
   };
 
@@ -284,11 +302,13 @@ export const DiaryListScreen = () => {
 
 
   /**
-   * 보호자인 경우 연결된 어르신 목록 로드
+   * 역할에 따라 연결된 사용자 목록 로드
    */
   useEffect(() => {
     if (user?.role === 'caregiver') {
       loadConnectedElderly();
+    } else if (user?.role === 'elderly') {
+      loadConnectedCaregivers();
     }
   }, [user]);
 
@@ -360,6 +380,35 @@ export const DiaryListScreen = () => {
   };
 
   /**
+   * 작성자 이름 가져오기
+   */
+  const getAuthorName = (diary: Diary): string => {
+    // 현재 사용자가 작성자인 경우
+    if (diary.author_id === user?.user_id) {
+      return user.name;
+    }
+    
+    // 보호자인 경우: 연결된 어르신 중에서 작성자를 찾기
+    if (user?.role === 'caregiver') {
+      const author = connectedElderly.find(elderly => elderly.user_id === diary.author_id);
+      if (author) {
+        return author.name;
+      }
+    }
+    
+    // 어르신인 경우: 연결된 보호자 중에서 작성자를 찾기
+    if (user?.role === 'elderly') {
+      const author = connectedCaregivers.find(caregiver => caregiver.user_id === diary.author_id);
+      if (author) {
+        return author.name;
+      }
+    }
+    
+    // 찾을 수 없는 경우 빈 문자열 반환
+    return '';
+  };
+
+  /**
    * 작성자 배지 정보 가져오기
    */
   const getAuthorBadgeInfo = (diary: Diary) => {
@@ -373,11 +422,13 @@ export const DiaryListScreen = () => {
       };
     }
     
+    const authorName = getAuthorName(diary);
+    
     if (diary.author_type === 'caregiver') {
       return {
         icon: 'medical' as const,
         iconFamily: 'Ionicons' as const,
-        text: '보호자 작성',
+        text: authorName ? `${authorName}님 작성` : '보호자 작성',
         color: '#2196F3',
         bgColor: '#E3F2FD',
       };
@@ -387,7 +438,7 @@ export const DiaryListScreen = () => {
       return {
         icon: 'pencil' as const,
         iconFamily: 'Ionicons' as const,
-        text: '어르신 작성',
+        text: authorName ? `${authorName}님 작성` : '어르신님 작성',
         color: '#4CAF50',
         bgColor: '#E8F5E9',
       };
@@ -566,7 +617,7 @@ export const DiaryListScreen = () => {
       <Ionicons name="book-outline" size={64} color="#CCCCCC" style={{ marginBottom: 16 }} />
       <Text style={styles.emptyTitle}>작성된 일기가 없습니다</Text>
       <Text style={styles.emptyDescription}>
-        AI와의 통화를 통해 자동으로 일기가 생성되거나{'\n'}
+        하루와 대화를 통해 일기를 작성하거나{'\n'}
         직접 일기를 작성해보세요
       </Text>
     </View>

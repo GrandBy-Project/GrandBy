@@ -138,46 +138,57 @@ export const validateVerificationCode = (code: string): { valid: boolean; messag
 /**
  * 생년월일 검증
  */
-export const validateBirthDate = (birthDate: string): { valid: boolean; message: string } => {
+export const validateBirthDate = (raw: string): { valid: boolean; message: string } => {
+  const birthDate = (raw || "").trim();
+
   if (!birthDate) {
-    return { valid: false, message: '생년월일을 입력해주세요' };
+    return { valid: false, message: "생년월일을 입력해주세요" };
   }
-  
-  // YYYY-MM-DD 형식 검증
-  const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-  if (!dateRegex.test(birthDate)) {
-    return { valid: false, message: 'YYYY-MM-DD 형식으로 입력해주세요' };
+
+  // 1) 형식(구조)만 체크: 숫자4-숫자2-숫자2
+  const structureRe = /^\d{4}-\d{2}-\d{2}$/;
+  if (!structureRe.test(birthDate)) {
+    return { valid: false, message: "YYYY-MM-DD 형식으로 입력해주세요" };
   }
-  
-  // 유효한 날짜인지 확인
-  const date = new Date(birthDate);
-  const today = new Date();
-  
-  if (isNaN(date.getTime())) {
-    return { valid: false, message: '올바른 날짜를 입력해주세요' };
+
+  // 2) 숫자 분해
+  const [yStr, mStr, dStr] = birthDate.split("-");
+  const y = parseInt(yStr, 10);
+  const m = parseInt(mStr, 10);
+  const d = parseInt(dStr, 10);
+
+  // 3) 월/일 1차 범위 체크 (00, 13월, 32일 등 빠르게 차단)
+  if (m < 1 || m > 12 || d < 1 || d > 31) {
+    return { valid: false, message: "올바른 날짜를 입력해주세요" };
   }
-  
-  // 미래 날짜 방지
-  if (date > today) {
-    return { valid: false, message: '미래 날짜는 입력할 수 없습니다' };
+
+  // 4) 윤년/말일 체크
+  const isLeap = (yy: number) => (yy % 4 === 0 && yy % 100 !== 0) || (yy % 400 === 0);
+  const daysInMonth = (yy: number, mm: number) => {
+    const base = [31, 28 + (isLeap(yy) ? 1 : 0), 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    return base[mm - 1];
+  };
+  if (d > daysInMonth(y, m)) {
+    return { valid: false, message: "올바른 날짜를 입력해주세요" };
   }
-  
-  // 만 14세 이상 확인
-  const age = today.getFullYear() - date.getFullYear();
-  const monthDiff = today.getMonth() - date.getMonth();
-  const dayDiff = today.getDate() - date.getDate();
-  
-  const actualAge = monthDiff < 0 || (monthDiff === 0 && dayDiff < 0) ? age - 1 : age;
-  
-  if (actualAge < 14) {
-    return { valid: false, message: '만 14세 이상만 가입 가능합니다' };
+
+  // 5) 미래 날짜 방지 (로컬 오늘 기준; KST가 필요하면 KST 오늘 계산 함수로 대체)
+  const now = new Date();
+  const ty = now.getFullYear();
+  const tm = now.getMonth() + 1;
+  const td = now.getDate();
+  const isFuture = y > ty || (y === ty && (m > tm || (m === tm && d > td)));
+  if (isFuture) {
+    return { valid: false, message: "미래 날짜는 입력할 수 없습니다" };
   }
-  
-  if (actualAge > 120) {
-    return { valid: false, message: '올바른 생년월일을 입력해주세요' };
-  }
-  
-  return { valid: true, message: '' };
+
+  // 6) 나이 제한 (만 14~120세)
+  let age = ty - y;
+  if (tm < m || (tm === m && td < d)) age -= 1;
+  if (age < 14) return { valid: false, message: "만 14세 이상만 가입 가능합니다" };
+  if (age > 120) return { valid: false, message: "올바른 생년월일을 입력해주세요" };
+
+  return { valid: true, message: "" };
 };
 
 /**
