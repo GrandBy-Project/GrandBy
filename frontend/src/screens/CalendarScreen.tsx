@@ -53,7 +53,7 @@ export const CalendarScreen = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
-  const { selectedElderlyId, setSelectedElderly } = useSelectedElderlyStore();
+  const { selectedElderlyId, selectedElderlyName, setSelectedElderly } = useSelectedElderlyStore();
   const { fontSizeLevel } = useFontSizeStore();
   const { show } = useAlert();
 
@@ -1067,32 +1067,6 @@ export const CalendarScreen = () => {
         }
       />
 
-      {/* 보호자용 어르신 선택 (연결된 어르신이 여러 명인 경우) */}
-      {user?.role === 'caregiver' && connectedElderly.length > 1 && (
-        <View style={styles.elderlySelectorContainer}>
-          <Text style={styles.elderlySelectorLabel}>어르신 선택:</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.elderlySelectorScroll}>
-            {connectedElderly.map((elderly) => (
-              <TouchableOpacity
-                key={elderly.user_id}
-                style={[
-                  styles.elderlySelectorButton,
-                  selectedElderlyId === elderly.user_id && styles.elderlySelectorButtonActive
-                ]}
-                onPress={() => setSelectedElderly(elderly.user_id, elderly.name)}
-                activeOpacity={0.7}
-              >
-                <Text style={[
-                  styles.elderlySelectorButtonText,
-                  selectedElderlyId === elderly.user_id && styles.elderlySelectorButtonTextActive
-                ]}>
-                  {elderly.name}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
-      )}
 
       {/* 보호자인데 어르신이 선택되지 않은 경우 안내 */}
       {user?.role === 'caregiver' && !selectedElderlyId && connectedElderly.length === 0 && (
@@ -1498,7 +1472,11 @@ export const CalendarScreen = () => {
               <View style={styles.scheduleSection}>
                 <View style={styles.scheduleHeader}>
                   <Text style={styles.scheduleSectionTitle}>
-                    {selectedDate ? `${formatDateWithWeekday(selectedDate)} 일정` : '오늘의 일정'}
+                    {selectedDate 
+                      ? `${formatDateWithWeekday(selectedDate)} 일정` 
+                      : user?.role === 'caregiver' && selectedElderlyName
+                        ? `${selectedElderlyName}님의 일정`
+                        : '오늘의 일정'}
                   </Text>
                 </View>
 
@@ -3533,14 +3511,16 @@ const styles = StyleSheet.create({
   detailModalOverlay: {
     flex: 1,
     backgroundColor: Colors.overlay,
-    justifyContent: 'flex-end',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   detailModalContent: {
     backgroundColor: Colors.background,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    borderRadius: 20,
     maxHeight: '80%',
     minHeight: '50%',
+    width: '90%',
+    alignSelf: 'center',
   },
   detailModalHeader: {
     flexDirection: 'row',
