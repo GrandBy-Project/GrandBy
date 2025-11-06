@@ -111,6 +111,11 @@ export const GuardianHomeScreen = () => {
   // 스크롤 관련 ref
   const scrollViewRef = useRef<ScrollView>(null);
   
+  // 초기 마운트 여부 추적 (useFocusEffect 중복 호출 방지)
+  const isFirstMount = useRef(true);
+  // 초기 데이터 로딩 완료 여부 추적 (useEffect 중복 호출 방지)
+  const isInitialDataLoaded = useRef(false);
+  
   // 전체보기 토글 상태
   const [showAllTodos, setShowAllTodos] = useState(false);
   
@@ -353,9 +358,7 @@ export const GuardianHomeScreen = () => {
                 style={[styles.dayTab, selectedDayTab === 'today' && styles.dayTabActive]}
                 onPress={() => {
                   setSelectedDayTab('today');
-                  if (currentElderly) {
-                    loadTodosForElderly(currentElderly.id, false, 'today');
-                  }
+                  // useEffect가 자동으로 selectedDayTab 변경을 감지하여 loadTodosForElderly 호출
                 }}
                 activeOpacity={0.7}
               >
@@ -367,9 +370,7 @@ export const GuardianHomeScreen = () => {
                 style={[styles.dayTab, selectedDayTab === 'tomorrow' && styles.dayTabActive]}
                 onPress={() => {
                   setSelectedDayTab('tomorrow');
-                  if (currentElderly) {
-                    loadTodosForElderly(currentElderly.id, false, 'tomorrow');
-                  }
+                  // useEffect가 자동으로 selectedDayTab 변경을 감지하여 loadTodosForElderly 호출
                 }}
                 activeOpacity={0.7}
               >
@@ -1343,10 +1344,18 @@ export const GuardianHomeScreen = () => {
       }));
       
       setConnectedElderly(elderlyProfiles);
+      // 초기 데이터 로딩 완료 플래그 설정 (이제 useEffect가 실행될 수 있음)
+      if (!isInitialDataLoaded.current) {
+        isInitialDataLoaded.current = true;
+      }
     } catch (error: any) {
       console.error('❌ 연결된 어르신 로딩 실패:', error);
       setConnectedElderly([]);
       show('오류', '연결된 어르신 목록을 불러오는데 실패했습니다.');
+      // 에러 시에도 플래그 설정 (다음 시도 시 정상 동작하도록)
+      if (!isInitialDataLoaded.current) {
+        isInitialDataLoaded.current = true;
+      }
     } finally {
       setIsLoadingElderly(false);
     }
@@ -1613,6 +1622,11 @@ export const GuardianHomeScreen = () => {
 
   // 현재 어르신 변경 시 TODO 및 다이어리 다시 로딩
   useEffect(() => {
+    // 초기 데이터 로딩이 완료되지 않았으면 스킵 (loadConnectedElderly 완료 후 실행되도록)
+    if (!isInitialDataLoaded.current) {
+      return;
+    }
+    
     if (currentElderly) {
       // selectedDayTab을 명시적으로 전달하여 최신 값 사용
       loadTodosForElderly(currentElderly.id, false, selectedDayTab);
@@ -1626,6 +1640,12 @@ export const GuardianHomeScreen = () => {
     useCallback(() => {
       // user가 없으면 데이터 로딩 안함 (로그아웃 시)
       if (!user) return;
+      
+      // 초기 마운트 시에는 스킵 (useEffect에서 이미 처리함)
+      if (isFirstMount.current) {
+        isFirstMount.current = false;
+        return;
+      }
       
       let isMounted = true;
       
@@ -1654,7 +1674,7 @@ export const GuardianHomeScreen = () => {
         isMounted = false;
         clearTimeout(refreshTimer);
       };
-    }, [user, currentElderly?.id, selectedDayTab]) // selectedDayTab도 의존성에 포함
+    }, [user]) // currentElderly?.id, selectedDayTab 제거 (useEffect에서 이미 처리)
   );
 
   // 날짜 포맷팅 유틸리티 함수들
