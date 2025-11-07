@@ -491,44 +491,30 @@ export const CalendarScreen = () => {
     }
   }, [user]);
 
-  // 선택된 어르신 변경 시 일정 다시 로드
-  useEffect(() => {
-    if (user?.role === 'caregiver' && selectedElderlyId) {
-      loadSchedules();
-      loadDiaries();
-    }
-  }, [selectedElderlyId]);
-
-  // 컴포넌트 마운트 시 & selectedDay 변경 시 일정 로딩
-  useEffect(() => {
-    // 보호자인 경우 어르신이 선택된 후에만 로드
-    if (user?.role === 'caregiver' && !selectedElderlyId) {
-      return;
-    }
-    loadSchedules();
-    loadDiaries();
-  }, [selectedDay, isMonthlyView]);
-
   // 날짜 변경 시 스크롤 뷰에서 해당 날짜로 이동
   useEffect(() => {
     const dates = getExtendedDates(selectedDay);
     scrollToDate(selectedDay, dates);
   }, [selectedDay]);
 
-  // 화면 포커스 시 일정 목록 새로고침 (수정 후 복귀 시 자동 업데이트)
+  // 화면 포커스 시 및 날짜/뷰 변경 시 일정 목록 로드 (중복 호출 방지)
   useFocusEffect(
     useCallback(() => {
-      // 보호자인 경우 어르신이 선택되어 있을 때만 로드
+      // 보호자인 경우 어르신이 선택된 후에만 로드
+      if (user?.role === 'caregiver' && !selectedElderlyId) {
+        return;
+      }
+      
+      // 일정 및 일기 로드
       if (user?.role === 'caregiver' && selectedElderlyId) {
         loadSchedules();
         loadDiaries();
       } else if (user?.role === 'elderly') {
-        // 어르신인 경우 바로 로드
         loadSchedules();
         loadDiaries();
       }
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [user?.role, selectedElderlyId])
+    }, [user?.role, selectedElderlyId, selectedDay, isMonthlyView])
   );
 
   // 주간 캘린더 유틸리티 함수들
@@ -753,13 +739,19 @@ export const CalendarScreen = () => {
   const scrollToDate = (date: Date, dates: Date[]) => {
     const index = dates.findIndex(d => isSameDate(d, date));
     if (index !== -1 && dayScrollViewRef.current) {
-      // 각 날짜 버튼의 너비: minWidth(50) + marginRight(8) = 58
+      // 각 날짜 버튼의 전체 너비: minWidth(50) + marginRight(8) = 58
       const buttonWidth = 58;
+      // 버튼의 실제 콘텐츠 너비 (minWidth)
+      const buttonContentWidth = 50;
+      // ScrollView의 좌측 padding (daySelectorContent의 paddingHorizontal)
+      const scrollViewPadding = 24;
       const screenWidth = Dimensions.get('window').width;
-      // 버튼 중앙 위치 계산
-      const buttonCenterX = index * buttonWidth + buttonWidth / 2;
+      
+      // 날짜 텍스트의 중앙 위치 계산 (padding 포함)
+      const dateTextCenterX = scrollViewPadding + index * buttonWidth + buttonContentWidth / 2;
+      
       // 화면 중앙으로 맞추기 위한 스크롤 위치
-      const scrollPosition = buttonCenterX - screenWidth / 2;
+      const scrollPosition = dateTextCenterX - screenWidth / 2;
       
       // 약간의 지연 후 스크롤 (렌더링 완료 후)
       setTimeout(() => {
@@ -776,6 +768,14 @@ export const CalendarScreen = () => {
     const newDate = new Date(selectedDay);
     newDate.setDate(1); // 먼저 1일로 설정 (월말 날짜 오류 방지)
     newDate.setMonth(newDate.getMonth() - 1); // 그 다음 월 변경
+    
+    // 새 날짜가 현재 달이면 오늘 날짜로 설정
+    const today = new Date();
+    if (newDate.getFullYear() === today.getFullYear() && 
+        newDate.getMonth() === today.getMonth()) {
+      newDate.setDate(today.getDate());
+    }
+    
     setSelectedDay(newDate);
   };
 
@@ -783,6 +783,14 @@ export const CalendarScreen = () => {
     const newDate = new Date(selectedDay);
     newDate.setDate(1); // 먼저 1일로 설정 (월말 날짜 오류 방지)
     newDate.setMonth(newDate.getMonth() + 1); // 그 다음 월 변경
+    
+    // 새 날짜가 현재 달이면 오늘 날짜로 설정
+    const today = new Date();
+    if (newDate.getFullYear() === today.getFullYear() && 
+        newDate.getMonth() === today.getMonth()) {
+      newDate.setDate(today.getDate());
+    }
+    
     setSelectedDay(newDate);
   };
 
@@ -1551,11 +1559,9 @@ export const CalendarScreen = () => {
               <View style={styles.scheduleSection}>
                 <View style={styles.scheduleHeader}>
                   <Text style={styles.scheduleSectionTitle}>
-                    {selectedDate 
-                      ? `${formatDateWithWeekday(selectedDate)} 일정` 
-                      : user?.role === 'caregiver' && selectedElderlyName
-                        ? `${selectedElderlyName}님의 일정`
-                        : '오늘의 일정'}
+                    {isToday(selectedDay) 
+                      ? '오늘의 일정' 
+                      : `${selectedDay.getMonth() + 1}월 ${selectedDay.getDate()}일의 일정`}
                   </Text>
                 </View>
 
@@ -1628,44 +1634,40 @@ export const CalendarScreen = () => {
                         </View>
 
                         <View style={styles.scheduleContent}>
-                          <View style={styles.scheduleMetaRow}>
-                            <View style={[
-                              styles.scheduleStatusBadge,
-                              isCompleted && styles.scheduleStatusBadgeCompleted,
-                              isCancelled && styles.scheduleStatusBadgeCancelled,
-                            ]}>
-                              <Text
-                                style={[
-                                  styles.scheduleStatusBadgeText,
-                                  isCompleted && styles.scheduleStatusBadgeTextCompleted,
-                                  isCancelled && styles.scheduleStatusBadgeTextCancelled,
-                                ]}
-                              >
-                                {isCompleted ? '완료' : isCancelled ? '취소' : '예정'}
-                              </Text>
+                          {/* 완료 또는 취소 상태일 때만 배지 표시 */}
+                          {(isCompleted || isCancelled) && (
+                            <View style={styles.scheduleMetaRow}>
+                              <View style={[
+                                styles.scheduleStatusBadge,
+                                isCompleted && styles.scheduleStatusBadgeCompleted,
+                                isCancelled && styles.scheduleStatusBadgeCancelled,
+                              ]}>
+                                <Text
+                                  style={[
+                                    styles.scheduleStatusBadgeText,
+                                    isCompleted && styles.scheduleStatusBadgeTextCompleted,
+                                    isCancelled && styles.scheduleStatusBadgeTextCancelled,
+                                  ]}
+                                >
+                                  {isCompleted ? '완료' : '취소'}
+                                </Text>
+                              </View>
                             </View>
-                            <View style={[
-                              styles.scheduleShareBadge,
-                              schedule.is_shared_with_caregiver ? styles.scheduleShareBadgeOn : styles.scheduleShareBadgeOff,
-                            ]}>
-                              <Ionicons
-                                name={schedule.is_shared_with_caregiver ? 'people' : 'lock-closed'}
-                                size={12}
-                                color={schedule.is_shared_with_caregiver ? Colors.primary : Colors.textSecondary}
-                                style={{ marginRight: 4 }}
-                              />
-                              <Text
-                                style={[
-                                  styles.scheduleShareBadgeText,
-                                  schedule.is_shared_with_caregiver ? styles.scheduleShareBadgeTextOn : styles.scheduleShareBadgeTextOff,
-                                ]}
-                              >
-                                {schedule.is_shared_with_caregiver ? '공유' : '비공유'}
-                              </Text>
-                            </View>
+                          )}
+
+                          {/* 제목과 공유 아이콘을 같은 라인에 배치 */}
+                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <Text style={[styles.scheduleTitle, (isCompleted || isCancelled) && styles.scheduleTitleCompleted, { flex: 1, marginRight: 8 }]}>
+                              {schedule.title}
+                            </Text>
+                            {/* 공유 아이콘 (우측 배치) */}
+                            <Ionicons
+                              name={schedule.is_shared_with_caregiver ? 'people' : 'lock-closed'}
+                              size={18}
+                              color={schedule.is_shared_with_caregiver ? Colors.primary : Colors.textLight}
+                            />
                           </View>
 
-                          <Text style={[styles.scheduleTitle, (isCompleted || isCancelled) && styles.scheduleTitleCompleted]}>{schedule.title}</Text>
                           <Text style={[styles.scheduleTime, (isCompleted || isCancelled) && styles.scheduleTimeCompleted]}>
                             {formatTimeKorean(schedule.due_time)}
                           </Text>
@@ -1687,7 +1689,6 @@ export const CalendarScreen = () => {
                     <View style={styles.timeScheduleContainer}>
                       {pendingSchedules.length > 0 && (
                         <View style={styles.scheduleSubsection}>
-                          <Text style={styles.scheduleSubsectionTitle}>예정된 일정</Text>
                           {pendingSchedules.map(renderScheduleCard)}
                         </View>
                       )}
@@ -1709,7 +1710,9 @@ export const CalendarScreen = () => {
               <View style={styles.scheduleSection}>
                 <View style={styles.scheduleHeader}>
                   <Text style={styles.scheduleSectionTitle}>
-                    {selectedDate ? `${formatDateWithWeekday(selectedDate)} 일기` : '오늘의 일기'}
+                    {isToday(selectedDay) 
+                      ? '오늘의 일기' 
+                      : `${selectedDay.getMonth() + 1}월 ${selectedDay.getDate()}일의 일기`}
                   </Text>
                 </View>
 
