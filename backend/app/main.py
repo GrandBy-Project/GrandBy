@@ -42,13 +42,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-<<<<<<< HEAD
-# OpenAI 클라이언트 및 서비스 초기화
-llm_service = LLMService()
-session_store = get_session_store()
-
-=======
->>>>>>> develop
 # WebSocket 연결 및 대화 세션 관리
 # 주의: llm_service와 naver_clova_tts_service는 각 통화마다 독립적인 인스턴스를 생성하여 사용
 # (동시 통화 시 충돌 방지를 위해 전역 인스턴스 사용하지 않음)
