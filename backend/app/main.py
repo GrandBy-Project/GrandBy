@@ -1632,32 +1632,65 @@ async def media_stream_handler(
                 welcome_text = get_time_based_welcome_message()
                 lp(f"💬 환영 메시지: {welcome_text}")
 
-                try:
+                # TTS 재생 완료를 기다리는 태스크 (타임아웃 포함)
+                async def wait_for_tts_completion():
+                    """TTS 재생 완료 대기 (타임아웃 포함)"""
                     # 에코 방지
                     if rtzr_stt:
                         rtzr_stt.start_bot_speaking()
 
-                    # ✅ 독립적인 TTS 서비스 인스턴스 사용
-                    audio_data, tts_time = await tts_service.text_to_speech_bytes(welcome_text)
+                    try:
+                        # ✅ 독립적인 TTS 서비스 인스턴스 사용
+                        audio_data, tts_time = await tts_service.text_to_speech_bytes(welcome_text)
 
-                    if audio_data:
-                        playback_duration = await send_clova_audio_to_twilio(
-                            websocket=websocket,
-                            stream_sid=stream_sid,
-                            audio_data=audio_data,
-                            sentence_index=0,
-                            pipeline_start=time.time()
-                        )
+                        if audio_data:
+                            playback_duration = await send_clova_audio_to_twilio(
+                                websocket=websocket,
+                                stream_sid=stream_sid,
+                                audio_data=audio_data,
+                                sentence_index=0,
+                                pipeline_start=time.time()
+                            )
 
-                        if playback_duration > 0:
-                            await asyncio.sleep(playback_duration * 0.9)
-                    else:
-                        logger.warning(f" 환영 멘트 TTS 합성 실패, 건너뜀")
-                except Exception as e:
-                    logger.error(f"❌ 환영 멘트 TTS 합성 오류: {e}")
-                finally:
+                            if playback_duration > 0:
+                                # 정상적인 재생 시간이 계산된 경우
+                                wait_time = playback_duration * 0.9
+                                lp(f"🔊 TTS 전송 완료, 재생 대기: {wait_time:.2f}초 (예상 재생: {playback_duration:.2f}초)")
+                                await asyncio.sleep(wait_time)
+                                return True
+                            else:
+                                # 재생 시간이 0인 경우 (Twilio 재생 실패 가능성)
+                                logger.warning(f"⚠️ TTS 전송은 성공했지만 재생 시간이 0입니다. 최소 대기 후 진행")
+                                await asyncio.sleep(2.0)  # 최소 2초 대기
+                                return False
+                        else:
+                            logger.warning(f"⚠️ 환영 멘트 TTS 합성 실패, 건너뜀")
+                            await asyncio.sleep(1.0)  # 짧은 대기 후 진행
+                            return False
+                    except Exception as e:
+                        logger.error(f"❌ 환영 멘트 TTS 처리 오류: {e}")
+                        await asyncio.sleep(1.0)  # 오류 시 짧은 대기 후 진행
+                        return False
+
+                # ✅ 타임아웃 기반 예외 처리: 최대 10초 대기 후 STT 활성화
+                try:
+                    tts_success = await asyncio.wait_for(
+                        wait_for_tts_completion(),
+                        timeout=5.0  # 최대 5초 대기
+                    )
+                    # 정상 완료 시 STT 활성화
                     if rtzr_stt:
                         rtzr_stt.stop_bot_speaking()
+                    if tts_success:
+                        lp(f"✅ TTS 재생 완료, STT 활성화")
+                    else:
+                        lp(f"⚠️ TTS 재생 불확실하지만 타임아웃 전에 완료, STT 활성화")
+                except asyncio.TimeoutError:
+                    # 타임아웃 발생 시 STT 강제 활성화
+                    logger.warning(f"⏱️ TTS 재생 대기 타임아웃 (10초 초과), STT 강제 활성화")
+                    if rtzr_stt:
+                        rtzr_stt.stop_bot_speaking()
+                    lp(f"✅ 타임아웃 후 STT 활성화 (통화 계속 진행)")
                 
                 # ========== RTZR 스트리밍 시작 ==========
                 lp("🎤 RTZR 실시간 STT 스트리밍 시작")
