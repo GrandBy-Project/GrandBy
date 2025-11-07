@@ -18,6 +18,7 @@ import {
   TouchableWithoutFeedback,
   Switch,
   Image,
+  RefreshControl,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Header, BottomNavigationBar, TimePicker, CategorySelector } from '../components';
@@ -111,6 +112,7 @@ export const CalendarScreen = () => {
   // API 연동: TodoItem 타입 사용
   const [schedules, setSchedules] = useState<TodoItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // 일기 상태
   const [diaries, setDiaries] = useState<Diary[]>([]);
@@ -445,6 +447,19 @@ export const CalendarScreen = () => {
       setDiaries(data);
     } catch (error: any) {
       console.error('❌ 일기 조회 실패:', error);
+    }
+  };
+
+  // 새로고침 핸들러
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await Promise.all([
+        loadSchedules(),
+        loadDiaries(),
+      ]);
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
@@ -1079,7 +1094,18 @@ export const CalendarScreen = () => {
 
       {/* 보호자용 공유 필터 */}
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.content} 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={handleRefresh}
+            colors={[Colors.primary]}
+            tintColor={Colors.primary}
+          />
+        }
+      >
         {/* 필터 탭 */}
         <View style={styles.filterContainer}>
           <TouchableOpacity

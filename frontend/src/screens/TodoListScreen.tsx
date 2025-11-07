@@ -10,6 +10,7 @@ import {
   TouchableOpacity,
   Animated,
   ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Header, BottomNavigationBar } from '../components';
@@ -504,7 +505,18 @@ export const TodoListScreen = () => {
         </Text>
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.content} 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={loadTodos}
+            colors={[Colors.primary]}
+            tintColor={Colors.primary}
+          />
+        }
+      >
         {/* 로딩 상태 */}
         {isLoading ? (
           <View style={styles.loadingContainer}>
