@@ -42,11 +42,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+<<<<<<< HEAD
 # OpenAI 클라이언트 및 서비스 초기화
 llm_service = LLMService()
 session_store = get_session_store()
 
+=======
+>>>>>>> develop
 # WebSocket 연결 및 대화 세션 관리
+# 주의: llm_service와 naver_clova_tts_service는 각 통화마다 독립적인 인스턴스를 생성하여 사용
+# (동시 통화 시 충돌 방지를 위해 전역 인스턴스 사용하지 않음)
 active_connections: Dict[str, WebSocket] = {}
 conversation_sessions: Dict[str, list] = {}
 saved_calls: set = set()  # 중복 저장 방지용 플래그
@@ -199,6 +204,8 @@ async def save_conversation_to_db(call_sid: str, conversation: list):
             # LLM 요약 생성 (대화가 있는 경우에만)
             if len(conversation) > 0:
                 logger.info("🤖 LLM으로 통화 요약 생성 중...")
+                # 각 통화마다 독립적인 LLM 서비스 인스턴스 생성 (동시 통화 충돌 방지)
+                llm_service = LLMService()
                 summary = llm_service.summarize_call_conversation(conversation)
                 call_log_db.conversation_summary = summary
                 logger.info(f"✅ 요약 생성 완료: {summary[:100]}...")
@@ -247,7 +254,8 @@ async def process_streaming_response(
     rtzr_stt=None,
     call_sid=None,
     metrics_collector=None,
-    turn_index=None
+    turn_index=None,
+    tts_service=None  # 각 통화마다 독립적인 TTS 서비스 인스턴스
 ) -> str:
     """
     최적화된 스트리밍 응답 처리 - 사전 연결된 WebSocket 사용
@@ -276,7 +284,8 @@ async def process_streaming_response(
             rtzr_stt=rtzr_stt,
             call_sid=call_sid,
             metrics_collector=metrics_collector,
-            turn_index=turn_index
+            turn_index=turn_index,
+            tts_service=tts_service  # 독립적인 TTS 서비스 인스턴스 전달
         )
         
         pipeline_time = time.time() - pipeline_start
@@ -309,7 +318,8 @@ async def llm_to_clova_tts_pipeline(
     rtzr_stt=None,
     call_sid=None,
     metrics_collector=None,
-    turn_index=None
+    turn_index=None,
+    tts_service=None  # 각 통화마다 독립적인 TTS 서비스 인스턴스
 ) -> float:
     """
     LLM 텍스트 생성 → Naver Clova TTS → Twilio 전송 파이프라인
@@ -379,8 +389,13 @@ async def llm_to_clova_tts_pipeline(
                     metrics_collector.record_tts_start(turn_index, tts_start_time)
                     logger.debug(f"📊 [메트릭] TTS 시작 시간 기록: {tts_start_time:.3f}")
                 
-                # Naver Clova TTS로 즉시 변환
-                audio_data, tts_time = await naver_clova_tts_service.text_to_speech_bytes(sentence)
+                # ✅ 독립적인 TTS 서비스 인스턴스 사용 (동시 통화 충돌 방지)
+                if tts_service is None:
+                    # Fallback: 전역 인스턴스 사용 (하위 호환성)
+                    from app.services.ai_call.naver_clova_tts_service import naver_clova_tts_service
+                    audio_data, tts_time = await naver_clova_tts_service.text_to_speech_bytes(sentence)
+                else:
+                    audio_data, tts_time = await tts_service.text_to_speech_bytes(sentence)
                 
                 if audio_data:
                     elapsed_tts = time.time() - pipeline_start
@@ -422,7 +437,13 @@ async def llm_to_clova_tts_pipeline(
             sentence_count += 1
             logger.info(f"🔊 [마지막 문장] TTS 변환 시작: {sentence_buffer.strip()[:40]}...")
             
-            audio_data, tts_time = await naver_clova_tts_service.text_to_speech_bytes(sentence_buffer.strip())
+            # ✅ 독립적인 TTS 서비스 인스턴스 사용 (동시 통화 충돌 방지)
+            if tts_service is None:
+                # Fallback: 전역 인스턴스 사용 (하위 호환성)
+                from app.services.ai_call.naver_clova_tts_service import naver_clova_tts_service
+                audio_data, tts_time = await naver_clova_tts_service.text_to_speech_bytes(sentence_buffer.strip())
+            else:
+                audio_data, tts_time = await tts_service.text_to_speech_bytes(sentence_buffer.strip())
             
             if audio_data:
                 # 마지막 문장의 TTS 완료 시간 기록 (first_completion_time은 기록하지 않음)
@@ -535,10 +556,24 @@ async def send_clova_audio_to_twilio(
                 "media": {"payload": chunk}
             }
             
-            await websocket.send_text(json.dumps(message))
+            try:
+                await websocket.send_text(json.dumps(message))
+                logger.debug(f"📤 [문장 {sentence_index}] 청크 {chunk_count} 전송 완료 ({len(chunk)} bytes)")
+                
+                # 마지막 청크가 아니면 짧은 딜레이
+                if i + chunk_size < len(audio_base64):
+                    await asyncio.sleep(0.02)  # 20ms
+                    
+            except Exception as e:
+                logger.error(f"❌ [문장 {sentence_index}] 청크 {chunk_count} 전송 실패: {e}")
+                # 첫 번째 청크 실패 시 전체 중단
+                if chunk_count == 1:
+                    raise
+                # 중간 청크 실패는 경고만
+                logger.warning(f"⚠️ [문장 {sentence_index}] 청크 {chunk_count} 전송 실패, 계속 진행")
         
         elapsed = time.time() - pipeline_start
-        logger.info(f"📤 [문장 {sentence_index}] Twilio 전송 완료 ({chunk_count} 청크, +{elapsed:.2f}초)")
+        logger.debug(f"📤 [문장 {sentence_index}] Twilio 전송 완료 ({chunk_count} 청크, +{elapsed:.2f}초)")
         
         return playback_duration
         
@@ -1519,7 +1554,7 @@ async def media_stream_handler(
     rtzr_stt = None  # RTZR 실시간 STT
     llm_collector = None  # LLM 부분 결과 수집기
     elderly_id = None  # 통화 대상 어르신 ID
-    log_prefix = ""
+    tts_service = None  # 각 통화마다 독립적인 TTS 서비스 인스턴스 (동시 통화 충돌 방지)
     
     try:
         async for message in websocket.iter_text():
@@ -1547,6 +1582,11 @@ async def media_stream_handler(
                 
                 # RTZR 실시간 STT 초기화
                 rtzr_stt = RTZRRealtimeSTT()
+                
+                # ✅ 각 통화마다 독립적인 TTS 서비스 인스턴스 생성 (동시 통화 충돌 방지)
+                from app.services.ai_call.naver_clova_tts_service import NaverClovaTTSService
+                tts_service = NaverClovaTTSService()
+                logger.info(f"🔊 독립적인 TTS 서비스 인스턴스 생성 완료: {call_sid}")
 
                 # LLM 부분 결과 수집기 초기화 (백그라운드 전송)
                 async def llm_partial_callback(partial_text: str):
@@ -1603,7 +1643,8 @@ async def media_stream_handler(
                     if rtzr_stt:
                         rtzr_stt.start_bot_speaking()
 
-                    audio_data, tts_time = await naver_clova_tts_service.text_to_speech_bytes(welcome_text)
+                    # ✅ 독립적인 TTS 서비스 인스턴스 사용
+                    audio_data, tts_time = await tts_service.text_to_speech_bytes(welcome_text)
 
                     if audio_data:
                         playback_duration = await send_clova_audio_to_twilio(
@@ -1678,8 +1719,8 @@ async def media_stream_handler(
                                 
                                 logger.info(f"🔊 [TTS] 종료 안내 메시지 전송: {warning_message}")
                                 
-                                # TTS 변환 및 전송
-                                audio_data, tts_time = await naver_clova_tts_service.text_to_speech_bytes(warning_message)
+                                # ✅ 독립적인 TTS 서비스 인스턴스 사용
+                                audio_data, tts_time = await tts_service.text_to_speech_bytes(warning_message)
                                 if audio_data:
                                     playback_duration = await send_clova_audio_to_twilio(
                                         websocket,
@@ -1829,7 +1870,8 @@ async def media_stream_handler(
                                     rtzr_stt=rtzr_stt,
                                     call_sid=call_sid,
                                     metrics_collector=performance_collectors.get(call_sid),
-                                    turn_index=turn_index
+                                    turn_index=turn_index,
+                                    tts_service=tts_service  # 독립적인 TTS 서비스 인스턴스 전달
                                 )
                                 llm_end_time = time.time()
                                 llm_duration = llm_end_time - llm_start_time
@@ -1969,6 +2011,14 @@ async def media_stream_handler(
                     logger.error(f"❌ Finally 블록 최종 처리 실패: {e}")
                 finally:
                     session_store.release_finalize_lock(call_sid)
+        
+        # ✅ TTS 서비스 리소스 정리
+        if tts_service:
+            try:
+                await tts_service.close()
+                logger.debug(f"🔒 TTS 서비스 리소스 정리 완료: {call_sid}")
+            except Exception as e:
+                logger.warning(f"⚠️ TTS 서비스 정리 중 오류 (무시): {e}")
         
         # 정리 작업 (메모리에서 제거)
         if call_sid and call_sid in active_connections:

@@ -355,77 +355,10 @@ class TodoService:
         logger.info(f"   - status_filter: {status_filter}")
         logger.info(f"   - shared_only: {shared_only}")
         
-        # 조회 전에 해당 날짜에 대해 반복 일정 템플릿에서 개별 TODO 생성
-        # 사용자가 설정한 반복 일정(매일/매주/매월)이 해당 날짜에 맞으면 자동 생성
-        recurring_templates = db.query(Todo).filter(
-            and_(
-                Todo.elderly_id == elderly_id,
-                Todo.is_recurring == True,
-                Todo.parent_recurring_id.is_(None),  # 템플릿만
-                or_(
-                    Todo.recurring_end_date.is_(None),  # 종료일 없음
-                    Todo.recurring_end_date >= target_date  # 종료일이 조회 날짜 이후
-                )
-            )
-        ).all()
-        
-        if recurring_templates:
-            # 해당 날짜에 이미 생성된 TODO 조회 (배치 처리)
-            existing_todos = db.query(Todo).filter(
-                and_(
-                    Todo.elderly_id == elderly_id,
-                    Todo.parent_recurring_id.in_([t.todo_id for t in recurring_templates]),
-                Todo.due_date == target_date
-                )
-            ).all()
-            
-            # existing 체크를 위한 Set 생성 (빠른 조회)
-            existing_set = {(t.parent_recurring_id, t.due_date) for t in existing_todos}
-            
-            # 해당 날짜에 개별 TODO 생성
-            todos_to_create = []
-            for template in recurring_templates:
-                # 시작일 체크
-                template_start_date = template.recurring_start_date or template.due_date
-                if target_date < template_start_date:
-                    continue  # 시작일 이전이면 생성 안 함
-                
-                # 종료일 체크
-                if template.recurring_end_date and target_date > template.recurring_end_date:
-                    continue  # 종료일 이후면 생성 안 함
-                
-                # 이미 생성된 TODO가 있는지 확인 (Set 조회로 빠르게)
-                if (template.todo_id, target_date) in existing_set:
-                    continue  # 이미 생성됨
-                
-                # 반복 조건 확인 (해당 날짜에 생성되어야 하는지)
-                should_create = TodoService._should_create_recurring_todo(template, target_date)
-                
-                if should_create:
-                    # 개별 TODO 생성
-                    new_todo = Todo(
-                        todo_id=str(uuid.uuid4()),
-                        elderly_id=template.elderly_id,
-                        creator_id=template.creator_id,
-                        title=template.title,
-                        description=template.description,
-                        category=template.category,
-                        due_date=target_date,
-                        due_time=template.due_time,
-                        creator_type=template.creator_type,
-                        status=TodoStatus.PENDING,
-                        is_confirmed=True,
-                        is_recurring=False,  # 생성된 TODO는 반복 아님
-                        parent_recurring_id=template.todo_id,  # 원본 템플릿 ID
-                        is_shared_with_caregiver=template.is_shared_with_caregiver,
-                    )
-                    todos_to_create.append(new_todo)
-                    logger.info(f"   ✅ 반복 일정 자동 생성: {template.title} ({target_date})")
-            
-            # 생성할 TODO들이 있으면 한 번에 추가
-            if todos_to_create:
-                db.add_all(todos_to_create)
-                db.commit()
+        # ⚠️ 반복 일정 자동 생성 제거
+        # 반복 일정은 Celery Beat의 generate_recurring_todos()가 매일 자정에 생성하므로
+        # 조회 시마다 생성하면 중복 생성 및 성능 문제 발생 가능
+        # 필요시 generate_recurring_todos()를 수동 호출하거나 스케줄러를 더 자주 실행
         
         # 반복 일정 템플릿 제외 (is_recurring=True이고 parent_recurring_id=NULL인 것은 템플릿)
         # 실제 할일만 조회: is_recurring=False이거나, 생성된 개별 TODO (parent_recurring_id가 있음)
@@ -489,97 +422,10 @@ class TodoService:
         Returns:
             TODO 목록
         """
-        # 조회 전에 범위 내 모든 날짜에 대해 반복 일정 템플릿에서 개별 TODO 생성
-        # 사용자가 설정한 반복 일정(매일/매주/매월)이 해당 날짜에 맞으면 자동 생성
-        # 성능 최적화: 템플릿을 한 번만 조회하고, existing 체크를 배치로 처리
-        
-        # 범위가 너무 넓으면 성능 저하 (7일 이상이면 제한)
-        days_diff = (end_date - start_date).days
-        if days_diff > 7:
-            # 범위가 넓으면 최근 7일만 생성 (나머지는 Celery Beat가 처리)
-            effective_end_date = start_date + timedelta(days=7)
-        else:
-            effective_end_date = end_date
-        
-        recurring_templates = db.query(Todo).filter(
-            and_(
-                Todo.elderly_id == elderly_id,
-                Todo.is_recurring == True,
-                Todo.parent_recurring_id.is_(None),  # 템플릿만
-                or_(
-                    Todo.recurring_end_date.is_(None),  # 종료일 없음
-                    Todo.recurring_end_date >= start_date  # 종료일이 범위 시작일 이후
-                )
-            )
-        ).all()
-        
-        if not recurring_templates:
-            # 템플릿이 없으면 바로 조회
-            pass
-        else:
-            # 범위 내 날짜에 이미 생성된 TODO를 한 번에 조회 (배치 처리)
-            existing_todos = db.query(Todo).filter(
-                and_(
-                    Todo.elderly_id == elderly_id,
-                    Todo.parent_recurring_id.in_([t.todo_id for t in recurring_templates]),
-                    Todo.due_date >= start_date,
-                    Todo.due_date <= effective_end_date
-                )
-            ).all()
-            
-            # existing 체크를 위한 Set 생성 (빠른 조회)
-            existing_set = {(t.parent_recurring_id, t.due_date) for t in existing_todos}
-            
-            # 범위 내 모든 날짜에 대해 개별 TODO 생성
-            current_date = start_date
-            todos_to_create = []
-            
-            while current_date <= effective_end_date:
-                for template in recurring_templates:
-                    # 시작일 체크
-                    template_start_date = template.recurring_start_date or template.due_date
-                    if current_date < template_start_date:
-                        continue  # 시작일 이전이면 생성 안 함
-                    
-                    # 종료일 체크
-                    if template.recurring_end_date and current_date > template.recurring_end_date:
-                        continue  # 종료일 이후면 생성 안 함
-                    
-                    # 이미 생성된 TODO가 있는지 확인 (Set 조회로 빠르게)
-                    if (template.todo_id, current_date) in existing_set:
-                        continue  # 이미 생성됨
-                    
-                    # 반복 조건 확인 (해당 날짜에 생성되어야 하는지)
-                    should_create = TodoService._should_create_recurring_todo(template, current_date)
-                    
-                    if should_create:
-                        # 개별 TODO 생성
-                        new_todo = Todo(
-                            todo_id=str(uuid.uuid4()),
-                            elderly_id=template.elderly_id,
-                            creator_id=template.creator_id,
-                            title=template.title,
-                            description=template.description,
-                            category=template.category,
-                            due_date=current_date,
-                            due_time=template.due_time,
-                            creator_type=template.creator_type,
-                            status=TodoStatus.PENDING,
-                            is_confirmed=True,
-                            is_recurring=False,  # 생성된 TODO는 반복 아님
-                            parent_recurring_id=template.todo_id,  # 원본 템플릿 ID
-                            is_shared_with_caregiver=template.is_shared_with_caregiver,
-                        )
-                        todos_to_create.append(new_todo)
-                        # existing_set에 추가하여 중복 방지
-                        existing_set.add((template.todo_id, current_date))
-                
-                current_date += timedelta(days=1)
-            
-            # 생성할 TODO들이 있으면 한 번에 추가
-            if todos_to_create:
-                db.add_all(todos_to_create)
-                db.commit()
+        # ⚠️ 반복 일정 자동 생성 제거
+        # 반복 일정은 Celery Beat의 generate_recurring_todos()가 매일 자정에 생성하므로
+        # 조회 시마다 생성하면 중복 생성 및 성능 문제 발생 가능
+        # 필요시 generate_recurring_todos()를 수동 호출하거나 스케줄러를 더 자주 실행
         
         # 반복 일정 템플릿 제외 (is_recurring=True이고 parent_recurring_id=NULL인 것은 템플릿)
         # 실제 할일만 조회: is_recurring=False이거나, 생성된 개별 TODO (parent_recurring_id가 있음)

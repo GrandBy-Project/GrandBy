@@ -63,14 +63,25 @@ def upload_file_to_s3(
     try:
         client = get_s3_client()
         
-        # S3에 업로드
-        client.put_object(
-            Bucket=bucket_name,
-            Key=s3_key,
-            Body=file_data,
-            ContentType=content_type,
-            # ACL은 비활성화되어 있으므로 설정하지 않음
-        )
+        # S3에 업로드 (퍼블릭 읽기 권한 설정)
+        try:
+            # ACL 설정 시도 (버킷 정책이 ACL을 허용하는 경우)
+            client.put_object(
+                Bucket=bucket_name,
+                Key=s3_key,
+                Body=file_data,
+                ContentType=content_type,
+                ACL='public-read'  # 퍼블릭 읽기 권한
+            )
+        except ClientError as acl_error:
+            # ACL이 비활성화된 경우 ACL 없이 업로드
+            logger.warning(f"⚠️ ACL 설정 실패, ACL 없이 업로드 시도: {acl_error}")
+            client.put_object(
+                Bucket=bucket_name,
+                Key=s3_key,
+                Body=file_data,
+                ContentType=content_type
+            )
         
         # S3 URL 생성
         s3_url = f"https://{bucket_name}.s3.{settings.AWS_REGION}.amazonaws.com/{s3_key}"
