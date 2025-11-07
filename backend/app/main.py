@@ -482,6 +482,58 @@ async def llm_to_clova_tts_pipeline(
         return 0.0
 
 
+async def send_silence_frames(
+    websocket: WebSocket,
+    stream_sid: str,
+    num_frames: int = 12,
+    frame_duration_ms: int = 20
+) -> None:
+    """
+    PCMU 무성 프레임(0xFF)을 Twilio로 전송
+    
+    Args:
+        websocket: Twilio WebSocket
+        stream_sid: Twilio Stream SID
+        num_frames: 전송할 프레임 수 (기본값: 12개)
+        frame_duration_ms: 각 프레임의 지속 시간 (밀리초, 기본값: 20ms)
+    """
+    import base64
+    
+    # 8kHz에서 20ms = 160 샘플 (8000 * 0.02)
+    samples_per_frame = int(8000 * frame_duration_ms / 1000)
+    
+    # PCMU 무성 샘플 (0xFF = mu-law silence)
+    silence_sample = 0xFF
+    silence_frame = bytes([silence_sample] * samples_per_frame)
+    
+    # Base64 인코딩
+    silence_base64 = base64.b64encode(silence_frame).decode('utf-8')
+    
+    logger.info(f"🔇 프리롤 무성 프레임 전송 시작: {num_frames}개 프레임 ({frame_duration_ms}ms/프레임)")
+    
+    for i in range(num_frames):
+        message = {
+            "event": "media",
+            "streamSid": stream_sid,
+            "media": {"payload": silence_base64}
+        }
+        
+        try:
+            await websocket.send_text(json.dumps(message))
+            logger.debug(f"🔇 무성 프레임 {i+1}/{num_frames} 전송 완료")
+            
+            # 프레임 간 딜레이 (20ms)
+            if i < num_frames - 1:
+                await asyncio.sleep(frame_duration_ms / 1000.0)
+        except Exception as e:
+            logger.error(f"❌ 무성 프레임 {i+1} 전송 실패: {e}")
+            # 첫 프레임 실패 시 중단
+            if i == 0:
+                raise
+    
+    logger.info(f"✅ 프리롤 무성 프레임 전송 완료: {num_frames}개")
+
+
 async def send_clova_audio_to_twilio(
     websocket: WebSocket,
     stream_sid: str,
@@ -530,6 +582,13 @@ async def send_clova_audio_to_twilio(
         # PCM → mulaw 변환
         mulaw_data = audioop.lin2ulaw(pcm_data, 2)
         
+        # 출력 프레임 수 및 바이트 계산
+        output_frames = len(mulaw_data)  # mulaw는 1바이트당 1샘플
+        output_bytes = len(mulaw_data)
+        
+        # 인코딩/리샘플 결과 로그
+        logger.info(f"TTS resample+encode: in={framerate}Hz PCM16, out=8000Hz PCMU, frames={output_frames}, bytes={output_bytes}")
+        
         # 재생 시간 계산
         playback_duration = len(mulaw_data) / 8000.0
         
@@ -539,10 +598,23 @@ async def send_clova_audio_to_twilio(
         # Twilio로 청크 단위 전송
         chunk_size = 8000  # 8KB 청크
         chunk_count = 0
+        frames_sent = 0
+        bytes_sent = 0
+        first_frame_at = None
+        last_ts = None
+        
+        # mulaw 데이터의 실제 프레임 수 (1바이트 = 1샘플)
+        total_mulaw_frames = len(mulaw_data)
         
         for i in range(0, len(audio_base64), chunk_size):
             chunk = audio_base64[i:i + chunk_size]
             chunk_count += 1
+            
+            # 첫 프레임 시간 기록
+            if first_frame_at is None:
+                first_frame_at = time.time()
+                # 전송 시작/첫 프레임 로그
+                logger.info(f"OUTBOUND send:start stream_sid={stream_sid}, first_frame_at={first_frame_at:.6f}")
             
             message = {
                 "event": "media",
@@ -552,6 +624,18 @@ async def send_clova_audio_to_twilio(
             
             try:
                 await websocket.send_text(json.dumps(message))
+                
+                # 누적 카운터 업데이트 (Base64 인코딩된 청크 크기)
+                bytes_sent += len(chunk)
+                # Base64에서 원본 mulaw 바이트 수 추정 (대략적)
+                mulaw_bytes_in_chunk = len(chunk) * 3 // 4
+                frames_sent += mulaw_bytes_in_chunk
+                last_ts = time.time()
+                
+                # 전송 누적 카운터 로그 (주기적: 10개 청크마다 또는 마지막 청크)
+                if chunk_count % 10 == 0 or i + chunk_size >= len(audio_base64):
+                    logger.info(f"OUTBOUND send:progress frames_sent={frames_sent}, bytes_sent={bytes_sent}, last_ts={last_ts:.6f}")
+                
                 logger.debug(f"📤 [문장 {sentence_index}] 청크 {chunk_count} 전송 완료 ({len(chunk)} bytes)")
                 
                 # 마지막 청크가 아니면 짧은 딜레이
@@ -565,6 +649,12 @@ async def send_clova_audio_to_twilio(
                     raise
                 # 중간 청크 실패는 경고만
                 logger.warning(f"⚠️ [문장 {sentence_index}] 청크 {chunk_count} 전송 실패, 계속 진행")
+        
+        # 전송 종료/드레인 로그 (실제 mulaw 프레임 수 사용)
+        total_frames = total_mulaw_frames
+        total_ms = playback_duration * 1000
+        drained = True  # 모든 청크 전송 완료
+        logger.info(f"OUTBOUND send:done drained={drained}, total_frames={total_frames}, total_ms≈{total_ms:.2f}")
         
         elapsed = time.time() - pipeline_start
         logger.debug(f"📤 [문장 {sentence_index}] Twilio 전송 완료 ({chunk_count} 청크, +{elapsed:.2f}초)")
@@ -619,81 +709,81 @@ app = FastAPI(
 )
 
 
-# ==================== Middleware ====================
+# # ==================== Middleware ====================
 
-# CORS 설정
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origins_list,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# # CORS 설정
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=settings.cors_origins_list,
+#     allow_credentials=True,
+#     allow_methods=["*"],
+#     allow_headers=["*"],
+# )
 
 
-# 요청 로깅 Middleware
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    """모든 HTTP 요청 로깅 (응답 크기 및 로딩 시간 포함)"""
-    start_time = time.perf_counter()
+# # 요청 로깅 Middleware
+# @app.middleware("http")
+# async def log_requests(request: Request, call_next):
+#     """모든 HTTP 요청 로깅 (응답 크기 및 로딩 시간 포함)"""
+#     start_time = time.perf_counter()
     
-    # 요청 시작 로깅
-    logger.info(f"📥 {request.method} {request.url.path}")
+#     # 요청 시작 로깅
+#     logger.info(f"📥 {request.method} {request.url.path}")
     
-    # 응답 처리
-    response = await call_next(request)
+#     # 응답 처리
+#     response = await call_next(request)
     
-    # 로딩 시간 계산 (밀리초)
-    elapsed_time = (time.perf_counter() - start_time) * 1000
+#     # 로딩 시간 계산 (밀리초)
+#     elapsed_time = (time.perf_counter() - start_time) * 1000
     
-    # 응답 크기 측정
-    response_size = None
-    if "content-length" in response.headers:
-        # Content-Length 헤더가 있으면 사용
-        try:
-            response_size = int(response.headers["content-length"])
-        except (ValueError, TypeError):
-            response_size = None
-    else:
-        # Content-Length 헤더가 없으면 응답 본문 읽기 (스트리밍 응답이 아닌 경우에만)
-        try:
-            body = b""
-            async for chunk in response.body_iterator:
-                body += chunk
-            response_size = len(body)
+#     # 응답 크기 측정
+#     response_size = None
+#     if "content-length" in response.headers:
+#         # Content-Length 헤더가 있으면 사용
+#         try:
+#             response_size = int(response.headers["content-length"])
+#         except (ValueError, TypeError):
+#             response_size = None
+#     else:
+#         # Content-Length 헤더가 없으면 응답 본문 읽기 (스트리밍 응답이 아닌 경우에만)
+#         try:
+#             body = b""
+#             async for chunk in response.body_iterator:
+#                 body += chunk
+#             response_size = len(body)
             
-            # 응답 본문을 다시 스트림으로 변환
-            from starlette.responses import Response
-            response = Response(
-                content=body,
-                status_code=response.status_code,
-                headers=dict(response.headers),
-                media_type=getattr(response, 'media_type', None) or response.headers.get('content-type', 'application/json')
-            )
-        except Exception as e:
-            # 응답 본문 읽기 실패 시 크기 측정 건너뛰기
-            logger.debug(f"⚠️ 응답 크기 측정 실패 (스트리밍 응답일 수 있음): {e}")
-            response_size = None
+#             # 응답 본문을 다시 스트림으로 변환
+#             from starlette.responses import Response
+#             response = Response(
+#                 content=body,
+#                 status_code=response.status_code,
+#                 headers=dict(response.headers),
+#                 media_type=getattr(response, 'media_type', None) or response.headers.get('content-type', 'application/json')
+#             )
+#         except Exception as e:
+#             # 응답 본문 읽기 실패 시 크기 측정 건너뛰기
+#             logger.debug(f"⚠️ 응답 크기 측정 실패 (스트리밍 응답일 수 있음): {e}")
+#             response_size = None
     
-    # 크기를 읽기 쉬운 형식으로 변환
-    size_str = ""
-    if response_size is not None:
-        if response_size < 1024:
-            size_str = f"{response_size}B"
-        elif response_size < 1024 * 1024:
-            size_str = f"{response_size / 1024:.2f}KB"
-        else:
-            size_str = f"{response_size / (1024 * 1024):.2f}MB"
+#     # 크기를 읽기 쉬운 형식으로 변환
+#     size_str = ""
+#     if response_size is not None:
+#         if response_size < 1024:
+#             size_str = f"{response_size}B"
+#         elif response_size < 1024 * 1024:
+#             size_str = f"{response_size / 1024:.2f}KB"
+#         else:
+#             size_str = f"{response_size / (1024 * 1024):.2f}MB"
     
-    # 응답 로깅 (상태 코드, 크기, 시간)
-    logger.info(
-        f"📤 {request.method} {request.url.path} - "
-        f"{response.status_code} | "
-        f"{size_str} | "
-        f"{elapsed_time:.2f}ms"
-    )
+#     # 응답 로깅 (상태 코드, 크기, 시간)
+#     logger.info(
+#         f"📤 {request.method} {request.url.path} - "
+#         f"{response.status_code} | "
+#         f"{size_str} | "
+#         f"{elapsed_time:.2f}ms"
+#     )
     
-    return response
+#     return response
 
 
 # ==================== Exception Handlers ====================
@@ -1518,9 +1608,13 @@ async def voice_handler(request: Request):
     connect.append(stream)
     response.append(connect)
     
+    # TwiML 스냅샷 로그
+    twiml_xml = str(response)
+    stream_name = websocket_url.split('/')[-1]  # media-stream
+    logger.info(f"Twiml returned: track=outbound_track, url={websocket_url}, stream_name={stream_name}, bidirectional=true")
     
     logger.info(f"🎙️ Twilio WebSocket 스트림 시작: {websocket_url}")
-    return str(response)
+    return twiml_xml
 
 
 @app.websocket("/api/twilio/media-stream")
@@ -1549,16 +1643,27 @@ async def media_stream_handler(
     llm_collector = None  # LLM 부분 결과 수집기
     elderly_id = None  # 통화 대상 어르신 ID
     tts_service = None  # 각 통화마다 독립적인 TTS 서비스 인스턴스 (동시 통화 충돌 방지)
+    mark_received = asyncio.Event()  # 마크 왕복 확인용 이벤트
     
     try:
         async for message in websocket.iter_text():
             data = json.loads(message)
             event_type = data.get('event')
             
+            # ========== 마크 이벤트 처리 ==========
+            if event_type == 'mark':
+                mark_name = data.get('mark', {}).get('name', '')
+                if mark_name == 'ready':
+                    logger.info(f"✅ [마크 왕복 확인] Twilio로부터 'ready' 마크 수신")
+                    mark_received.set()
+            
             # ========== 1. 스트림 시작 ==========
             if event_type == 'start':
                 call_sid = data['start']['callSid']
                 stream_sid = data['start']['streamSid']
+                
+                # 마크 이벤트 리셋 (새로운 스트림 시작)
+                mark_received.clear()
                 
                 # customParameters에서 elderly_id 추출 (Twilio 통화 시작 시 전달)
                 custom_params = data['start'].get('customParameters', {})
@@ -1627,6 +1732,42 @@ async def media_stream_handler(
                 lp(f"│ Stream SID: {stream_sid:41} │")
                 lp(f"│ Elderly ID: {elderly_id:41} │")
                 logger.info(f"└{'─'*58}┘")
+                
+                # ========== 마크 왕복 확인 ==========
+                lp("📡 마크 왕복 확인 시작")
+                
+                # 마크 이벤트 전송
+                mark_message = {
+                    "event": "mark",
+                    "streamSid": stream_sid,
+                    "mark": {"name": "ready"}
+                }
+                await websocket.send_text(json.dumps(mark_message))
+                lp("📤 'ready' 마크 전송 완료")
+                
+                # 마크 왕복 대기 (최대 500ms)
+                mark_wait_start = time.time()
+                try:
+                    await asyncio.wait_for(mark_received.wait(), timeout=0.5)
+                    mark_wait_time = (time.time() - mark_wait_start) * 1000
+                    lp(f"✅ 마크 왕복 확인 완료 ({mark_wait_time:.1f}ms)")
+                except asyncio.TimeoutError:
+                    mark_wait_time = (time.time() - mark_wait_start) * 1000
+                    lp(f"⚠️ 마크 왕복 타임아웃 ({mark_wait_time:.1f}ms), 계속 진행")
+                
+                # ========== 프리롤 무성 프레임 전송 ==========
+                lp("🔇 프리롤 무성 프레임 전송 시작")
+                try:
+                    await send_silence_frames(
+                        websocket=websocket,
+                        stream_sid=stream_sid,
+                        num_frames=12,  # 10~15개 중 12개 선택
+                        frame_duration_ms=20
+                    )
+                    lp("✅ 프리롤 무성 프레임 전송 완료")
+                except Exception as e:
+                    logger.error(f"❌ 프리롤 무성 프레임 전송 실패: {e}")
+                    # 프리롤 실패해도 계속 진행
                 
                 # 🚀 개선: 시간대별 환영 메시지 랜덤 선택
                 welcome_text = get_time_based_welcome_message()
