@@ -508,6 +508,11 @@ async def send_clova_audio_to_twilio(
     import audioop
     
     try:
+        # ✅ WebSocket 연결 상태 확인
+        if websocket.client_state.name != "CONNECTED":
+            logger.error(f"❌ [문장 {sentence_index}] WebSocket 연결 상태 불량: {websocket.client_state.name}")
+            return 0.0
+        
         # WAV 파일 파싱
         wav_io = io.BytesIO(audio_data)
         with wave.open(wav_io, 'rb') as wav_file:
@@ -517,7 +522,7 @@ async def send_clova_audio_to_twilio(
             n_frames = wav_file.getnframes()
             pcm_data = wav_file.readframes(n_frames)
         
-        logger.info(f"🎵 [문장 {sentence_index}] 원본: {framerate}Hz, {channels}ch")
+        logger.info(f"🎵 [문장 {sentence_index}] 원본: {framerate}Hz, {channels}ch, {n_frames}프레임")
         
         # Stereo → Mono 변환
         if channels == 2:
@@ -533,12 +538,19 @@ async def send_clova_audio_to_twilio(
         # 재생 시간 계산
         playback_duration = len(mulaw_data) / 8000.0
         
+        if playback_duration <= 0:
+            logger.warning(f"⚠️ [문장 {sentence_index}] 재생 시간이 0입니다. 오디오 데이터 문제 가능성")
+            return 0.0
+        
         # Base64 인코딩
         audio_base64 = base64.b64encode(mulaw_data).decode('utf-8')
+        
+        logger.info(f"📤 [문장 {sentence_index}] Twilio 전송 시작: {len(audio_base64)} bytes (예상 재생: {playback_duration:.2f}초)")
         
         # Twilio로 청크 단위 전송
         chunk_size = 8000  # 8KB 청크
         chunk_count = 0
+        failed_chunks = 0
         
         for i in range(0, len(audio_base64), chunk_size):
             chunk = audio_base64[i:i + chunk_size]
@@ -551,8 +563,17 @@ async def send_clova_audio_to_twilio(
             }
             
             try:
+                # ✅ 전송 전 연결 상태 재확인
+                if websocket.client_state.name != "CONNECTED":
+                    logger.error(f"❌ [문장 {sentence_index}] 청크 {chunk_count} 전송 전 연결 끊김 감지")
+                    failed_chunks += 1
+                    if chunk_count == 1:
+                        # 첫 번째 청크 실패 시 전체 중단
+                        raise ConnectionError(f"WebSocket 연결 끊김: {websocket.client_state.name}")
+                    continue
+                
                 await websocket.send_text(json.dumps(message))
-                logger.debug(f"📤 [문장 {sentence_index}] 청크 {chunk_count} 전송 완료 ({len(chunk)} bytes)")
+                logger.debug(f"📤 [문장 {sentence_index}] 청크 {chunk_count}/{len(audio_base64)//chunk_size + 1} 전송 완료 ({len(chunk)} bytes)")
                 
                 # 마지막 청크가 아니면 짧은 딜레이
                 if i + chunk_size < len(audio_base64):
@@ -560,6 +581,7 @@ async def send_clova_audio_to_twilio(
                     
             except Exception as e:
                 logger.error(f"❌ [문장 {sentence_index}] 청크 {chunk_count} 전송 실패: {e}")
+                failed_chunks += 1
                 # 첫 번째 청크 실패 시 전체 중단
                 if chunk_count == 1:
                     raise
@@ -567,7 +589,17 @@ async def send_clova_audio_to_twilio(
                 logger.warning(f"⚠️ [문장 {sentence_index}] 청크 {chunk_count} 전송 실패, 계속 진행")
         
         elapsed = time.time() - pipeline_start
-        logger.debug(f"📤 [문장 {sentence_index}] Twilio 전송 완료 ({chunk_count} 청크, +{elapsed:.2f}초)")
+        
+        # ✅ 전송 결과 요약 로깅
+        if failed_chunks > 0:
+            logger.warning(f"⚠️ [문장 {sentence_index}] Twilio 전송 완료 (실패: {failed_chunks}/{chunk_count} 청크, +{elapsed:.2f}초)")
+        else:
+            logger.info(f"✅ [문장 {sentence_index}] Twilio 전송 완료 ({chunk_count} 청크, +{elapsed:.2f}초, 예상 재생: {playback_duration:.2f}초)")
+        
+        # ✅ 실패한 청크가 많으면 재생 시간 조정
+        if failed_chunks > chunk_count * 0.3:  # 30% 이상 실패
+            logger.error(f"❌ [문장 {sentence_index}] 전송 실패율이 높습니다 ({failed_chunks}/{chunk_count}). 재생 시간 0 반환")
+            return 0.0
         
         return playback_duration
         
@@ -1659,8 +1691,11 @@ async def media_stream_handler(
                                 await asyncio.sleep(wait_time)
                                 return True
                             else:
-                                # 재생 시간이 0인 경우 (Twilio 재생 실패 가능성)
-                                logger.warning(f"⚠️ TTS 전송은 성공했지만 재생 시간이 0입니다. 최소 대기 후 진행")
+                                # 재생 시간이 0인 경우 (Twilio 연결 문제 또는 전송 실패)
+                                logger.error(f"❌ TTS 전송 실패 또는 WebSocket 연결 문제 감지 (재생 시간: 0)")
+                                logger.error(f"   - WebSocket 상태 확인 필요")
+                                logger.error(f"   - Twilio Media Stream 연결 상태 확인 필요")
+                                # 최소 대기 후 진행 (통화는 계속 진행)
                                 await asyncio.sleep(2.0)  # 최소 2초 대기
                                 return False
                         else:
@@ -1687,7 +1722,8 @@ async def media_stream_handler(
                         lp(f"⚠️ TTS 재생 불확실하지만 타임아웃 전에 완료, STT 활성화")
                 except asyncio.TimeoutError:
                     # 타임아웃 발생 시 STT 강제 활성화
-                    logger.warning(f"⏱️ TTS 재생 대기 타임아웃 (10초 초과), STT 강제 활성화")
+                    logger.warning(f"⏱️ TTS 재생 대기 타임아웃 (5초 초과), STT 강제 활성화")
+                    logger.warning(f"   - TTS 전송 지연 또는 Twilio 연결 문제 가능성")
                     if rtzr_stt:
                         rtzr_stt.stop_bot_speaking()
                     lp(f"✅ 타임아웃 후 STT 활성화 (통화 계속 진행)")
