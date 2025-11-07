@@ -48,7 +48,7 @@ class TwilioService:
                 call_params["status_callback"] = status_callback_url
                 call_params["status_callback_event"] = [
                     "initiated", "ringing", "answered", "completed",
-                    "no-answer", "busy", "failed", "canceled"
+                    # "no-answer", "busy", "failed", "canceled"
                 ]
             
             call = self.client.calls.create(**call_params)

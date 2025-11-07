@@ -13,4 +13,5 @@ export * from './CustomIcons';
 export { DiaryFilters } from './DiaryFilters';
 export { DiaryInsights, type DiaryInsightsProps } from './DiaryInsights';
 export { QuickActionGrid, type QuickAction } from './QuickActionGrid';
+export { TutorialModal, type TutorialType } from './TutorialModal';
 
