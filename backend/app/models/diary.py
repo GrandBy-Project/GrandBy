@@ -8,8 +8,24 @@ from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
 import uuid
+from pytz import timezone, UTC
 
 from app.database import Base
+
+# 한국 시간대 (KST, UTC+9)
+KST = timezone('Asia/Seoul')
+
+def kst_now():
+    """
+    현재 한국 시간(KST)을 반환 (naive datetime)
+    UTC 시간을 가져온 후 KST로 변환하여 시스템 시간대와 무관하게 작동
+    SQLAlchemy의 DateTime 컬럼에서 사용
+    """
+    # UTC 시간을 가져온 후 KST로 변환 (시스템 시간대와 무관)
+    utc_now = datetime.now(UTC)
+    kst_time = utc_now.astimezone(KST)
+    # naive datetime으로 반환 (SQLAlchemy용)
+    return kst_time.replace(tzinfo=None)
 
 
 class AuthorType(str, enum.Enum):
@@ -50,9 +66,9 @@ class Diary(Base):
     # 상태
     status = Column(SQLEnum(DiaryStatus), default=DiaryStatus.PUBLISHED)
     
-    # 타임스탬프
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # 타임스탬프 (한국 시간 KST)
+    created_at = Column(DateTime, default=kst_now)
+    updated_at = Column(DateTime, default=kst_now, onupdate=kst_now)
     
     # Relationships
     author = relationship("User", foreign_keys=[author_id], back_populates="diaries")
@@ -77,8 +93,8 @@ class DiaryPhoto(Base):
     # 사진 정보
     photo_url = Column(String(500), nullable=False)  # S3 URL
     
-    # 타임스탬프
-    created_at = Column(DateTime, default=datetime.utcnow)
+    # 타임스탬프 (한국 시간 KST)
+    created_at = Column(DateTime, default=kst_now)
     
     # Relationships
     diary = relationship("Diary", back_populates="photos")
@@ -104,8 +120,8 @@ class DiaryComment(Base):
     # 읽음 여부
     is_read = Column(Boolean, default=False)
     
-    # 타임스탬프
-    created_at = Column(DateTime, default=datetime.utcnow)
+    # 타임스탬프 (한국 시간 KST)
+    created_at = Column(DateTime, default=kst_now)
     
     # Relationships
     diary = relationship("Diary", back_populates="comments")
