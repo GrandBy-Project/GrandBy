@@ -46,10 +46,9 @@ logger = logging.getLogger(__name__)
 llm_service = LLMService()
 session_store = get_session_store()
 
-# WebSocket 연결 및 대화 세션 관리
+# WebSocket 연결 관리 (WebSocket 객체는 직렬화 불가하므로 인메모리 유지)
 active_connections: Dict[str, WebSocket] = {}
-conversation_sessions: Dict[str, list] = {}
-saved_calls: set = set()  # 중복 저장 방지용 플래그
+# 대화 세션 및 저장 플래그는 session_store에서 관리 (Redis 또는 메모리)
 
 # TTS 재생 완료 시간 추적 (call_sid -> (completion_time, total_playback_duration))
 active_tts_completions: Dict[str, tuple[float, float]] = {}
@@ -1541,9 +1540,7 @@ async def media_stream_handler(
                 
                 active_connections[call_sid] = websocket
                 
-                # 대화 세션 초기화 (LLM 대화 히스토리 관리)
-                if call_sid not in conversation_sessions:
-                    conversation_sessions[call_sid] = []
+                # 대화 세션은 세션 스토어에서 자동 관리됨 (초기화 불필요)
                 
                 # RTZR 실시간 STT 초기화
                 rtzr_stt = RTZRRealtimeSTT()
@@ -1637,9 +1634,9 @@ async def media_stream_handler(
                     try:
                         logger.info("🔄 [process_rtzr_results 시작] 결과 처리 루프 가동")
                         async for result in rtzr_stt.start_streaming():
-                            # ✅ 통화 종료 체크
-                            if call_sid not in conversation_sessions:
-                                logger.info("⚠️ 통화 종료로 인한 RTZR 처리 중단")
+                            # ✅ 통화 종료 체크 (세션 스토어 기반)
+                            if session_store.is_finalized(call_sid):
+                                logger.info(f"{log_prefix} ⚠️ 통화 종료로 인한 RTZR 처리 중단")
                                 break
                             
                             if not result:
@@ -1746,9 +1743,9 @@ async def media_stream_handler(
                             
                             # 최종 결과 처리
                             if is_final and text:
-                                # ✅ 통화 종료 체크
-                                if call_sid not in conversation_sessions:
-                                    logger.info("⚠️ 통화 종료로 인한 최종 처리 중단")
+                                # ✅ 통화 종료 체크 (세션 스토어 기반)
+                                if session_store.is_finalized(call_sid):
+                                    logger.info(f"{log_prefix} ⚠️ 통화 종료로 인한 최종 처리 중단")
                                     break
                                 
                                 # ✅ RTZR 결과에서 사용자 발화 시작 시간 가져오기 (리셋 전에 저장된 값)
