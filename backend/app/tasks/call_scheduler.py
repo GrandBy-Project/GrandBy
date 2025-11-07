@@ -10,6 +10,7 @@ from app.services.ai_call.twilio_service import TwilioService
 from app.config import settings
 from app.utils.phone import normalize_phone_number
 from datetime import datetime
+import pytz
 import logging
 
 logger = logging.getLogger(__name__)
@@ -27,8 +28,9 @@ def check_and_make_calls():
     
     db = SessionLocal()
     try:
-        # 현재 시간
-        current_datetime = datetime.now()
+        # 현재 시간 (한국 시간대 사용)
+        kst = pytz.timezone('Asia/Seoul')
+        current_datetime = datetime.now(kst)
         current_hour = current_datetime.hour
         current_minute = current_datetime.minute
         
