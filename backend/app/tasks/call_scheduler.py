@@ -102,7 +102,7 @@ def check_and_make_calls():
                 
                 # ✅ 수동 통화와 동일한 설정 사용
                 api_base_url = settings.API_BASE_URL
-                voice_url = f"https://{api_base_url}/api/twilio/voice"  # WebSocket 시작 엔드포인트
+                voice_url = f"https://{api_base_url}/api/twilio/voice?elderly_id={elderly.user_id}"  # WebSocket 시작 엔드포인트 (사용자 식별자 포함)
                 status_callback_url = f"https://{api_base_url}/api/twilio/call-status"
                 
                 logger.info(f"┌{'─'*58}┐")
