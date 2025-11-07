@@ -28,6 +28,7 @@ import { BottomNavigationBar, Header } from '../components';
 import { TimePicker } from '../components/TimePicker';
 import { Colors } from '../constants/Colors';
 import apiClient from '../api/client';
+import { getTodayKST } from '../utils/dateUtils';
 
 // 기분 옵션
 const MOOD_OPTIONS = [
@@ -49,7 +50,7 @@ export const DiaryWriteScreen = () => {
   const callSid = searchParams.callSid as string | undefined;
   const fromBanner = searchParams.fromBanner === 'true'; // 상단 배너에서 온 경우 파라미터 추가
 
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]); // YYYY-MM-DD
+  const [date, setDate] = useState(getTodayKST()); // YYYY-MM-DD (한국 시간대 기준)
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [selectedMood, setSelectedMood] = useState<string>('');
@@ -181,12 +182,14 @@ export const DiaryWriteScreen = () => {
             const { getCallLogs } = await import('../api/call');
             const calls = await getCallLogs({ limit: 10 });
             
-            // 오늘 완료된 통화 기록 찾기
-            const today = new Date().toISOString().split('T')[0];
+            // 오늘 완료된 통화 기록 찾기 (한국 시간대 기준)
+            const today = getTodayKST();
             
             const todayCalls = calls.find((call: any) => {
+              // 통화 날짜를 한국 시간대 기준으로 변환
               const callDate = new Date(call.created_at);
-              const callDateString = callDate.toISOString().split('T')[0];
+              const callKoreaTime = new Date(callDate.toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
+              const callDateString = `${callKoreaTime.getFullYear()}-${(callKoreaTime.getMonth() + 1).toString().padStart(2, '0')}-${callKoreaTime.getDate().toString().padStart(2, '0')}`;
               return callDateString === today && call.call_status === 'completed';
             });
             

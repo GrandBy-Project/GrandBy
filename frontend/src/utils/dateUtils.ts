@@ -301,3 +301,19 @@ export const isSameDate = (date1: Date | string, date2: Date | string): boolean 
   return d1.toDateString() === d2.toDateString();
 };
 
+/**
+ * 한국 시간대(KST, UTC+9) 기준으로 오늘 날짜를 "YYYY-MM-DD" 형식으로 반환
+ * toISOString()은 UTC 기준이므로 한국 시간대에서 자정 이후에 전날 날짜가 될 수 있는 문제를 해결
+ * @returns "YYYY-MM-DD" 형식의 한국 시간대 기준 오늘 날짜
+ */
+export const getTodayKST = (): string => {
+  const now = new Date();
+  // 한국 시간대 기준으로 날짜 가져오기
+  const koreaTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
+  const year = koreaTime.getFullYear();
+  // getMonth()는 0부터 시작 (0=1월, 11=12월)이므로 +1을 해서 실제 월을 구함
+  const month = (koreaTime.getMonth() + 1).toString().padStart(2, '0');
+  const day = koreaTime.getDate().toString().padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
