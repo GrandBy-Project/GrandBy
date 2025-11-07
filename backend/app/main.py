@@ -49,6 +49,7 @@ active_connections: Dict[str, WebSocket] = {}
 conversation_sessions: Dict[str, list] = {}
 saved_calls: set = set()  # 중복 저장 방지용 플래그
 
+session_store = get_session_store()
 # TTS 재생 완료 시간 추적 (call_sid -> (completion_time, total_playback_duration))
 active_tts_completions: Dict[str, tuple[float, float]] = {}
 
