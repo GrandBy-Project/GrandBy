@@ -305,35 +305,80 @@ export const DiaryDetailScreen = () => {
   };
 
   /**
-   * 타임스탬프 포맷팅 (상대적 시간)
+   * 타임스탬프 포맷팅 (상대적 시간, 한국 시간대)
    */
   const formatTimestamp = (dateString: string): string => {
-    const date = new Date(dateString);
-    const now = new Date();
-    const diff = now.getTime() - date.getTime();
-    const minutes = Math.floor(diff / 60000);
-    const hours = Math.floor(diff / 3600000);
-    const days = Math.floor(diff / 86400000);
+    try {
+      // DB에서 저장된 시간은 한국 시간(KST)인데 시간대 정보가 없음
+      let date: Date;
+      
+      if (dateString.includes('T')) {
+        // ISO 형식이면 시간대 정보 확인
+        if (!dateString.includes('Z') && !dateString.match(/[+-]\d{2}:\d{2}$/)) {
+          // 시간대 정보가 없으면 한국 시간대(+09:00)로 추가
+          dateString = dateString.replace(/\.\d+/, '') + '+09:00';
+        }
+        date = new Date(dateString);
+      } else {
+        date = new Date(dateString);
+      }
+      
+      if (isNaN(date.getTime())) {
+        return '';
+      }
+      
+      const now = new Date();
+      const diff = now.getTime() - date.getTime();
+      const minutes = Math.floor(diff / 60000);
+      const hours = Math.floor(diff / 3600000);
+      const days = Math.floor(diff / 86400000);
 
-    if (minutes < 1) return '방금 전';
-    if (minutes < 60) return `${minutes}분 전`;
-    if (hours < 24) return `${hours}시간 전`;
-    if (days < 7) return `${days}일 전`;
+      if (minutes < 1) return '방금 전';
+      if (minutes < 60) return `${minutes}분 전`;
+      if (hours < 24) return `${hours}시간 전`;
+      if (days < 7) return `${days}일 전`;
 
-    const month = (date.getMonth() + 1).toString().padStart(2, '0');
-    const day = date.getDate().toString().padStart(2, '0');
-    return `${month}월 ${day}일`;
+      const month = (date.getMonth() + 1).toString().padStart(2, '0');
+      const day = date.getDate().toString().padStart(2, '0');
+      return `${month}월 ${day}일`;
+    } catch (error) {
+      console.error('타임스탬프 포맷팅 오류:', error);
+      return '';
+    }
   };
 
   /**
-   * 작성시간 포맷팅
+   * 작성시간 포맷팅 (한국 시간대)
    */
   const formatCreatedTime = (dateString: string): string => {
-    const date = new Date(dateString);
-    return date.toLocaleString('ko-KR', {
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+    try {
+      // DB에서 저장된 시간은 한국 시간(KST)인데 시간대 정보가 없음
+      let date: Date;
+      
+      if (dateString.includes('T')) {
+        // ISO 형식이면 시간대 정보 확인
+        if (!dateString.includes('Z') && !dateString.match(/[+-]\d{2}:\d{2}$/)) {
+          // 시간대 정보가 없으면 한국 시간대(+09:00)로 추가
+          dateString = dateString.replace(/\.\d+/, '') + '+09:00';
+        }
+        date = new Date(dateString);
+      } else {
+        date = new Date(dateString);
+      }
+      
+      if (isNaN(date.getTime())) {
+        return '';
+      }
+      
+      return date.toLocaleString('ko-KR', {
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZone: 'Asia/Seoul',
+      });
+    } catch (error) {
+      console.error('시간 포맷팅 오류:', error);
+      return '';
+    }
   };
 
   /**
