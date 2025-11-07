@@ -10,6 +10,7 @@ import enum
 import uuid
 
 from app.database import Base
+from app.utils.datetime_utils import kst_now
 
 
 class CallStatus(str, enum.Enum):
@@ -63,8 +64,8 @@ class CallLog(Base):
     # Twilio 관련
     twilio_call_sid = Column(String(100), nullable=True, unique=True)
     
-    # 타임스탬프
-    created_at = Column(DateTime, default=datetime.utcnow)
+    # 타임스탬프 (한국 시간 KST)
+    created_at = Column(DateTime, default=kst_now)
     
     # Relationships
     elderly = relationship("User", back_populates="call_logs")
@@ -92,9 +93,9 @@ class CallSettings(Base):
     # 활성화 여부
     is_active = Column(Boolean, default=True)
     
-    # 타임스탬프
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # 타임스탬프 (한국 시간 KST)
+    created_at = Column(DateTime, default=kst_now)
+    updated_at = Column(DateTime, default=kst_now, onupdate=kst_now)
     
     def __repr__(self):
         return f"<CallSettings for {self.elderly_id}>"
@@ -117,8 +118,8 @@ class CallTranscript(Base):
     # 타임스탬프 (통화 내 시간)
     timestamp = Column(Float, nullable=True)  # 초 단위
     
-    # 생성 시간
-    created_at = Column(DateTime, default=datetime.utcnow)
+    # 생성 시간 (한국 시간 KST)
+    created_at = Column(DateTime, default=kst_now)
     
     # Relationships
     call = relationship("CallLog", back_populates="transcripts")
@@ -144,8 +145,8 @@ class EmotionLog(Base):
     # 감지된 키워드 (JSON)
     detected_keywords = Column(Text, nullable=True)  # JSON 형식
     
-    # 분석 시간
-    analyzed_at = Column(DateTime, default=datetime.utcnow)
+    # 분석 시간 (한국 시간 KST)
+    analyzed_at = Column(DateTime, default=kst_now)
     
     # Relationships
     call = relationship("CallLog", back_populates="emotions")

@@ -9,6 +9,7 @@ from typing import List
 from datetime import datetime
 
 from app.database import get_db
+from app.utils.datetime_utils import kst_now
 from app.schemas.notification import NotificationResponse
 from app.models.notification import Notification
 from app.models.user import User
@@ -63,7 +64,7 @@ async def mark_as_read(
     
     # 읽음 처리
     notification.is_read = True
-    notification.read_at = datetime.utcnow()
+    notification.read_at = kst_now()
     db.commit()
     
     return {"message": "알림을 읽음으로 표시했습니다."}

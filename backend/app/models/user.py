@@ -10,6 +10,7 @@ import enum
 import uuid
 
 from app.database import Base
+from app.utils.datetime_utils import kst_now
 
 
 class UserRole(str, enum.Enum):
@@ -69,9 +70,9 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     is_verified = Column(Boolean, default=False)
     
-    # 타임스탬프
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # 타임스탬프 (한국 시간 KST)
+    created_at = Column(DateTime, default=kst_now)
+    updated_at = Column(DateTime, default=kst_now, onupdate=kst_now)
     last_login_at = Column(DateTime, nullable=True)
     deleted_at = Column(DateTime, nullable=True)  # Soft Delete용
     
@@ -126,9 +127,9 @@ class UserConnection(Base):
     # 연결 상태
     status = Column(SQLEnum(ConnectionStatus), default=ConnectionStatus.PENDING)
     
-    # 타임스탬프
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # 타임스탬프 (한국 시간 KST)
+    created_at = Column(DateTime, default=kst_now)
+    updated_at = Column(DateTime, default=kst_now, onupdate=kst_now)
     
     # Relationships
     caregiver = relationship("User", foreign_keys=[caregiver_id], back_populates="caregiver_connections")
@@ -163,8 +164,8 @@ class UserSettings(Base):
     # 언어 설정
     language_preference = Column(String(10), default="ko")
     
-    # 타임스탬프
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # 타임스탬프 (한국 시간 KST)
+    updated_at = Column(DateTime, default=kst_now, onupdate=kst_now)
     
     # Relationships
     user = relationship("User", back_populates="settings")

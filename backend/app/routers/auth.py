@@ -8,6 +8,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 from app.database import get_db
+from app.utils.datetime_utils import kst_now
 from app.schemas.user import UserCreate, UserLogin, Token, UserResponse
 from app.models.user import User, UserSettings
 from passlib.context import CryptContext
@@ -219,8 +220,8 @@ async def login(user_data: UserLogin, db: Session = Depends(get_db)):
     if email in login_attempts:
         del login_attempts[email]
     
-    # 마지막 로그인 시간 업데이트
-    user.last_login_at = datetime.utcnow()
+    # 마지막 로그인 시간 업데이트 (한국 시간)
+    user.last_login_at = kst_now()
     db.commit()
     
     # JWT 토큰 생성
@@ -343,8 +344,8 @@ async def refresh_token(
         "sub": user.user_id
     })
     
-    # 마지막 로그인 시간 업데이트
-    user.last_login_at = datetime.utcnow()
+    # 마지막 로그인 시간 업데이트 (한국 시간)
+    user.last_login_at = kst_now()
     db.commit()
     
     return {
@@ -722,7 +723,7 @@ async def reset_password_verify(
         password_to_hash = request.new_password
     
     user.password_hash = pwd_context.hash(password_to_hash)
-    user.updated_at = datetime.utcnow()
+    user.updated_at = kst_now()
     
     db.commit()
     

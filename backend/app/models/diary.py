@@ -8,24 +8,9 @@ from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
 import uuid
-from pytz import timezone, UTC
 
 from app.database import Base
-
-# 한국 시간대 (KST, UTC+9)
-KST = timezone('Asia/Seoul')
-
-def kst_now():
-    """
-    현재 한국 시간(KST)을 반환 (naive datetime)
-    UTC 시간을 가져온 후 KST로 변환하여 시스템 시간대와 무관하게 작동
-    SQLAlchemy의 DateTime 컬럼에서 사용
-    """
-    # UTC 시간을 가져온 후 KST로 변환 (시스템 시간대와 무관)
-    utc_now = datetime.now(UTC)
-    kst_time = utc_now.astimezone(KST)
-    # naive datetime으로 반환 (SQLAlchemy용)
-    return kst_time.replace(tzinfo=None)
+from app.utils.datetime_utils import kst_now
 
 
 class AuthorType(str, enum.Enum):

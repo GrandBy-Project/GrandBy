@@ -9,6 +9,7 @@ from sqlalchemy import func
 from typing import List, Optional
 from datetime import time as dt_time, datetime, date
 from app.database import get_db
+from app.utils.datetime_utils import kst_now
 from app.schemas.call import (
     CallLogResponse, 
     CallSettingsCreate,
@@ -171,7 +172,7 @@ async def create_or_update_call_settings(
             existing_setting.call_time = call_time_obj
             existing_setting.frequency = settings_data.frequency
             existing_setting.is_active = settings_data.is_active
-            existing_setting.updated_at = datetime.utcnow()
+            existing_setting.updated_at = kst_now()
             
             db.commit()
             db.refresh(existing_setting)
@@ -179,14 +180,12 @@ async def create_or_update_call_settings(
             logger.info(f"✅ 전화 시간 업데이트: {elderly_id} - {settings_data.call_time}")
             return existing_setting
         else:
-            # 새 설정 생성
+            # 새 설정 생성 (created_at, updated_at은 모델의 default로 자동 설정됨)
             new_setting = CallSettings(
                 elderly_id=elderly_id,
                 call_time=call_time_obj,
                 frequency=settings_data.frequency,
-                is_active=settings_data.is_active,
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow()
+                is_active=settings_data.is_active
             )
             db.add(new_setting)
             db.commit()
@@ -244,7 +243,7 @@ async def delete_call_settings(
     
     # 완전 삭제 대신 비활성화
     setting.is_active = False
-    setting.updated_at = datetime.utcnow()
+    setting.updated_at = kst_now()
     db.commit()
     
     logger.info(f"🔕 전화 설정 비활성화: {elderly_id}")
