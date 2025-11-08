@@ -14,21 +14,42 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Header, BottomNavigationBar } from '../components';
+import { Ionicons } from '@expo/vector-icons';
+import { getCategoryIcon, getCategoryColor } from '../constants/TodoCategories';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../constants/Colors';
 import * as todoApi from '../api/todo';
 import { TokenManager } from '../api/client';
 import { useFontSizeStore } from '../store/fontSizeStore';
 import { useAlert } from '../components/GlobalAlertProvider';
+import { useAuthStore } from '../store/authStore';
 
 interface TodoItem {
   id: string;
   title: string;
   description: string;
+  rawDescription: string | null;
   time: string;
+  rawDueTime: string | null;
+  dueDate: string;
   isCompleted: boolean;
   priority: 'high' | 'medium' | 'low';
   category: 'medicine' | 'hospital' | 'daily' | 'other' | 'exercise' | 'meal';
+  rawCategory: todoApi.TodoItem['category'];
+  status: todoApi.TodoItem['status'];
+  creatorType: todoApi.TodoItem['creator_type'];
+  creatorId: string;
+  creatorName: string | null;
+  isSharedWithCaregiver: boolean;
+  isRecurring: boolean;
+  recurringType: todoApi.TodoItem['recurring_type'];
+  recurringInterval: number | null;
+  recurringDays: number[] | null;
+  recurringDayOfMonth: number | null;
+  recurringEndDate: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 type DateFilter = 'yesterday' | 'today' | 'tomorrow';
@@ -38,6 +59,7 @@ export const TodoListScreen = () => {
   const insets = useSafeAreaInsets();
   const { fontSizeLevel } = useFontSizeStore();
   const { show } = useAlert();
+  const { user } = useAuthStore();
   const [showSuccessAnimation, setShowSuccessAnimation] = useState(false);
   const [completedTodoTitle, setCompletedTodoTitle] = useState('');
   const [fadeAnim] = useState(new Animated.Value(0));
@@ -65,10 +87,28 @@ export const TodoListScreen = () => {
         id: todo.todo_id,
         title: todo.title,
         description: todo.description || '',
+        rawDescription: todo.description,
         time: todo.due_time ? formatTime(todo.due_time) : '시간 미정',
+        rawDueTime: todo.due_time,
+        dueDate: todo.due_date,
         isCompleted: todo.status === 'completed',
         priority: getPriority(todo.category),
         category: mapCategory(todo.category),
+        rawCategory: todo.category,
+        status: todo.status,
+        creatorType: todo.creator_type,
+        creatorId: todo.creator_id,
+        creatorName: (todo as any).creator_name ?? null,
+        isSharedWithCaregiver: todo.is_shared_with_caregiver,
+        isRecurring: todo.is_recurring,
+        recurringType: todo.recurring_type,
+        recurringInterval: todo.recurring_interval,
+        recurringDays: todo.recurring_days,
+        recurringDayOfMonth: todo.recurring_day_of_month,
+        recurringEndDate: todo.recurring_end_date,
+        completedAt: todo.completed_at,
+        createdAt: todo.created_at,
+        updatedAt: todo.updated_at,
       }));
       
       setTodos(mappedTodos);
@@ -172,76 +212,50 @@ export const TodoListScreen = () => {
 
   // 카테고리별 아이콘 컴포넌트
   const CategoryIcon = ({ category, size = 24 }: { category: string; size?: number }) => {
-    const iconStyle = {
-      width: size,
-      height: size,
-      borderRadius: size / 2,
-      justifyContent: 'center' as const,
-      alignItems: 'center' as const,
-    };
+    const containerSize = size;
+    const iconName = getCategoryIcon(category?.toUpperCase() || null);
+    const iconColor = getCategoryColor(category?.toUpperCase() || null);
+    const backgroundColor = `${iconColor}1A`; // 10% alpha
 
-    switch (category) {
-      case 'medicine':
-        return (
-          <View style={[iconStyle, { backgroundColor: '#FF6B6B' }]}>
-            <View style={{
-              width: size * 0.6,
-              height: size * 0.6,
-              backgroundColor: 'white',
-              borderRadius: 2,
-            }} />
-          </View>
-        );
-      case 'hospital':
-        return (
-          <View style={[iconStyle, { backgroundColor: '#4ECDC4' }]}>
-            <View style={{
-              width: size * 0.4,
-              height: size * 0.6,
-              backgroundColor: 'white',
-            }} />
-            <View style={{
-              position: 'absolute',
-              width: size * 0.6,
-              height: size * 0.4,
-              backgroundColor: 'white',
-            }} />
-          </View>
-        );
-      case 'daily':
-        return (
-          <View style={[iconStyle, { backgroundColor: '#45B7D1' }]}>
-            <View style={{
-              width: size * 0.5,
-              height: size * 0.5,
-              borderRadius: size * 0.25,
-              backgroundColor: 'white',
-            }} />
-          </View>
-        );
-      default:
-        return (
-          <View style={[iconStyle, { backgroundColor: '#96CEB4' }]}>
-            <View style={{
-              width: size * 0.6,
-              height: 2,
-              backgroundColor: 'white',
-              marginBottom: 2,
-            }} />
-            <View style={{
-              width: size * 0.4,
-              height: 2,
-              backgroundColor: 'white',
-              marginBottom: 2,
-            }} />
-            <View style={{
-              width: size * 0.5,
-              height: 2,
-              backgroundColor: 'white',
-            }} />
-          </View>
-        );
+    return (
+      <View
+        style={{
+          width: containerSize,
+          height: containerSize,
+          borderRadius: containerSize / 2,
+          backgroundColor,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <Ionicons name={iconName as any} size={size * 0.6} color={iconColor} />
+      </View>
+    );
+  };
+
+  const formatRecurringInfo = (todo: TodoItem) => {
+    if (!todo.isRecurring) {
+      return '';
     }
+
+    if (todo.recurringType === 'DAILY') {
+      return '매일';
+    }
+
+    if (todo.recurringType === 'WEEKLY' && todo.recurringDays?.length) {
+      const dayMap = ['일', '월', '화', '수', '목', '금', '토'];
+      const days = todo.recurringDays
+        .map(day => dayMap[day] ?? '')
+        .filter(Boolean)
+        .join(', ');
+      return days ? `매주 ${days}` : '매주';
+    }
+
+    if (todo.recurringType === 'MONTHLY' && todo.recurringDayOfMonth) {
+      return `매월 ${todo.recurringDayOfMonth}일`;
+    }
+
+    return '';
   };
 
   const getPriorityColor = (priority: string) => {
@@ -319,6 +333,28 @@ export const TodoListScreen = () => {
   const TodoCard = ({ todo }: { todo: TodoItem }) => {
     const { fontSizeLevel } = useFontSizeStore();
     const isExpanded = expandedTodoId === todo.id;
+    const categorySource = todo.rawCategory || todo.category;
+    const categoryKey = categorySource ? categorySource.toUpperCase() : null;
+    const recurringLabel = formatRecurringInfo(todo);
+    const creatorLabel = (() => {
+      if (todo.creatorId === user?.user_id) {
+        return '나';
+      }
+
+      if (todo.creatorName) {
+        return todo.creatorName;
+      }
+
+      if (todo.creatorType === 'elderly') {
+        return user?.name || '어르신';
+      }
+
+      if (todo.creatorType === 'caregiver') {
+        return '보호자';
+      }
+
+      return 'AI';
+    })();
     
     return (
       <TouchableOpacity
@@ -329,13 +365,13 @@ export const TodoListScreen = () => {
           onPress={() => handleCardPress(todo.id)}
         activeOpacity={0.95}
         >
-        {/* 기본 카드 내용 */}
         <View style={styles.cardContent}>
-            <View style={styles.todoLeft}>
-            <View style={styles.categoryIconContainer}>
-              <CategoryIcon category={todo.category} size={28} />
+          <View style={styles.todoLeft}>
+            <View style={styles.categoryIconWrapper}>
+              <CategoryIcon category={categoryKey || categorySource} size={44} />
             </View>
-              <View style={styles.todoInfo}>
+            <View style={styles.todoInfo}>
+              <View style={styles.todoTitleRow}>
                 <Text
                   style={[
                     styles.todoTitle,
@@ -348,25 +384,21 @@ export const TodoListScreen = () => {
                 >
                   {todo.title}
                 </Text>
-                <Text
+              </View>
+
+              <View style={styles.metaRow}>
+                <View
                   style={[
-                    styles.todoDescription,
-                    todo.isCompleted && styles.completedText,
-                    fontSizeLevel >= 1 && { fontSize: 16 },
-                    fontSizeLevel >= 2 && { fontSize: 18 },
+                    styles.timeContainer,
+                    todo.isCompleted && styles.completedTimeContainer,
                   ]}
-                  numberOfLines={2}
-                  ellipsizeMode="tail"
                 >
-                  {todo.description}
-                </Text>
-                <View style={[
-                  styles.timeContainer,
-                  todo.isCompleted && styles.completedTimeContainer,
-                ]}>
-                <View style={styles.timeIconContainer}>
-                  <View style={styles.clockIcon} />
-                </View>
+                  <Ionicons
+                    name="time-outline"
+                    size={16}
+                    color={todo.isCompleted ? '#999999' : Colors.primary}
+                    style={{ marginRight: 6 }}
+                  />
                   <Text
                     style={[
                       styles.todoTime,
@@ -380,28 +412,46 @@ export const TodoListScreen = () => {
                 </View>
               </View>
             </View>
-            
-          {/* 완료 버튼 */}
-            <TouchableOpacity 
-              style={styles.completeButtonContainer}
+          </View>
+
+          <TouchableOpacity
+            style={styles.completeButtonContainer}
             onPress={(e) => {
-              e.stopPropagation(); // 카드 클릭 이벤트 방지
+              e.stopPropagation();
               handleCompletePress(todo.id);
             }}
-              activeOpacity={0.7}
-            >
-              <View style={[
+            activeOpacity={0.7}
+          >
+            <View
+              style={[
                 styles.completeButton,
                 todo.isCompleted && styles.completedButton,
-              ]}>
-                {todo.isCompleted ? (
-                  <Text style={[styles.completedButtonText, fontSizeLevel >= 1 && { fontSize: 16 }, fontSizeLevel >= 2 && { fontSize: 18 }]}>취소</Text>
-                ) : (
-                  <Text style={[styles.completeButtonText, fontSizeLevel >= 1 && { fontSize: 16 }, fontSizeLevel >= 2 && { fontSize: 18 }]}>완료</Text>
-                )}
-              </View>
-            </TouchableOpacity>
-          </View>
+              ]}
+            >
+              {todo.isCompleted ? (
+                <Text
+                  style={[
+                    styles.completedButtonText,
+                    fontSizeLevel >= 1 && { fontSize: 16 },
+                    fontSizeLevel >= 2 && { fontSize: 18 },
+                  ]}
+                >
+                  취소
+                </Text>
+              ) : (
+                <Text
+                  style={[
+                    styles.completeButtonText,
+                    fontSizeLevel >= 1 && { fontSize: 16 },
+                    fontSizeLevel >= 2 && { fontSize: 18 },
+                  ]}
+                >
+                  완료
+                </Text>
+              )}
+            </View>
+          </TouchableOpacity>
+        </View>
 
         {/* 확장된 내용 - 부드러운 opacity 애니메이션 */}
         {isExpanded && (
@@ -412,10 +462,82 @@ export const TodoListScreen = () => {
             }
           ]}>
             <View style={styles.detailDivider} />
-            <Text style={[styles.expandedLabel, fontSizeLevel >= 1 && { fontSize: 18 }, fontSizeLevel >= 2 && { fontSize: 20 }]}>더 자세한 정보</Text>
-            <Text style={[styles.expandedDescription, fontSizeLevel >= 1 && { fontSize: 16 }, fontSizeLevel >= 2 && { fontSize: 18 }]}>
-              이 할일에 대한 추가 정보나 메모가 여기에 표시됩니다.
-            </Text>
+            <Text style={[styles.expandedLabel, fontSizeLevel >= 1 && { fontSize: 18 }, fontSizeLevel >= 2 && { fontSize: 20 }]}>상세 정보</Text>
+            <View style={styles.detailInfoBox}>
+              <View style={styles.detailInfoItem}>
+                <View style={[styles.detailInfoIconCircle, { backgroundColor: 'rgba(74, 85, 104, 0.12)' }]}>
+                  <Ionicons name="person-circle" size={18} color="#4A5568" />
+                </View>
+                <View style={styles.detailInfoText}>
+                  <Text style={[styles.detailInfoLabel, fontSizeLevel >= 1 && { fontSize: 16 }, fontSizeLevel >= 2 && { fontSize: 18 }]}>
+                    등록자
+                  </Text>
+                  <Text style={[styles.detailInfoValue, fontSizeLevel >= 1 && { fontSize: 16 }, fontSizeLevel >= 2 && { fontSize: 18 }]}>
+                    {creatorLabel}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.detailInfoItem}>
+                <View
+                  style={[
+                    styles.detailInfoIconCircle,
+                    {
+                      backgroundColor: todo.isSharedWithCaregiver
+                        ? 'rgba(52, 183, 159, 0.14)'
+                        : 'rgba(153, 153, 153, 0.14)',
+                    },
+                  ]}
+                >
+                  <Ionicons
+                    name={todo.isSharedWithCaregiver ? 'people' : 'lock-closed'}
+                    size={16}
+                    color={todo.isSharedWithCaregiver ? Colors.primary : '#999999'}
+                  />
+                </View>
+                <View style={styles.detailInfoText}>
+                  <Text style={[styles.detailInfoLabel, fontSizeLevel >= 1 && { fontSize: 16 }, fontSizeLevel >= 2 && { fontSize: 18 }]}>
+                    공유 상태
+                  </Text>
+                  <Text
+                    style={[
+                      styles.detailInfoValue,
+                      todo.isSharedWithCaregiver
+                        ? styles.detailInfoValuePositive
+                        : styles.detailInfoValueNeutral,
+                      fontSizeLevel >= 1 && { fontSize: 16 },
+                      fontSizeLevel >= 2 && { fontSize: 18 },
+                    ]}
+                  >
+                    {todo.isSharedWithCaregiver ? '보호자와 공유 중' : '비공유'}
+                  </Text>
+                </View>
+              </View>
+
+              {recurringLabel ? (
+                <View style={[styles.detailInfoItem, styles.detailInfoItemLast]}>
+                  <View style={[styles.detailInfoIconCircle, { backgroundColor: 'rgba(74, 85, 104, 0.12)' }]}
+                  >
+                    <Ionicons name="refresh" size={16} color="#4A5568" />
+                  </View>
+                  <View style={styles.detailInfoText}>
+                    <Text style={[styles.detailInfoLabel, fontSizeLevel >= 1 && { fontSize: 16 }, fontSizeLevel >= 2 && { fontSize: 18 }]}>
+                      반복 일정
+                    </Text>
+                    <Text
+                      style={[
+                        styles.detailInfoValueMultiline,
+                        fontSizeLevel >= 1 && { fontSize: 16 },
+                        fontSizeLevel >= 2 && { fontSize: 18 },
+                      ]}
+                      numberOfLines={2}
+                    >
+                      {recurringLabel}
+                    </Text>
+                  </View>
+                </View>
+              ) : null}
+            </View>
           </Animated.View>
         )}
         </TouchableOpacity>
@@ -697,8 +819,12 @@ const styles = StyleSheet.create({
   },
   
   // 새로운 아이콘 스타일들
-  categoryIconContainer: {
+  categoryIconWrapper: {
+    width: 48,
+    height: 48,
     marginRight: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   calendarIconContainer: {
     marginRight: 12,
@@ -721,17 +847,6 @@ const styles = StyleSheet.create({
     height: 14,
     backgroundColor: Colors.primary,
     borderRadius: 2,
-  },
-  timeIconContainer: {
-    marginRight: 6,
-  },
-  clockIcon: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: Colors.primary,
-    backgroundColor: 'transparent',
   },
   emptyIconContainer: {
     width: 64,
@@ -888,23 +1003,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flex: 1,
   },
-  categoryIcon: {
-    fontSize: 24,
-    marginRight: 12,
-  },
   todoInfo: {
     flex: 1,
+  },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    marginTop: 12,
+    justifyContent: 'flex-start',
+    marginBottom: -4,
+  },
+  todoTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
   },
   todoTitle: {
     fontSize: 16,
     fontWeight: '600',
     color: '#333333',
     marginBottom: 4,
-  },
-  todoDescription: {
-    fontSize: 14,
-    color: '#666666',
-    lineHeight: 20,
   },
   todoRight: {
     alignItems: 'center',
@@ -928,53 +1047,73 @@ const styles = StyleSheet.create({
     color: Colors.primary,
     marginBottom: 8,
   },
-  expandedDescription: {
-    fontSize: 14,
-    color: '#666',
-    lineHeight: 20,
-  },
   detailDivider: {
     height: 1,
     backgroundColor: '#F0F0F0',
     marginBottom: 16,
   },
-  detailSection: {
-    marginBottom: 16,
+  detailInfoBox: {
+    backgroundColor: '#F8F9FB',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#E0E6ED',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
   },
-  detailLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333333',
-    marginBottom: 8,
-  },
-  detailText: {
-    fontSize: 16,
-    color: '#666666',
-    lineHeight: 24,
-  },
-  detailTimeContainer: {
+  detailInfoItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.primaryPale,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 12,
-    alignSelf: 'flex-start',
+    marginBottom: 12,
   },
-  detailTimeText: {
-    fontSize: 16,
-    color: Colors.primary,
+  detailInfoItemLast: {
+    marginBottom: 0,
+  },
+  detailInfoIconCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 14,
+  },
+  detailInfoText: {
+    flex: 1,
+    marginLeft: 0,
+  },
+  detailInfoLabel: {
+    fontSize: 14,
     fontWeight: '600',
+    color: '#666666',
+    marginBottom: 2,
+  },
+  detailInfoValue: {
+    fontSize: 14,
+    color: '#333333',
+    fontWeight: '600',
+  },
+  detailInfoValueMultiline: {
+    fontSize: 14,
+    color: '#333333',
+    lineHeight: 20,
+  },
+  detailInfoValuePositive: {
+    color: Colors.primary,
+  },
+  detailInfoValueNeutral: {
+    color: '#999999',
   },
   timeContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 8,
+    marginTop: 0,
+    marginRight: 8,
     backgroundColor: Colors.primaryPale,
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 12,
     alignSelf: 'flex-start',
+    flexShrink: 0,
+    marginBottom: 4,
   },
   todoTime: {
     fontSize: 14,

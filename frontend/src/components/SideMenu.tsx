@@ -257,13 +257,16 @@ export const SideMenu: React.FC<SideMenuProps> = ({ visible, onClose }) => {
           ]}
         >
           {/* 프로필 섹션 */}
-          <View style={[
-            styles.profileSection,
-            {
-              padding: profilePadding,
-              paddingTop: Math.max(insets.top, getResponsivePadding(20, scale)) + profilePadding,
-            }
-          ]}>
+          <View
+            style={[
+              styles.profileSection,
+              {
+                padding: profilePadding,
+                paddingTop:
+                  Math.max(insets.top, getResponsivePadding(20, scale)) + profilePadding,
+              },
+            ]}
+          >
             <View style={[
               styles.profileImageContainer,
               {
@@ -290,13 +293,17 @@ export const SideMenu: React.FC<SideMenuProps> = ({ visible, onClose }) => {
             ]}>
               {user?.name || 'Patrick'}
             </Text>
-            <Text style={[
-              styles.userInfo, 
-              { fontSize: userInfoFontSize },
-              fontSizeLevel >= 1 && { fontSize: userInfoFontSize * 1.15 },
-              fontSizeLevel >= 2 && { fontSize: userInfoFontSize * 1.3 }
-            ]}>
-              Ford Transit Connect
+            <Text
+              style={[
+                styles.userInfo,
+                { fontSize: userInfoFontSize },
+                fontSizeLevel >= 1 && { fontSize: userInfoFontSize * 1.15 },
+                fontSizeLevel >= 2 && { fontSize: userInfoFontSize * 1.3 },
+              ]}
+              numberOfLines={1}
+              ellipsizeMode="tail"
+            >
+              {user?.email || '이메일 정보 없음'}
             </Text>
           </View>
 
@@ -434,8 +441,6 @@ const styles = StyleSheet.create({
   // 프로필 섹션
   profileSection: {
     backgroundColor: '#34B79F',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
     alignItems: 'center',
     // padding, paddingTop은 동적으로 적용됨
   },
