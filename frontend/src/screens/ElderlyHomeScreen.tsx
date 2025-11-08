@@ -14,6 +14,7 @@ import {
   Animated,
   Linking,
   RefreshControl,
+  Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../store/authStore';
@@ -118,6 +119,9 @@ export const ElderlyHomeScreen = () => {
     }
   };
 
+  const weatherIconSize = fontSizeLevel >= 1 ? 32 : 24;
+  const weatherIconUrl = weather?.icon ? `https://openweathermap.org/img/wn/${weather.icon}@2x.png` : null;
+
   const loadTodayTodos = async () => {
     if (!user) {
       console.warn('⚠️ 어르신: user가 없어서 TODO 로딩 스킵');
@@ -141,21 +145,43 @@ export const ElderlyHomeScreen = () => {
       })));
       
       setTodayTodos(todos);
-      
+
       // 가장 가까운 미완료 일정 찾기
       const now = new Date();
+      const currentTimeString = `${now.getHours().toString().padStart(2, '0')}:${now
+        .getMinutes()
+        .toString()
+        .padStart(2, '0')}`;
+
+      const normalizeTime = (time: string | null | undefined) =>
+        time ? time.substring(0, 5) : null;
+
       const pendingTodos = todos.filter(
         (todo: any) => todo.status !== 'COMPLETED' && todo.status !== 'completed'
       );
-      
+
+      const upcomingCandidates =
+        selectedDayTab === 'today'
+          ? pendingTodos.filter((todo: any) => {
+              const todoTime = normalizeTime(todo.due_time);
+              if (!todoTime) {
+                return true;
+              }
+              return todoTime >= currentTimeString;
+            })
+          : pendingTodos;
+
       // 시간 순으로 정렬하여 가장 가까운 일정 선택
-      const sortedTodos = [...pendingTodos].sort((a: any, b: any) => {
-        if (!a.due_time && !b.due_time) return 0;
-        if (!a.due_time) return 1;
-        if (!b.due_time) return -1;
-        return a.due_time.localeCompare(b.due_time);
+      const sortedTodos = [...upcomingCandidates].sort((a: any, b: any) => {
+        const aTime = normalizeTime(a.due_time);
+        const bTime = normalizeTime(b.due_time);
+
+        if (!aTime && !bTime) return 0;
+        if (!aTime) return 1;
+        if (!bTime) return -1;
+        return aTime.localeCompare(bTime);
       });
-      
+
       setUpcomingTodo(sortedTodos[0] || null);
     } catch (error: any) {
       console.error('❌ 오늘 할 일 불러오기 실패:', error);
@@ -692,7 +718,19 @@ export const ElderlyHomeScreen = () => {
           <View style={styles.divider} />
 
           <View style={styles.weatherSection}>
-            <SunIcon size={fontSizeLevel >= 1 ? 32 : 24} color="#FFB800" />
+            {weatherIconUrl ? (
+              <Image
+                source={{ uri: weatherIconUrl }}
+                style={{
+                  width: weatherIconSize,
+                  height: weatherIconSize,
+                  borderRadius: weatherIconSize / 2,
+                }}
+                resizeMode="contain"
+              />
+            ) : (
+              <SunIcon size={weatherIconSize} color="#FFB800" />
+            )}
             {isLoadingWeather ? (
               <Text style={[styles.weatherText, fontSizeLevel >= 1 && styles.weatherTextLarge, fontSizeLevel >= 2 && { fontSize: 18 }]}>
                 날씨 정보를 불러오는 중...
@@ -717,7 +755,7 @@ export const ElderlyHomeScreen = () => {
             ) : weather.temperature !== undefined ? (
               <View style={{ flex: 1, marginLeft: 12 }}>
                 <Text style={[styles.weatherText, fontSizeLevel >= 1 && styles.weatherTextLarge]}>
-                  {weather.location && `${weather.location} `}현재 {weather.temperature}°C, {weather.description}
+                  {weather.location && `${weather.location} `}현재 {weather.temperature}°C
                 </Text>
               </View>
             ) : (

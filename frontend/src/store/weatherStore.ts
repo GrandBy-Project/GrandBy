@@ -9,6 +9,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 export interface WeatherData {
   temperature?: number;
   description?: string;
+  icon?: string;
   location?: string;
   hasPermission?: boolean;
   lastUpdated?: number; // 마지막 업데이트 시간 (timestamp)
