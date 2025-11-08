@@ -14,6 +14,7 @@ import re
 import logging
 
 from app.database import get_db
+from app.utils.datetime_utils import kst_now
 from app.schemas.user import (
     ConnectionCreate, ConnectionResponse, UserResponse,
     ElderlySearchResult, ConnectionListResponse, ConnectionWithUserInfo,
@@ -164,7 +165,7 @@ async def create_connection(
         
         # 거절된 경우 - 24시간 후 재요청 가능
         if existing_connection.status == ConnectionStatus.REJECTED:
-            time_since_rejection = datetime.utcnow() - existing_connection.updated_at
+            time_since_rejection = kst_now() - existing_connection.updated_at
             if time_since_rejection < timedelta(hours=24):
                 remaining_hours = 24 - int(time_since_rejection.total_seconds() / 3600)
                 raise HTTPException(
@@ -174,7 +175,7 @@ async def create_connection(
             
             # 24시간 지났으면 기존 연결을 PENDING으로 변경
             existing_connection.status = ConnectionStatus.PENDING
-            existing_connection.updated_at = datetime.utcnow()
+            existing_connection.updated_at = kst_now()
             db.commit()
             db.refresh(existing_connection)
             
@@ -383,7 +384,7 @@ async def accept_connection(
     
     # 연결 수락
     connection.status = ConnectionStatus.ACTIVE
-    connection.updated_at = datetime.utcnow()
+    connection.updated_at = kst_now()
     
     # 보호자에게 알림 생성 (활성화된 계정만)
     caregiver = db.query(User).filter(
@@ -473,7 +474,7 @@ async def reject_connection(
     
     # 연결 거절
     connection.status = ConnectionStatus.REJECTED
-    connection.updated_at = datetime.utcnow()
+    connection.updated_at = kst_now()
     
     db.commit()
     db.refresh(connection)
@@ -1079,7 +1080,7 @@ async def upload_profile_image(
     
     # DB 업데이트
     current_user.profile_image_url = image_url
-    current_user.updated_at = datetime.utcnow()
+    current_user.updated_at = kst_now()
     db.commit()
     db.refresh(current_user)
     
@@ -1107,7 +1108,7 @@ async def delete_profile_image_endpoint(
     
     # DB 업데이트
     current_user.profile_image_url = None
-    current_user.updated_at = datetime.utcnow()
+    current_user.updated_at = kst_now()
     db.commit()
     
     return {"message": "프로필 이미지가 삭제되었습니다"}
@@ -1165,7 +1166,7 @@ async def update_profile(
     current_user.phone_number = request.phone_number
     current_user.birth_date = request.birth_date
     current_user.gender = request.gender
-    current_user.updated_at = datetime.utcnow()
+    current_user.updated_at = kst_now()
     
     db.commit()
     db.refresh(current_user)
@@ -1223,7 +1224,7 @@ async def change_password(
         password_to_hash = request.new_password
     
     current_user.password_hash = pwd_context.hash(password_to_hash)
-    current_user.updated_at = datetime.utcnow()
+    current_user.updated_at = kst_now()
     
     db.commit()
     
@@ -1262,8 +1263,8 @@ async def delete_account(
     
     # Soft Delete 처리
     current_user.is_active = False
-    current_user.deleted_at = datetime.utcnow()
-    current_user.updated_at = datetime.utcnow()
+    current_user.deleted_at = kst_now()
+    current_user.updated_at = kst_now()
     
     # # 프로필 이미지 삭제
     # if current_user.profile_image_url:
@@ -1333,7 +1334,7 @@ async def update_push_token(
     
     # 현재 사용자 토큰 업데이트
     current_user.push_token = token_data.push_token
-    current_user.push_token_updated_at = datetime.utcnow()
+    current_user.push_token_updated_at = kst_now()
     
     db.commit()
     
@@ -1428,7 +1429,7 @@ async def update_user_settings(
     for field, value in update_data.items():
         setattr(settings, field, value)
     
-    settings.updated_at = datetime.utcnow()
+    settings.updated_at = kst_now()
     
     db.commit()
     db.refresh(settings)

@@ -9,6 +9,7 @@ import enum
 import uuid
 
 from app.database import Base
+from app.utils.datetime_utils import kst_now
 
 
 class CreatorType(str, enum.Enum):
@@ -89,9 +90,9 @@ class Todo(Base):
     # AI 생성 TODO 확인 여부
     is_confirmed = Column(Boolean, default=True)  # 보호자가 만든 것은 기본 true, AI는 false
     
-    # 타임스탬프
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # 타임스탬프 (한국 시간 KST)
+    created_at = Column(DateTime, default=kst_now)
+    updated_at = Column(DateTime, default=kst_now, onupdate=kst_now)
     completed_at = Column(DateTime, nullable=True)
     
     # Relationships

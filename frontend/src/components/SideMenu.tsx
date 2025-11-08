@@ -12,12 +12,14 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../store/authStore';
+import { useSelectedElderlyStore } from '../store/selectedElderlyStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useResponsive, getResponsiveFontSize, getResponsivePadding, getResponsiveSize } from '../hooks/useResponsive';
 import { useFontSizeStore } from '../store/fontSizeStore';
 import { ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../constants/Colors';
+import { UserRole } from '../types';
 
 interface SideMenuProps {
   visible: boolean;
@@ -27,6 +29,7 @@ interface SideMenuProps {
 export const SideMenu: React.FC<SideMenuProps> = ({ visible, onClose }) => {
   const router = useRouter();
   const { user } = useAuthStore();
+  const { selectedElderlyId, selectedElderlyName } = useSelectedElderlyStore();
   const insets = useSafeAreaInsets();
   const { scale, width: screenWidth, height: screenHeight } = useResponsive();
   const { fontSizeLevel } = useFontSizeStore();
@@ -72,54 +75,115 @@ export const SideMenu: React.FC<SideMenuProps> = ({ visible, onClose }) => {
     });
   };
 
+  // 역할에 따른 메뉴 항목 정의
+  const getMenuItems = () => {
+    // 보호자 메뉴
+    if (user?.role === UserRole.CAREGIVER) {
+      return [
+        {
+          id: 'schedule-management',
+          iconName: 'checkmark-circle-outline' as keyof typeof Ionicons.glyphMap,
+          title: '일정 관리',
+          onPress: () => {
+            router.push('/calendar');
+            handleClose();
+          },
+        },
+        {
+          id: 'statistics',
+          iconName: 'bar-chart-outline' as keyof typeof Ionicons.glyphMap,
+          title: '통계',
+          onPress: () => {
+            // 선택된 어르신이 있으면 쿼리 파라미터 포함, 없으면 기본 경로
+            if (selectedElderlyId && selectedElderlyName) {
+              router.push(`/guardian-statistics?elderlyId=${selectedElderlyId}&elderlyName=${encodeURIComponent(selectedElderlyName)}`);
+            } else {
+              router.push('/guardian-statistics');
+            }
+            handleClose();
+          },
+        },
+        {
+          id: 'ai-call-settings',
+          iconName: 'phone-portrait-outline' as keyof typeof Ionicons.glyphMap,
+          title: 'AI 통화 설정',
+          onPress: () => {
+            router.push('/guardian-ai-call');
+            handleClose();
+          },
+        },
+        {
+          id: 'diary',
+          iconName: 'book-outline' as keyof typeof Ionicons.glyphMap,
+          title: '일기장',
+          onPress: () => {
+            router.push('/diaries');
+            handleClose();
+          },
+        },
+        {
+          id: 'mypage',
+          iconName: 'person-outline' as keyof typeof Ionicons.glyphMap,
+          title: '내 정보',
+          onPress: () => {
+            router.push('/mypage');
+            handleClose();
+          },
+        },
+      ];
+    }
+    
+    // 어르신 메뉴 (기본값)
+    return [
+      {
+        id: 'todo-list',
+        iconName: 'list-outline' as keyof typeof Ionicons.glyphMap,
+        title: '해야 할 일',
+        onPress: () => {
+          router.push('/todos');
+          handleClose();
+        },
+      },
+      {
+        id: 'ai-call',
+        iconName: 'call-outline' as keyof typeof Ionicons.glyphMap,
+        title: 'AI 통화',
+        onPress: () => {
+          router.push('/ai-call');
+          handleClose();
+        },
+      },
+      {
+        id: 'shared-diary',
+        iconName: 'book-outline' as keyof typeof Ionicons.glyphMap,
+        title: '일기장',
+        onPress: () => {
+          router.push('/diaries');
+          handleClose();
+        },
+      },
+      {
+        id: 'calendar',
+        iconName: 'calendar-outline' as keyof typeof Ionicons.glyphMap,
+        title: '달력',
+        onPress: () => {
+          router.push('/calendar');
+          handleClose();
+        },
+      },
+      {
+        id: 'mypage',
+        iconName: 'person-outline' as keyof typeof Ionicons.glyphMap,
+        title: '내 정보',
+        onPress: () => {
+          router.push('/mypage');
+          handleClose();
+        },
+      },
+    ];
+  };
 
-  const menuItems = [
-    {
-      id: 'todo-list',
-      iconName: 'list-outline' as keyof typeof Ionicons.glyphMap,
-      title: '해야 할 일',
-      onPress: () => {
-        router.push('/todos');
-        handleClose();
-      },
-    },
-    {
-      id: 'ai-call',
-      iconName: 'call-outline' as keyof typeof Ionicons.glyphMap,
-      title: 'AI 통화',
-      onPress: () => {
-        router.push('/ai-call');
-        handleClose();
-      },
-    },
-    {
-      id: 'shared-diary',
-      iconName: 'book-outline' as keyof typeof Ionicons.glyphMap,
-      title: '일기장',
-      onPress: () => {
-        router.push('/diaries');
-        handleClose();
-      },
-    },
-    {
-      id: 'calendar',
-      iconName: 'calendar-outline' as keyof typeof Ionicons.glyphMap,
-      title: '달력',
-      onPress: () => {
-        router.push('/calendar');
-        handleClose();
-      },
-    },
-    {
-      id: 'mypage',
-      iconName: 'person-outline' as keyof typeof Ionicons.glyphMap,
-      title: '내 정보',
-      onPress: () => {
-        router.push('/mypage');
-        handleClose();
-      },
-    },
-  ];
+  const menuItems = getMenuItems();
 
   // 순수 비율 기반 동적 계산
   // 메뉴 너비: 화면 너비의 70-75% (화면 크기에 따라 자연스럽게)
@@ -276,6 +340,7 @@ export const SideMenu: React.FC<SideMenuProps> = ({ visible, onClose }) => {
                     name={item.iconName} 
                     size={menuIconSize} 
                     color={Colors.primary}
+                    style={item.id === 'ai-call-settings' ? { transform: [{ scaleY: 0.85 }] } : undefined}
                   />
                 </View>
                 {/* 메뉴 텍스트 */}
