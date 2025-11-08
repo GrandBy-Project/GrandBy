@@ -7,6 +7,7 @@ import * as Notifications from 'expo-notifications';
 import { registerPushToken } from '../src/api/auth';
 import { useAuthStore } from '../src/store/authStore';
 import { GlobalAlertProvider } from '../src/components/GlobalAlertProvider';
+import { ToastProvider } from '../src/components/ToastProvider';
 import { useErrorStore } from '../src/store/errorStore';
 
 // 푸시 알림 설정
@@ -79,24 +80,26 @@ export default function RootLayout() {
   };
 
   return (
-    <GlobalAlertProvider>
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          animation: 'fade', // 페이드 전환으로 더 깔끔한 페이지 전환
-        }}
-      >
-        <Stack.Screen name="index" />
-        <Stack.Screen name="register" />
-        <Stack.Screen name="home" />
-        <Stack.Screen name="mypage" />
-        <Stack.Screen name="todos" />
-        <Stack.Screen name="todo-write" />
-        <Stack.Screen name="guardian-todo-add" />
-        <Stack.Screen name="calendar" />
-        <Stack.Screen name="ai-call" />
-      </Stack>
-    </GlobalAlertProvider>
+    <ToastProvider>
+      <GlobalAlertProvider>
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            animation: 'fade', // 페이드 전환으로 더 깔끔한 페이지 전환
+          }}
+        >
+          <Stack.Screen name="index" />
+          <Stack.Screen name="register" />
+          <Stack.Screen name="home" />
+          <Stack.Screen name="mypage" />
+          <Stack.Screen name="todos" />
+          <Stack.Screen name="todo-write" />
+          <Stack.Screen name="guardian-todo-add" />
+          <Stack.Screen name="calendar" />
+          <Stack.Screen name="ai-call" />
+        </Stack>
+      </GlobalAlertProvider>
+    </ToastProvider>
   );
 }
 

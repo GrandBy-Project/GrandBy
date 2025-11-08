@@ -16,6 +16,7 @@ import {
   RefreshControl,
   Image,
   PanResponder,
+  BackHandler,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Calendar } from 'react-native-calendars';
@@ -30,6 +31,7 @@ import * as todoApi from '../api/todo';
 import * as connectionsApi from '../api/connections';
 import * as diaryApi from '../api/diary';
 import { useAlert } from '../components/GlobalAlertProvider';
+import { useToast } from '../components/ToastProvider';
 import { formatDateForDisplay } from '../utils/dateUtils';
 import {
   TODO_CATEGORIES,
@@ -68,6 +70,7 @@ export const GuardianHomeScreen = () => {
   const { setSelectedElderly } = useSelectedElderlyStore();
   const insets = useSafeAreaInsets();
   const { show } = useAlert();
+  const { showToast } = useToast();
   const [currentElderlyIndex, setCurrentElderlyIndex] = useState(0);
   const [todayTodos, setTodayTodos] = useState<todoApi.TodoItem[]>([]);
   const [isLoadingTodos, setIsLoadingTodos] = useState(false);
@@ -80,6 +83,7 @@ export const GuardianHomeScreen = () => {
   const [searchResults, setSearchResults] = useState<connectionsApi.ElderlySearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [showConnectionModal, setShowConnectionModal] = useState(false);
 
   // 통계 데이터 상태
   const [monthlyStats, setMonthlyStats] = useState<todoApi.TodoDetailedStats | null>(null);
@@ -2251,6 +2255,41 @@ export const GuardianHomeScreen = () => {
       },
     },
   ];
+
+  const lastBackPressRef = useRef(0);
+
+  useFocusEffect(
+    useCallback(() => {
+      const onBackPress = () => {
+        if (showEditModal) {
+          setShowEditModal(false);
+          return true;
+        }
+
+        if (showAddElderlyModal) {
+          setShowAddElderlyModal(false);
+          return true;
+        }
+
+        if (showConnectionModal) {
+          setShowConnectionModal(false);
+          return true;
+        }
+
+        const now = Date.now();
+        if (now - lastBackPressRef.current < 2000) {
+          BackHandler.exitApp();
+        } else {
+          lastBackPressRef.current = now;
+          showToast('한 번 더 누르면 앱이 종료됩니다.');
+        }
+        return true;
+      };
+
+      const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+      return () => subscription.remove();
+    }, [showEditModal, showAddElderlyModal, showConnectionModal, showToast])
+  );
 
   return (
     <View style={styles.container}>
