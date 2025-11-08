@@ -14,6 +14,7 @@ import {
   Animated,
   Linking,
   RefreshControl,
+  BackHandler,
   Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -33,6 +34,7 @@ import { useFontSizeStore } from '../store/fontSizeStore';
 import { useWeatherStore } from '../store/weatherStore';
 import { elderlyHomeStyles } from './ElderlyHomeScreen.styles';
 import { useAlert } from '../components/GlobalAlertProvider';
+import { useToast } from '../components/ToastProvider';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { formatPhoneNumber } from '../utils/validation';
 import { TutorialModal } from '../components';
@@ -52,6 +54,7 @@ export const ElderlyHomeScreen = () => {
   // 날씨 정보 전역 상태 사용
   const { weather, isLoading: isLoadingWeather, setWeather, setLoading: setIsLoadingWeather, isCachedWeatherValid, hasWeather } = useWeatherStore();
   const { show } = useAlert();
+  const { showToast } = useToast();
   
   const [todayTodos, setTodayTodos] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -75,10 +78,44 @@ export const ElderlyHomeScreen = () => {
   // 튜토리얼 관련 state
   const [showTutorial, setShowTutorial] = useState(false);
   const aiCallButtonRef = useRef<View>(null);
+  const lastBackPressRef = useRef(0);
 
   // 연결 애니메이션
   const pulseAnim = useRef(new Animated.Value(1)).current;
   
+  useFocusEffect(
+    useCallback(() => {
+      const onBackPress = () => {
+        if (showTodoModal) {
+          setShowTodoModal(false);
+          return true;
+        }
+
+        if (showConnectionModal) {
+          setShowConnectionModal(false);
+          return true;
+        }
+
+        if (showTutorial) {
+          setShowTutorial(false);
+          return true;
+        }
+
+        const now = Date.now();
+        if (now - lastBackPressRef.current < 2000) {
+          BackHandler.exitApp();
+        } else {
+          lastBackPressRef.current = now;
+          showToast('한 번 더 누르면 앱이 종료됩니다.');
+        }
+        return true;
+      };
+
+      const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+      return () => subscription.remove();
+    }, [showTodoModal, showConnectionModal, showTutorial, showToast])
+  );
+
   // 맥박 애니메이션 시작
   useEffect(() => {
     if (activeConnections.length > 0) {
