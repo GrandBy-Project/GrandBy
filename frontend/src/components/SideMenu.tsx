@@ -9,6 +9,7 @@ import {
   TouchableOpacity,
   Modal,
   Animated,
+  Image,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../store/authStore';
@@ -20,6 +21,7 @@ import { ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../constants/Colors';
 import { UserRole } from '../types';
+import { API_BASE_URL } from '../api/client';
 
 interface SideMenuProps {
   visible: boolean;
@@ -185,6 +187,17 @@ export const SideMenu: React.FC<SideMenuProps> = ({ visible, onClose }) => {
 
   const menuItems = getMenuItems();
 
+  // 프로필 이미지 URL 가져오기
+  const getProfileImageUrl = () => {
+    if (!user?.profile_image_url) return null;
+    // 이미 전체 URL인 경우
+    if (user.profile_image_url.startsWith('http')) {
+      return user.profile_image_url;
+    }
+    // 상대 경로인 경우
+    return `${API_BASE_URL}/${user.profile_image_url}`;
+  };
+
   // 순수 비율 기반 동적 계산
   // 메뉴 너비: 화면 너비의 70-75% (화면 크기에 따라 자연스럽게)
   const menuWidth = screenWidth * (screenWidth < 400 ? 0.70 : 0.75);
@@ -271,13 +284,25 @@ export const SideMenu: React.FC<SideMenuProps> = ({ visible, onClose }) => {
                 height: profileImageSize,
                 borderRadius: profileImageBorderRadius,
                 marginBottom: profileImageMarginBottom,
+                overflow: 'hidden',
               }
             ]}>
-              <Ionicons 
-                name="person-circle" 
-                size={profileImageSize * 0.9} 
-                color="#34B79F" 
-              />
+              {getProfileImageUrl() ? (
+                <Image
+                  source={{ uri: getProfileImageUrl()! }}
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                  }}
+                  resizeMode="cover"
+                />
+              ) : (
+                <Ionicons 
+                  name="person-circle" 
+                  size={profileImageSize * 0.9} 
+                  color="#34B79F" 
+                />
+              )}
             </View>
             <Text style={[
               styles.userName, 

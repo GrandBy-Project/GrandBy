@@ -14,6 +14,7 @@ import {
   Animated,
   Linking,
   RefreshControl,
+  Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../store/authStore';
@@ -35,6 +36,7 @@ import { useAlert } from '../components/GlobalAlertProvider';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { formatPhoneNumber } from '../utils/validation';
 import { TutorialModal } from '../components';
+import { API_BASE_URL } from '../api/client';
 
 export const ElderlyHomeScreen = () => {
   const router = useRouter();
@@ -102,6 +104,17 @@ export const ElderlyHomeScreen = () => {
       };
     }
   }, [activeConnections.length, pulseAnim]);
+
+  // 프로필 이미지 URL 가져오기
+  const getProfileImageUrl = () => {
+    if (!user?.profile_image_url) return null;
+    // 이미 전체 URL인 경우
+    if (user.profile_image_url.startsWith('http')) {
+      return user.profile_image_url;
+    }
+    // 상대 경로인 경우
+    return `${API_BASE_URL}/${user.profile_image_url}`;
+  };
 
   // 새로고침 핸들러
   const handleRefresh = async () => {
@@ -641,7 +654,18 @@ export const ElderlyHomeScreen = () => {
         <View style={styles.profileCard}>
           <View style={styles.profileHeader}>
             <View style={styles.avatarContainer}>
-              <ProfileIcon size={36} color="#34B79F" />
+              {getProfileImageUrl() ? (
+                <Image
+                  source={{ uri: getProfileImageUrl()! }}
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                  }}
+                  resizeMode="cover"
+                />
+              ) : (
+                <ProfileIcon size={36} color="#34B79F" />
+              )}
             </View>
             <View style={styles.profileInfo}>
               <Text style={[styles.greeting, fontSizeLevel >= 1 && styles.greetingLarge, fontSizeLevel >= 2 && { fontSize: 28 }]}>안녕하세요!</Text>
