@@ -18,6 +18,7 @@ import {
   UIManager,
   Modal,
   Pressable,
+  RefreshControl,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -46,6 +47,7 @@ export const MyPageScreen = () => {
   const [connectedElderly, setConnectedElderly] = useState<ConnectionWithUserInfo[]>([]);
   const [isLoadingCaregivers, setIsLoadingCaregivers] = useState(false);
   const [isLoadingElderly, setIsLoadingElderly] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [showPrivacyPolicy, setShowPrivacyPolicy] = useState(false);
   const [showTerms, setShowTerms] = useState(false);
   const [showImageOptionsModal, setShowImageOptionsModal] = useState(false);
@@ -96,6 +98,19 @@ export const MyPageScreen = () => {
       loadConnectedElderly();
     }
   }, [user]);
+
+  // 새로고침 핸들러
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await Promise.all([
+        loadNotificationSettings(),
+        user?.role === UserRole.ELDERLY ? loadConnectedCaregivers() : loadConnectedElderly(),
+      ]);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   const loadNotificationSettings = async () => {
     try {
@@ -933,6 +948,14 @@ export const MyPageScreen = () => {
         style={styles.content} 
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 20, padding: contentPadding }}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={handleRefresh}
+            colors={[Colors.primary]}
+            tintColor={Colors.primary}
+          />
+        }
       >
         {/* 사용자 정보 카드 */}
         <View style={[styles.userCard, { padding: userCardPadding, marginBottom: userCardMarginBottom }]}>

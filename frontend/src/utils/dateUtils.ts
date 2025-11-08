@@ -145,10 +145,10 @@ export const formatDateForDisplayWithRelative = (dateString: string): string => 
 };
 
 /**
- * "HH:MM" 형식의 시간 문자열을 "X시 X분" 형식으로 변환
- * CalendarScreen의 convertHHMMToKoreanTime 함수와 동일
+ * "HH:MM" 형식의 시간 문자열을 "오전/오후 X시" 또는 "오전/오후 X시 X분" 형식으로 변환
+ * 정각(0분)일 때는 "분" 생략
  * @param timeStr "HH:MM" 형식의 시간 문자열 또는 null
- * @returns "X시 X분" 형식 또는 "시간 미정" 또는 "하루 종일"
+ * @returns "오전/오후 X시 [X분]" 형식 또는 "시간 미정" 또는 "하루 종일"
  */
 export const formatTimeKorean = (timeStr: string | null): string => {
   if (!timeStr) return '시간 미정';
@@ -163,7 +163,16 @@ export const formatTimeKorean = (timeStr: string | null): string => {
   
   if (hour === 0 && minute === 0) return '하루 종일';
   
-  return `${hour}시 ${minute}분`;
+  // 오전/오후 구분
+  const period = hour < 12 ? '오전' : '오후';
+  const displayHour = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+  
+  // 정각(0분)일 때는 "분" 생략
+  if (minute === 0) {
+    return `${period} ${displayHour}시`;
+  }
+  
+  return `${period} ${displayHour}시 ${minute}분`;
 };
 
 /**

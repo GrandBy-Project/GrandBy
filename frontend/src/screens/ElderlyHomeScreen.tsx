@@ -13,6 +13,7 @@ import {
   useWindowDimensions,
   Animated,
   Linking,
+  RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../store/authStore';
@@ -52,6 +53,7 @@ export const ElderlyHomeScreen = () => {
   
   const [todayTodos, setTodayTodos] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [selectedDayTab, setSelectedDayTab] = useState<'today' | 'tomorrow'>('today'); // 오늘/내일 탭
   const [selectedTodo, setSelectedTodo] = useState<any | null>(null);
   const [showTodoModal, setShowTodoModal] = useState(false);
@@ -100,6 +102,21 @@ export const ElderlyHomeScreen = () => {
       };
     }
   }, [activeConnections.length, pulseAnim]);
+
+  // 새로고침 핸들러
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await Promise.all([
+        loadTodayTodos(),
+        loadWeather(), // 캐시 확인 후 필요시만 새로고침
+        loadPendingConnections(),
+        loadActiveConnections(),
+      ]);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   const loadTodayTodos = async () => {
     if (!user) {
@@ -608,7 +625,18 @@ export const ElderlyHomeScreen = () => {
         </View>
       )}
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.content} 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={handleRefresh}
+            colors={[Colors.primary]}
+            tintColor={Colors.primary}
+          />
+        }
+      >
         {/* 어르신 프로필 카드 */}
         <View style={styles.profileCard}>
           <View style={styles.profileHeader}>
