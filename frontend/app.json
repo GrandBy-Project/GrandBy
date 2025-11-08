@@ -53,7 +53,7 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/haruPushLogo.png",
+          "icon": "./assets/haruPushLogo2.png",
           "color": "#ffffff",
           "sounds": [],
           "modes": [

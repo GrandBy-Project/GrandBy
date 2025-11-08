@@ -38,12 +38,14 @@ import {
   getCategoryColor,
 } from '../constants/TodoCategories';
 import { formatPhoneNumber } from '../utils/validation';
+import { API_BASE_URL } from '../api/client';
 
 interface ElderlyProfile {
   id: string;
   name: string;
   age: number; // 만 나이
   profileImage: string;
+  profile_image_url?: string; // 프로필 이미지 URL
   healthStatus: 'good' | 'normal' | 'attention';
   todayTasksCompleted: number;
   todayTasksTotal: number;
@@ -198,6 +200,17 @@ export const GuardianHomeScreen = () => {
     );
   };
 
+  // 어르신 프로필 이미지 URL 가져오기
+  const getElderlyProfileImageUrl = (elderly: ElderlyProfile | null) => {
+    if (!elderly?.profile_image_url) return null;
+    // 이미 전체 URL인 경우
+    if (elderly.profile_image_url.startsWith('http')) {
+      return elderly.profile_image_url;
+    }
+    // 상대 경로인 경우
+    return `${API_BASE_URL}/${elderly.profile_image_url}`;
+  };
+
   // 탭별 컨텐츠 렌더링
   const renderFamilyTab = () => (
     <>
@@ -208,7 +221,18 @@ export const GuardianHomeScreen = () => {
           <View style={styles.elderlyCardHeader}>
             <View style={styles.elderlyProfileInfo}>
               <View style={styles.elderlyProfileImageContainer}>
-                <Ionicons name={currentElderly.profileImage as any} size={35} color="#666666" />
+                {getElderlyProfileImageUrl(currentElderly) ? (
+                  <Image
+                    source={{ uri: getElderlyProfileImageUrl(currentElderly)! }}
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                    }}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <Ionicons name={currentElderly.profileImage as any} size={35} color="#666666" />
+                )}
               </View>
               <View style={styles.elderlyProfileText}>
                 <Text style={styles.elderlyName}>{currentElderly.name}</Text>
@@ -1447,6 +1471,7 @@ export const GuardianHomeScreen = () => {
         name: e.name,
         age: calculateFullAge(e.birth_date), // 만 나이
         profileImage: 'person-circle',
+        profile_image_url: e.profile_image_url || undefined,
         healthStatus: 'good', // TODO: 실제 건강 상태 계산
         todayTasksCompleted: 0, // TODO: API에서 계산
         todayTasksTotal: 0, // TODO: API에서 계산
@@ -2523,6 +2548,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginRight: 16,
     position: 'relative',
+    overflow: 'hidden',
   },
   healthStatusDot: {
     position: 'absolute',
