@@ -311,7 +311,7 @@ class NotificationService:
             db=db,
             user_id=user_id,
             notification_type=NotificationType.TODO_REMINDER,
-            title=f"🔔 {minutes_before}분 후 일정이 있어요!",
+            title=f"어르신!{minutes_before}분 후 일정이 있어요!",
             message=f"'{todo_title}' 일정이 곧 시작됩니다.",
             related_id=todo_id,
             notification_type_key='todo_reminder'
@@ -335,7 +335,7 @@ class NotificationService:
             db=db,
             user_id=user_id,
             notification_type=NotificationType.TODO_REMINDER,
-            title="📋 오늘의 할 일을 확인해주세요",
+            title=" 오늘의 할 일을 확인해주세요",
             message=f"아직 완료하지 못한 일정이 {incomplete_count}개 있어요.",
             notification_type_key='todo_incomplete'
         )
@@ -362,7 +362,7 @@ class NotificationService:
             db=db,
             user_id=user_id,
             notification_type=NotificationType.DIARY_CREATED,  # TODO_CREATED 타입이 없어서 임시로 사용
-            title="✨ 새로운 일정이 추가되었어요",
+            title="새로운 일정이 추가되었어요",
             message=f"{creator_name}님이 '{todo_title}' 일정을 추가했습니다.",
             related_id=todo_id,
             notification_type_key='todo_created'
@@ -407,7 +407,7 @@ class NotificationService:
                 db=db,
                 user_id=connection.caregiver_id,
                 notification_type=NotificationType.DIARY_CREATED,  # TODO_CREATED 타입이 없어서 임시로 사용
-                title="📝 새로운 일정이 추가되었어요",
+                title="새로운 일정이 추가되었어요",
                 message=f"{elderly_name}님이 '{todo_title}' 일정을 추가했습니다.",
                 related_id=todo_id,
                 notification_type_key='todo_created'
@@ -439,7 +439,7 @@ class NotificationService:
                 db=db,
                 user_id=caregiver_id,
                 notification_type=NotificationType.DIARY_CREATED,
-                title="📖 새로운 일기가 작성되었어요",
+                title="새로운 일기가 작성되었어요",
                 message=f"{elderly_name}님의 오늘 일기가 자동으로 작성되었습니다.",
                 related_id=diary_id,
                 notification_type_key='diary_created'
@@ -506,7 +506,7 @@ class NotificationService:
                 db=db,
                 user_id=target_id,
                 notification_type=NotificationType.DIARY_CREATED,  # TODO: DIARY_COMMENT 타입 추가 시 변경
-                title="💬 새로운 댓글이 달렸어요",
+                title="새로운 댓글이 달렸어요",
                 message=f"{comment_author_name}님이 '{diary_title_text}' 일기에 댓글을 남겼습니다.",
                 related_id=diary_id,
                 notification_type_key='diary_comment'
@@ -534,8 +534,8 @@ class NotificationService:
             db=db,
             user_id=elderly_id,
             notification_type=NotificationType.CALL_MISSED,
-            title="📞 AI 전화가 완료되었어요",
-            message="오늘의 AI 전화가 완료되었습니다.",
+            title="하루와의 전화가 완료되었어요",
+            message="오늘의 전화가 완료되었습니다.",
             related_id=call_id,
             notification_type_key='call_completed'
         )
@@ -560,7 +560,7 @@ class NotificationService:
             db=db,
             user_id=elderly_id,
             notification_type=NotificationType.CONNECTION_REQUEST,
-            title="👥 새로운 연결 요청",
+            title="새로운 연결 요청",
             message=f"{caregiver_name}님이 연결을 요청했습니다.",
             related_id=connection_id,
             notification_type_key='connection_request'
@@ -586,7 +586,7 @@ class NotificationService:
             db=db,
             user_id=caregiver_id,
             notification_type=NotificationType.CONNECTION_ACCEPTED,
-            title="✅ 연결 요청이 수락되었어요",
+            title="연결 요청이 수락되었어요",
             message=f"{elderly_name}님이 연결 요청을 수락했습니다.",
             related_id=connection_id,
             notification_type_key='connection_accepted'

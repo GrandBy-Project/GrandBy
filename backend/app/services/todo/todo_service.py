@@ -8,6 +8,7 @@ from sqlalchemy import and_, or_, func
 from datetime import date, datetime, timedelta
 from typing import List, Optional, Dict
 import uuid
+from app.utils.datetime_utils import kst_now
 
 from app.models.todo import Todo, TodoStatus, CreatorType, RecurringType
 from app.models.user import User, UserRole, UserConnection, ConnectionStatus
@@ -485,8 +486,8 @@ class TodoService:
         
         # 완료 처리
         todo.status = TodoStatus.COMPLETED
-        todo.completed_at = datetime.utcnow()
-        todo.updated_at = datetime.utcnow()
+        todo.completed_at = kst_now()
+        todo.updated_at = kst_now()
         
         db.commit()
         db.refresh(todo)
@@ -536,7 +537,7 @@ class TodoService:
         
         todo.status = TodoStatus.PENDING
         todo.completed_at = None
-        todo.updated_at = datetime.utcnow()
+        todo.updated_at = kst_now()
         
         db.commit()
         db.refresh(todo)
@@ -588,7 +589,7 @@ class TodoService:
         for key, value in update_data.items():
             setattr(todo, key, value)
         
-        todo.updated_at = datetime.utcnow()
+        todo.updated_at = kst_now()
         
         db.commit()
         db.refresh(todo)

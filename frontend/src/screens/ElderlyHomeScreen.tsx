@@ -13,6 +13,9 @@ import {
   useWindowDimensions,
   Animated,
   Linking,
+  RefreshControl,
+  BackHandler,
+  Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../store/authStore';
@@ -31,9 +34,11 @@ import { useFontSizeStore } from '../store/fontSizeStore';
 import { useWeatherStore } from '../store/weatherStore';
 import { elderlyHomeStyles } from './ElderlyHomeScreen.styles';
 import { useAlert } from '../components/GlobalAlertProvider';
+import { useToast } from '../components/ToastProvider';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { formatPhoneNumber } from '../utils/validation';
 import { TutorialModal } from '../components';
+import { API_BASE_URL } from '../api/client';
 
 export const ElderlyHomeScreen = () => {
   const router = useRouter();
@@ -49,9 +54,11 @@ export const ElderlyHomeScreen = () => {
   // 날씨 정보 전역 상태 사용
   const { weather, isLoading: isLoadingWeather, setWeather, setLoading: setIsLoadingWeather, isCachedWeatherValid, hasWeather } = useWeatherStore();
   const { show } = useAlert();
+  const { showToast } = useToast();
   
   const [todayTodos, setTodayTodos] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [selectedDayTab, setSelectedDayTab] = useState<'today' | 'tomorrow'>('today'); // 오늘/내일 탭
   const [selectedTodo, setSelectedTodo] = useState<any | null>(null);
   const [showTodoModal, setShowTodoModal] = useState(false);
@@ -71,10 +78,44 @@ export const ElderlyHomeScreen = () => {
   // 튜토리얼 관련 state
   const [showTutorial, setShowTutorial] = useState(false);
   const aiCallButtonRef = useRef<View>(null);
+  const lastBackPressRef = useRef(0);
 
   // 연결 애니메이션
   const pulseAnim = useRef(new Animated.Value(1)).current;
   
+  useFocusEffect(
+    useCallback(() => {
+      const onBackPress = () => {
+        if (showTodoModal) {
+          setShowTodoModal(false);
+          return true;
+        }
+
+        if (showConnectionModal) {
+          setShowConnectionModal(false);
+          return true;
+        }
+
+        if (showTutorial) {
+          setShowTutorial(false);
+          return true;
+        }
+
+        const now = Date.now();
+        if (now - lastBackPressRef.current < 2000) {
+          BackHandler.exitApp();
+        } else {
+          lastBackPressRef.current = now;
+          showToast('한 번 더 누르면 앱이 종료됩니다.');
+        }
+        return true;
+      };
+
+      const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+      return () => subscription.remove();
+    }, [showTodoModal, showConnectionModal, showTutorial, showToast])
+  );
+
   // 맥박 애니메이션 시작
   useEffect(() => {
     if (activeConnections.length > 0) {
@@ -101,6 +142,35 @@ export const ElderlyHomeScreen = () => {
     }
   }, [activeConnections.length, pulseAnim]);
 
+  // 프로필 이미지 URL 가져오기
+  const getProfileImageUrl = () => {
+    if (!user?.profile_image_url) return null;
+    // 이미 전체 URL인 경우
+    if (user.profile_image_url.startsWith('http')) {
+      return user.profile_image_url;
+    }
+    // 상대 경로인 경우
+    return `${API_BASE_URL}/${user.profile_image_url}`;
+  };
+
+  // 새로고침 핸들러
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await Promise.all([
+        loadTodayTodos(),
+        loadWeather(), // 캐시 확인 후 필요시만 새로고침
+        loadPendingConnections(),
+        loadActiveConnections(),
+      ]);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  const weatherIconSize = fontSizeLevel >= 1 ? 32 : 24;
+  const weatherIconUrl = weather?.icon ? `https://openweathermap.org/img/wn/${weather.icon}@2x.png` : null;
+
   const loadTodayTodos = async () => {
     if (!user) {
       console.warn('⚠️ 어르신: user가 없어서 TODO 로딩 스킵');
@@ -124,21 +194,43 @@ export const ElderlyHomeScreen = () => {
       })));
       
       setTodayTodos(todos);
-      
+
       // 가장 가까운 미완료 일정 찾기
       const now = new Date();
+      const currentTimeString = `${now.getHours().toString().padStart(2, '0')}:${now
+        .getMinutes()
+        .toString()
+        .padStart(2, '0')}`;
+
+      const normalizeTime = (time: string | null | undefined) =>
+        time ? time.substring(0, 5) : null;
+
       const pendingTodos = todos.filter(
         (todo: any) => todo.status !== 'COMPLETED' && todo.status !== 'completed'
       );
-      
+
+      const upcomingCandidates =
+        selectedDayTab === 'today'
+          ? pendingTodos.filter((todo: any) => {
+              const todoTime = normalizeTime(todo.due_time);
+              if (!todoTime) {
+                return true;
+              }
+              return todoTime >= currentTimeString;
+            })
+          : pendingTodos;
+
       // 시간 순으로 정렬하여 가장 가까운 일정 선택
-      const sortedTodos = [...pendingTodos].sort((a: any, b: any) => {
-        if (!a.due_time && !b.due_time) return 0;
-        if (!a.due_time) return 1;
-        if (!b.due_time) return -1;
-        return a.due_time.localeCompare(b.due_time);
+      const sortedTodos = [...upcomingCandidates].sort((a: any, b: any) => {
+        const aTime = normalizeTime(a.due_time);
+        const bTime = normalizeTime(b.due_time);
+
+        if (!aTime && !bTime) return 0;
+        if (!aTime) return 1;
+        if (!bTime) return -1;
+        return aTime.localeCompare(bTime);
       });
-      
+
       setUpcomingTodo(sortedTodos[0] || null);
     } catch (error: any) {
       console.error('❌ 오늘 할 일 불러오기 실패:', error);
@@ -608,12 +700,34 @@ export const ElderlyHomeScreen = () => {
         </View>
       )}
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.content} 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={handleRefresh}
+            colors={[Colors.primary]}
+            tintColor={Colors.primary}
+          />
+        }
+      >
         {/* 어르신 프로필 카드 */}
         <View style={styles.profileCard}>
           <View style={styles.profileHeader}>
             <View style={styles.avatarContainer}>
-              <ProfileIcon size={36} color="#34B79F" />
+              {getProfileImageUrl() ? (
+                <Image
+                  source={{ uri: getProfileImageUrl()! }}
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                  }}
+                  resizeMode="cover"
+                />
+              ) : (
+                <ProfileIcon size={36} color="#34B79F" />
+              )}
             </View>
             <View style={styles.profileInfo}>
               <Text style={[styles.greeting, fontSizeLevel >= 1 && styles.greetingLarge, fontSizeLevel >= 2 && { fontSize: 28 }]}>안녕하세요!</Text>
@@ -664,7 +778,19 @@ export const ElderlyHomeScreen = () => {
           <View style={styles.divider} />
 
           <View style={styles.weatherSection}>
-            <SunIcon size={fontSizeLevel >= 1 ? 32 : 24} color="#FFB800" />
+            {weatherIconUrl ? (
+              <Image
+                source={{ uri: weatherIconUrl }}
+                style={{
+                  width: weatherIconSize,
+                  height: weatherIconSize,
+                  borderRadius: weatherIconSize / 2,
+                }}
+                resizeMode="contain"
+              />
+            ) : (
+              <SunIcon size={weatherIconSize} color="#FFB800" />
+            )}
             {isLoadingWeather ? (
               <Text style={[styles.weatherText, fontSizeLevel >= 1 && styles.weatherTextLarge, fontSizeLevel >= 2 && { fontSize: 18 }]}>
                 날씨 정보를 불러오는 중...
@@ -689,7 +815,7 @@ export const ElderlyHomeScreen = () => {
             ) : weather.temperature !== undefined ? (
               <View style={{ flex: 1, marginLeft: 12 }}>
                 <Text style={[styles.weatherText, fontSizeLevel >= 1 && styles.weatherTextLarge]}>
-                  {weather.location && `${weather.location} `}현재 {weather.temperature}°C, {weather.description}
+                  {weather.location && `${weather.location} `}현재 {weather.temperature}°C
                 </Text>
               </View>
             ) : (

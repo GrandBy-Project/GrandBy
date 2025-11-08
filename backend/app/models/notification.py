@@ -9,6 +9,7 @@ import enum
 import uuid
 
 from app.database import Base
+from app.utils.datetime_utils import kst_now
 
 
 class NotificationType(str, enum.Enum):
@@ -45,8 +46,8 @@ class Notification(Base):
     is_read = Column(Boolean, default=False)
     is_pushed = Column(Boolean, default=False)  # 푸시 알림 발송 여부
     
-    # 타임스탬프
-    created_at = Column(DateTime, default=datetime.utcnow)
+    # 타임스탬프 (한국 시간 KST)
+    created_at = Column(DateTime, default=kst_now)
     read_at = Column(DateTime, nullable=True)
     
     # Relationships

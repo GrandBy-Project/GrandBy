@@ -10,6 +10,7 @@ import enum
 import uuid
 
 from app.database import Base
+from app.utils.datetime_utils import kst_now
 
 
 class AuthorType(str, enum.Enum):
@@ -50,9 +51,9 @@ class Diary(Base):
     # 상태
     status = Column(SQLEnum(DiaryStatus), default=DiaryStatus.PUBLISHED)
     
-    # 타임스탬프
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # 타임스탬프 (한국 시간 KST)
+    created_at = Column(DateTime, default=kst_now)
+    updated_at = Column(DateTime, default=kst_now, onupdate=kst_now)
     
     # Relationships
     author = relationship("User", foreign_keys=[author_id], back_populates="diaries")
@@ -77,8 +78,8 @@ class DiaryPhoto(Base):
     # 사진 정보
     photo_url = Column(String(500), nullable=False)  # S3 URL
     
-    # 타임스탬프
-    created_at = Column(DateTime, default=datetime.utcnow)
+    # 타임스탬프 (한국 시간 KST)
+    created_at = Column(DateTime, default=kst_now)
     
     # Relationships
     diary = relationship("Diary", back_populates="photos")
@@ -104,8 +105,8 @@ class DiaryComment(Base):
     # 읽음 여부
     is_read = Column(Boolean, default=False)
     
-    # 타임스탬프
-    created_at = Column(DateTime, default=datetime.utcnow)
+    # 타임스탬프 (한국 시간 KST)
+    created_at = Column(DateTime, default=kst_now)
     
     # Relationships
     diary = relationship("Diary", back_populates="comments")
