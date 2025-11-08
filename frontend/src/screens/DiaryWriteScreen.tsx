@@ -3,7 +3,7 @@
  * 제목, 내용, 기분 입력
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -16,8 +16,9 @@ import {
   Modal,
   Pressable,
   Image,
+  BackHandler,
 } from 'react-native';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { createDiary } from '../api/diary';
@@ -112,6 +113,32 @@ export const DiaryWriteScreen = () => {
   const hideConfirmModal = () => {
     setConfirmModal(prev => ({ ...prev, visible: false }));
   };
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!fromCall) {
+        return () => {};
+      }
+
+      const onBackPress = () => {
+        showConfirmModal({
+          title: '일기 작성 취소',
+          message: '일기 작성을 취소하시겠습니까?',
+          confirmText: '홈으로 이동',
+          cancelText: '계속 작성',
+          onConfirm: () => {
+            hideConfirmModal();
+            router.replace('/home');
+          },
+          onCancel: hideConfirmModal,
+        });
+        return true;
+      };
+
+      const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+      return () => subscription.remove();
+    }, [fromCall, router, showConfirmModal, hideConfirmModal])
+  );
 
   /**
    * 유효성 검사 및 에러 표시

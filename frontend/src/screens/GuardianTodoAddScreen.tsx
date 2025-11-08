@@ -68,15 +68,20 @@ export const GuardianTodoAddScreen = () => {
   
   const isEditMode = !!todoId;
 
-  // elderlyId가 없으면 뒤로가기
-  useEffect(() => {
-    if (!elderlyId) {
-      show('오류', '어르신 정보가 없습니다.', [
-        { text: '확인', onPress: () => router.back() }
-      ]);
-    }
-  }, [elderlyId]);
-  
+  // 모달/입력 관련 상태는 항상 동일한 순서로 선언
+  const [showRecurringModal, setShowRecurringModal] = useState(false);
+  const [showDatePickerModal, setShowDatePickerModal] = useState(false);
+  const [showWeeklyDaysModal, setShowWeeklyDaysModal] = useState(false);
+  const [focusedField, setFocusedField] = useState<string | null>(null);
+
+  // 카테고리 및 반복 옵션 (hooks 이후 선언)
+  const categories = TODO_CATEGORIES;
+  const recurringOptions = [
+    { id: 'daily', name: '매일' },
+    { id: 'weekly', name: '매주' },
+    { id: 'monthly', name: '매월' },
+  ];
+
   // 수정 모드일 때 TODO 데이터 로드
   useEffect(() => {
     const loadTodoForEdit = async () => {
@@ -138,25 +143,6 @@ export const GuardianTodoAddScreen = () => {
       </View>
     );
   }
-
-  // 모달 상태
-  const [showRecurringModal, setShowRecurringModal] = useState(false);
-  const [showDatePickerModal, setShowDatePickerModal] = useState(false);
-  const [showWeeklyDaysModal, setShowWeeklyDaysModal] = useState(false);
-  
-  // 입력 필드 포커스 상태
-  const [focusedField, setFocusedField] = useState<string | null>(null);
-
-  // 카테고리 옵션 (Backend Enum과 일치)
-  // 카테고리 옵션 (공통 상수 사용)
-  const categories = TODO_CATEGORIES;
-
-  // 반복 옵션
-  const recurringOptions = [
-    { id: 'daily', name: '매일' },
-    { id: 'weekly', name: '매주' },
-    { id: 'monthly', name: '매월' },
-  ];
 
   const handleSaveTodo = async () => {
     if (!newTodo.title.trim()) {
