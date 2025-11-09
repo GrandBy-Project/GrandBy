@@ -55,7 +55,7 @@ class RTZRRealtimeSTT:
         self._signals = EndDecisionSignals(call_start_time=time.time())
         self._timeout_task: Optional[asyncio.Task] = None
 
-        logger.info("✅ RTZR 실시간 STT 초기화 완료")
+        # logger.info("✅ RTZR 실시간 STT 초기화 완료")
     
     def start_bot_speaking(self):
         """AI 응답 시작 - 사용자 입력 차단"""
@@ -104,7 +104,7 @@ class RTZRRealtimeSTT:
         # ⏱️ 타임아웃 체크 태스크 (1초 간격)
         async def _timeout_check_loop():
             """타임아웃만 체크하는 루프"""
-            logger.info("⏱️ [타임아웃 체크 루프 시작]")
+            # logger.info("⏱️ [타임아웃 체크 루프 시작]")
             try:
                 while self.is_active:
                     await asyncio.sleep(1.0)
@@ -127,9 +127,9 @@ class RTZRRealtimeSTT:
                 logger.error(f"상세 오류: {traceback.format_exc()}")
 
         self._timeout_task = asyncio.create_task(_timeout_check_loop())
-        logger.info("✅ [타임아웃 체크 태스크 생성 완료]")
+        # logger.info("✅ [타임아웃 체크 태스크 생성 완료]")
 
-        logger.info("🎤 RTZR 실시간 스트리밍 시작")
+        # logger.info("🎤 RTZR 실시간 스트리밍 시작")
         
         try:
             # RTZR 스트리밍 태스크 생성
@@ -167,7 +167,7 @@ class RTZRRealtimeSTT:
                     self._timeout_task.cancel()
                 except Exception:
                     pass
-            logger.info("🛑 RTZR 실시간 스트리밍 종료")
+            # logger.info("🛑 RTZR 실시간 스트리밍 종료")
     
     async def _consume_rtzr_stream(self):
         """RTZR STT 결과를 소비해서 results_queue에 넣기"""
@@ -220,7 +220,7 @@ class RTZRRealtimeSTT:
                         current_time = time.time()
                         if not self.streaming_start_time:
                             self.streaming_start_time = current_time
-                            logger.info(f"🎤 [발화 시작] 첫 부분 인식: {text}")
+                            # logger.info(f"🎤 [발화 시작] 첫 부분 인식: {text}")
                         
                         # 마지막 부분 결과 시간 업데이트 (사용자 발화 중 체크용)
                         self.last_partial_time = current_time

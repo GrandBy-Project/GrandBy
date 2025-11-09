@@ -46,18 +46,18 @@ class NaverClovaTTSService:
             "X-NCP-APIGW-API-KEY": self.client_secret,
         }
 
-        logger.info(f"🔊 Naver Clova TTS 서비스 초기화 완료")
-        logger.info(f"  - Speaker: {self.speaker}")
-        logger.info(f"  - Speed: {self.speed}")
-        logger.info(f"  - Pitch: {self.pitch}")
-        logger.info(f"  - Volume: {self.volume}")
-        logger.info(f"  - Alpha: {self.alpha}")
-        logger.info(f"  - Emotion: {self.emotion}")
+        # logger.info(f"🔊 Naver Clova TTS 서비스 초기화 완료")
+        # logger.info(f"  - Speaker: {self.speaker}")
+        # logger.info(f"  - Speed: {self.speed}")
+        # logger.info(f"  - Pitch: {self.pitch}")
+        # logger.info(f"  - Volume: {self.volume}")
+        # logger.info(f"  - Alpha: {self.alpha}")
+        # logger.info(f"  - Emotion: {self.emotion}")
     
     async def text_to_speech_bytes(self, text: str) -> Tuple[Optional[bytes], float]:
         try:
             start_time = time.time()
-            logger.info(f"🌐 Naver Clova TTS Client ID: {self.client_id[:10] if self.client_id else 'NOT SET'}")
+            # logger.info(f"🌐 Naver Clova TTS Client ID: {self.client_id[:10] if self.client_id else 'NOT SET'}")
             
             # 텍스트 검증
             if not text or len(text.strip()) < 1:
@@ -76,9 +76,9 @@ class NaverClovaTTSService:
                 "format": "wav"
             }
             
-            logger.info(f"🌐 Naver Clova TTS API 호출 중... (WAV 포맷)")
-            logger.info(f"  - Speaker: {self.speaker}")
-            logger.info(f"  - Text length: {len(text)}")
+            # logger.info(f"🌐 Naver Clova TTS API 호출 중... (WAV 포맷)")
+            # logger.info(f"  - Speaker: {self.speaker}")
+            # logger.info(f"  - Text length: {len(text)}")
             
             # 비동기 HTTP 요청 실행
             response = await self.client.post(
@@ -87,14 +87,14 @@ class NaverClovaTTSService:
                 data=data,
                 timeout=10.0
             )
-            try:
-                logger.info(f"🌐 [Clova TTS] Protocol negotiated: {response.http_version}  status={response.status_code}")
-            except Exception:
-                pass
+            # try:
+            #     # logger.info(f"🌐 [Clova TTS] Protocol negotiated: {response.http_version}  status={response.status_code}")
+            # except Exception:
+            #     pass
             
             if response.status_code == 200:
                 elapsed_time = time.time() - start_time
-                logger.info(f"✅ Clova TTS 변환 완료: {len(response.content)} bytes ({elapsed_time:.2f}초)")
+                # logger.info(f"✅ Clova TTS 변환 완료: {len(response.content)} bytes ({elapsed_time:.2f}초)")
                 return response.content, elapsed_time
             else:
                 logger.error(f"❌ API 호출 실패: {response.status_code}")
@@ -133,9 +133,9 @@ class NaverClovaTTSService:
                 "format": "wav"
             }
 
-            logger.info(f"🌐 Naver Clova TTS API 호출 중... (WAV 파일)")
-            logger.info(f"  - Speaker: {self.speaker}")
-            logger.info(f"  - Text length: {len(text)}")
+            # logger.info(f"🌐 Naver Clova TTS API 호출 중... (WAV 파일)")
+            # logger.info(f"  - Speaker: {self.speaker}")
+            # logger.info(f"  - Text length: {len(text)}")
 
             response = self.sync_client.post(
                 self.api_url,
@@ -143,10 +143,10 @@ class NaverClovaTTSService:
                 data=data,
                 timeout=10.0
             )
-            try:
-                logger.info(f"🌐 [Clova TTS] (sync) Protocol negotiated: {response.http_version}  status={response.status_code}")
-            except Exception:
-                pass
+            # try:
+            #     logger.info(f"🌐 [Clova TTS] (sync) Protocol negotiated: {response.http_version}  status={response.status_code}")
+            # except Exception:
+            #     pass
             
             # 응답 확인
             if response.status_code == 200:

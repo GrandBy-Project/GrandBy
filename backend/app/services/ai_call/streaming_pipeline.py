@@ -10,6 +10,7 @@ import re
 import wave
 import io
 import audioop
+from typing import Optional
 
 from fastapi import WebSocket
 from app.services.ai_call.llm_service import LLMService
@@ -27,7 +28,9 @@ async def process_streaming_response(
     call_sid=None,
     metrics_collector=None,
     turn_index=None,
-    tts_service=None  # 각 통화마다 독립적인 TTS 서비스 인스턴스
+    tts_service=None,  # 각 통화마다 독립적인 TTS 서비스 인스턴스
+    pending_mark_responses=None,  # mark 응답 대기 딕셔너리
+    ws_send_lock: Optional[asyncio.Lock] = None
 ) -> str:
     """
     최적화된 스트리밍 응답 처리 - 사전 연결된 WebSocket 사용
@@ -39,9 +42,9 @@ async def process_streaming_response(
     try:
         pipeline_start = time.time()
         full_response = []
-        logger.info("=" * 60)
-        logger.info("🚀 실시간 스트리밍 파이프라인 시작 (Naver Clova TTS 사용)")
-        logger.info("=" * 60)
+        # logger.info("=" * 60)
+        # logger.info("🚀 실시간 스트리밍 파이프라인 시작 (Naver Clova TTS 사용)")
+        # logger.info("=" * 60)
         
         # Naver Clova TTS 스트리밍 파이프라인
         playback_duration = await llm_to_clova_tts_pipeline(
@@ -55,15 +58,17 @@ async def process_streaming_response(
             call_sid=call_sid,
             metrics_collector=metrics_collector,
             turn_index=turn_index,
-            tts_service=tts_service  # 독립적인 TTS 서비스 인스턴스 전달
+            tts_service=tts_service,  # 독립적인 TTS 서비스 인스턴스 전달
+            pending_mark_responses=pending_mark_responses,  # mark 응답 대기 딕셔너리 전달
+            ws_send_lock=ws_send_lock
         )
         
         pipeline_time = time.time() - pipeline_start
         
-        logger.info("=" * 60)
-        logger.info(f"✅ 전체 파이프라인 완료: {pipeline_time:.2f}초")
-        logger.info(f"   예상 재생 시간: {playback_duration:.2f}초")
-        logger.info("=" * 60)
+        # logger.info("=" * 60)
+        # logger.info(f"✅ 전체 파이프라인 완료: {pipeline_time:.2f}초")
+        # logger.info(f"   예상 재생 시간: {playback_duration:.2f}초")
+        # logger.info("=" * 60)
         
         # 재생 완료 대기
         if playback_duration > 0:
@@ -89,7 +94,9 @@ async def llm_to_clova_tts_pipeline(
     call_sid=None,
     metrics_collector=None,
     turn_index=None,
-    tts_service=None  # 각 통화마다 독립적인 TTS 서비스 인스턴스
+    tts_service=None,  # 각 통화마다 독립적인 TTS 서비스 인스턴스
+    pending_mark_responses=None,  # mark 응답 대기 딕셔너리
+    ws_send_lock: Optional[asyncio.Lock] = None
 ) -> float:
     """
     LLM 텍스트 생성 → Naver Clova TTS → Twilio 전송 파이프라인
@@ -108,7 +115,7 @@ async def llm_to_clova_tts_pipeline(
         first_audio_sent = False
         total_playback_duration = 0.0
         
-        logger.info("🤖 [LLM] Naver Clova TTS 스트리밍 시작")
+        # logger.info("🤖 [LLM] Naver Clova TTS 스트리밍 시작")
         
         first_token_time = None
         async for chunk in llm_service.generate_response_streaming(user_text, conversation_history):
@@ -144,16 +151,16 @@ async def llm_to_clova_tts_pipeline(
                 elapsed = time.time() - pipeline_start
                 
                 if not first_audio_sent:
-                    logger.info(f"⚡ [첫 문장] +{elapsed:.2f}초에 생성 완료!")
+                    # logger.info(f"⚡ [첫 문장] +{elapsed:.2f}초에 생성 완료!")
                     first_audio_sent = True
                 
-                logger.info(f"🔊 [문장 {sentence_count}] TTS 변환 시작: {sentence[:40]}...")
+                # logger.info(f"🔊 [문장 {sentence_count}] TTS 변환 시작: {sentence[:40]}...")
                 
                 # 메트릭 수집: TTS 시작 시간 (첫 문장만)
                 if sentence_count == 1 and metrics_collector is not None and turn_index is not None:
                     tts_start_time = time.time()
                     metrics_collector.record_tts_start(turn_index, tts_start_time)
-                    logger.debug(f"📊 [메트릭] TTS 시작 시간 기록: {tts_start_time:.3f}")
+                    # logger.debug(f"📊 [메트릭] TTS 시작 시간 기록: {tts_start_time:.3f}")
                 
                 # ✅ 독립적인 TTS 서비스 인스턴스 사용 (동시 통화 충돌 방지)
                 if tts_service is None:
@@ -165,7 +172,7 @@ async def llm_to_clova_tts_pipeline(
                 
                 if audio_data:
                     elapsed_tts = time.time() - pipeline_start
-                    logger.info(f"✅ [문장 {sentence_count}] TTS 완료 (+{elapsed_tts:.2f}초, {tts_time:.2f}초)")
+                    # logger.info(f"✅ [문장 {sentence_count}] TTS 완료 (+{elapsed_tts:.2f}초, {tts_time:.2f}초)")
                     
                     # 메트릭 수집: TTS 완료 시간 기록
                     tts_completion_time = time.time()
@@ -189,7 +196,9 @@ async def llm_to_clova_tts_pipeline(
                         stream_sid,
                         audio_data,
                         sentence_count,
-                        pipeline_start
+                        pipeline_start,
+                        pending_mark_responses=pending_mark_responses,
+                        ws_send_lock=ws_send_lock
                     )
                     
                     total_playback_duration += playback_duration
@@ -223,20 +232,22 @@ async def llm_to_clova_tts_pipeline(
                     stream_sid,
                     audio_data,
                     sentence_count,
-                    pipeline_start
+                    pipeline_start,
+                    pending_mark_responses=pending_mark_responses,
+                    ws_send_lock=ws_send_lock
                 )
 
                 total_playback_duration += playback_duration
             else:
                 logger.warning("⚠️ 마지막 문장 TTS 실패, 건너뜀")
         
-        logger.info(f"✅ [전체] 총 {sentence_count}개 문장 처리 완료")
+        # logger.info(f"✅ [전체] 총 {sentence_count}개 문장 처리 완료")
         
         # ✅ TTS 완료 시점과 재생 시간 기록
         if call_sid:
             completion_time = time.time()
             active_tts_completions[call_sid] = (completion_time, total_playback_duration)
-            logger.info(f"📝 [TTS 추적] {call_sid}: 완료 시점={completion_time:.2f}, 재생 시간={total_playback_duration:.2f}초")
+            # logger.info(f"📝 [TTS 추적] {call_sid}: 완료 시점={completion_time:.2f}, 재생 시간={total_playback_duration:.2f}초")
             
             # 마지막 TTS 완료 시간 업데이트 (first_completion_time은 이미 첫 문장에서 기록됨)
             if metrics_collector is not None and turn_index is not None:
@@ -259,7 +270,9 @@ async def send_clova_audio_to_twilio(
     stream_sid: str,
     audio_data: bytes,
     sentence_index: int,
-    pipeline_start: float
+    pipeline_start: float,
+    pending_mark_responses: dict = None,
+    ws_send_lock: Optional[asyncio.Lock] = None
 ) -> float:
     """
     Clova TTS로 생성된 WAV 오디오를 Twilio로 전송
@@ -284,7 +297,7 @@ async def send_clova_audio_to_twilio(
             n_frames = wav_file.getnframes()
             pcm_data = wav_file.readframes(n_frames)
         
-        logger.info(f"🎵 [문장 {sentence_index}] 원본: {framerate}Hz, {channels}ch")
+        # logger.info(f"🎵 [문장 {sentence_index}] 원본: {framerate}Hz, {channels}ch")
         
         # Stereo → Mono 변환
         if channels == 2:
@@ -300,40 +313,58 @@ async def send_clova_audio_to_twilio(
         # 재생 시간 계산
         playback_duration = len(mulaw_data) / 8000.0
         
-        # Base64 인코딩
-        audio_base64 = base64.b64encode(mulaw_data).decode('utf-8')
-        
-        # Twilio로 청크 단위 전송
-        chunk_size = 8000  # 8KB 청크
+        # Twilio로 청크 단위 전송 (20ms 단위 프레임)
+        frame_samples = 160  # 160 bytes @ 8kHz mu-law ≈ 20ms
+        frame_duration = frame_samples / 8000.0
+        total_frames = (len(mulaw_data) + frame_samples - 1) // frame_samples
         chunk_count = 0
         
-        for i in range(0, len(audio_base64), chunk_size):
-            chunk = audio_base64[i:i + chunk_size]
+        logger.info(
+            f"🔄 [오디오 경로][3/3] AI 음성 WebSocket 전송 시작 "
+            f"(sentence={sentence_index}, duration≈{playback_duration:.2f}초, "
+            f"총 프레임={total_frames}, 프레임당 {frame_samples} bytes)"
+        )
+
+        for offset in range(0, len(mulaw_data), frame_samples):
+            frame = mulaw_data[offset:offset + frame_samples]
             chunk_count += 1
             
+            payload = base64.b64encode(frame).decode('utf-8')
             message = {
                 "event": "media",
                 "streamSid": stream_sid,
-                "media": {"payload": chunk}}
-            
+                "media": {"payload": payload}
+            }
+
             try:
-                await websocket.send_text(json.dumps(message))
-                logger.debug(f"📤 [문장 {sentence_index}] 청크 {chunk_count} 전송 완료 ({len(chunk)} bytes)")
-                
-                # 마지막 청크가 아니면 짧은 딜레이
-                if i + chunk_size < len(audio_base64):
-                    await asyncio.sleep(0.02)  # 20ms
-                    
+                if ws_send_lock is not None:
+                    async with ws_send_lock:
+                        await websocket.send_text(json.dumps(message))
+                else:
+                    await websocket.send_text(json.dumps(message))
+
+                logger.debug(
+                    f"📤 [문장 {sentence_index}] 프레임 {chunk_count}/{total_frames} 전송 완료 "
+                    f"(raw={len(frame)} bytes, base64={len(payload)} chars)"
+                )
+
+                # 마지막 프레임이 아니면 실시간 재생 속도에 맞춰 대기
+                if offset + frame_samples < len(mulaw_data):
+                    await asyncio.sleep(frame_duration)
+
             except Exception as e:
-                logger.error(f"❌ [문장 {sentence_index}] 청크 {chunk_count} 전송 실패: {e}")
-                # 첫 번째 청크 실패 시 전체 중단
+                logger.error(f"❌ [문장 {sentence_index}] 프레임 {chunk_count} 전송 실패: {e}")
                 if chunk_count == 1:
                     raise
-                # 중간 청크 실패는 경고만
-                logger.warning(f"⚠️ [문장 {sentence_index}] 청크 {chunk_count} 전송 실패, 계속 진행")
+                logger.warning(
+                    f"⚠️ [문장 {sentence_index}] 프레임 {chunk_count} 전송 실패, 계속 진행 (남은 프레임 {total_frames - chunk_count})"
+                )
         
         elapsed = time.time() - pipeline_start
-        logger.debug(f"📤 [문장 {sentence_index}] Twilio 전송 완료 ({chunk_count} 청크, +{elapsed:.2f}초)")
+        logger.info(
+            f"✅ [오디오 경로][3/3] 전송 완료 "
+            f"(sentence={sentence_index}, 전송 프레임={chunk_count}, 실제 소요={elapsed:.2f}초)"
+        )
         
         return playback_duration
         

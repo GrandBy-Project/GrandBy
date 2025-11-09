@@ -5,6 +5,7 @@ Twilio 음성 통화 서비스
 from twilio.rest import Client
 from twilio.jwt.access_token import AccessToken
 from twilio.jwt.access_token.grants import VoiceGrant
+from twilio.twiml.voice_response import VoiceResponse, Connect, Stream
 from app.config import settings
 import logging
 
@@ -127,6 +128,29 @@ class TwilioService:
             
         except Exception as e:
             logger.error(f"❌ Failed to generate voice access token: {e}")
+            raise
+
+    def start_media_stream_on_live_call(self, call_sid: str, websocket_url: str, elderly_id: str = "unknown"):
+        """
+        이미 진행 중인 통화에서 Twilio Media Stream을 다시 시작 (REST API)
+        """
+        try:
+            response = VoiceResponse()
+            connect = Connect()
+            stream = Stream(url=websocket_url)
+            if elderly_id:
+                stream.parameter(name="elderly_id", value=elderly_id)
+            connect.append(stream)
+            response.append(connect)
+
+            self.client.calls(call_sid).update(twiml=str(response))
+
+            logger.info(
+                f"🔁 Streams REST 호출 성공 "
+                f"(call_sid={call_sid}, websocket_url={websocket_url}, elderly_id={elderly_id})"
+            )
+        except Exception as e:
+            logger.error(f"❌ Streams REST 호출 실패: {e}")
             raise
     
     

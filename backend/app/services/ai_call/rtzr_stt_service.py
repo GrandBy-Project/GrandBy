@@ -35,7 +35,7 @@ class RTZRSTTService:
             logger.error("❌ RTZR_CLIENT_ID 또는 RTZR_CLIENT_SECRET이 설정되지 않았습니다!")
             raise ValueError("RTZR credentials are required")
         
-        logger.info("✅ RTZR STT 서비스 초기화 완료")
+        # logger.info("✅ RTZR STT 서비스 초기화 완료")
     
     async def get_access_token(self) -> str:
         """
@@ -59,7 +59,7 @@ class RTZRSTTService:
             
             result = response.json()
             token = result["access_token"]
-            logger.info("✅ RTZR 인증 토큰 발급 완료")
+            # logger.info("✅ RTZR 인증 토큰 발급 완료")
             return token
             
         except Exception as e:
@@ -106,7 +106,7 @@ class RTZRSTTService:
             query_string = "&".join([f"{k}={v}" for k, v in params.items()])
             ws_url_with_params = f"{ws_url}?{query_string}"
             
-            logger.info(f"🎤 RTZR WebSocket 연결 시작")
+            # logger.info(f"🎤 RTZR WebSocket 연결 시작")
             
             # 3. WebSocket 연결
             headers = {"Authorization": f"Bearer {token}"}
@@ -116,7 +116,7 @@ class RTZRSTTService:
                 extra_headers=headers
             ) as websocket:
                 
-                logger.info("✅ RTZR WebSocket 연결 완료")
+                # logger.info("✅ RTZR WebSocket 연결 완료")
                 
                 # 오디오 전송을 위한 태스크 생성
                 async def send_audio_loop():
@@ -174,8 +174,8 @@ class RTZRSTTService:
                                         
                                         if is_final:
                                             logger.info(f"✅ [RTZR 최종 인식] {text}")
-                                        else:
-                                            logger.info(f"📝 [RTZR 부분 인식] {text}")
+                                        # else:
+                                        #     logger.info(f"📝 [RTZR 부분 인식] {text}")
                         
                         except asyncio.TimeoutError:
                             # 타임아웃은 정상 (메시지 대기 중)
@@ -232,7 +232,7 @@ class PartialResultBuffer:
         if text and text.strip():
             self.current_text = text.strip()
             self.partial_texts.append(text.strip())
-            logger.debug(f"📝 [부분 인식] {text.strip()}")
+            # logger.debug(f"📝 [부분 인식] {text.strip()}")
     
     def set_final(self, text: str):
         """
@@ -244,7 +244,7 @@ class PartialResultBuffer:
         if text and text.strip():
             self.current_text = text.strip()
             self.is_final = True
-            logger.info(f"✅ [최종 인식] {text.strip()}")
+            # logger.info(f"✅ [최종 인식] {text.strip()}")
     
     def get_current_text(self) -> str:
         """
