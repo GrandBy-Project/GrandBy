@@ -350,31 +350,35 @@ export const DiaryDetailScreen = () => {
   /**
    * 작성시간 포맷팅 (한국 시간대)
    */
-  const formatCreatedTime = (dateString: string): string => {
+  const formatCreatedTime = (dateString?: string | null): string => {
+    if (!dateString) {
+      return '';
+    }
+
     try {
-      // DB에서 저장된 시간은 한국 시간(KST)인데 시간대 정보가 없음
-      let date: Date;
-      
-      if (dateString.includes('T')) {
-        // ISO 형식이면 시간대 정보 확인
-        if (!dateString.includes('Z') && !dateString.match(/[+-]\d{2}:\d{2}$/)) {
-          // 시간대 정보가 없으면 한국 시간대(+09:00)로 추가
-          dateString = dateString.replace(/\.\d+/, '') + '+09:00';
-        }
-        date = new Date(dateString);
-      } else {
-        date = new Date(dateString);
+      let normalized = dateString.trim();
+
+      if (normalized.includes(' ') && !normalized.includes('T')) {
+        normalized = normalized.replace(' ', 'T');
       }
-      
+
+      const hasTimezone =
+        normalized.includes('Z') || /[+-]\d{2}:\d{2}$/.test(normalized);
+
+      if (!hasTimezone) {
+        normalized = normalized.replace(/\.\d+/, '');
+        normalized = `${normalized}+09:00`;
+      }
+
+      const date = new Date(normalized);
       if (isNaN(date.getTime())) {
         return '';
       }
-      
-      return date.toLocaleString('ko-KR', {
-        hour: '2-digit',
-        minute: '2-digit',
-        timeZone: 'Asia/Seoul',
-      });
+
+      const hours = String(date.getHours()).padStart(2, '0');
+      const minutes = String(date.getMinutes()).padStart(2, '0');
+
+      return `${hours}시 ${minutes}분`;
     } catch (error) {
       console.error('시간 포맷팅 오류:', error);
       return '';
