@@ -1188,14 +1188,26 @@ export const GuardianHomeScreen = () => {
   };
 
   // 작성자 이름 가져오기
-  const getAuthorName = (authorId: string) => {
-    // 현재 어르신이면 현재 어르신 이름 반환
+  const getAuthorName = (diary: diaryApi.Diary) => {
+    if (diary.author_type === 'caregiver') {
+      if (diary.author_id === user?.user_id && user?.name) {
+        return user.name;
+      }
+      return diary.author_name || '보호자';
+    }
+
+    if (diary.author_type === 'ai') {
+      return 'AI';
+    }
+
+    const authorId = diary.author_id || diary.user_id;
+
     if (currentElderly && currentElderly.id === authorId) {
       return currentElderly.name;
     }
-    // 연결된 어르신 목록에서 찾기
+
     const author = connectedElderly.find(elderly => elderly.id === authorId);
-    return author ? author.name : '어르신';
+    return author ? author.name : diary.author_name || '어르신';
   };
 
   const renderCommunicationTab = () => {
@@ -1218,7 +1230,7 @@ export const GuardianHomeScreen = () => {
           ) : recentDiaries.length > 0 ? (
             recentDiaries.slice(0, 4).map((diary) => {
               const moodIcon = getMoodIcon(diary.mood);
-              const authorName = getAuthorName(diary.user_id);
+              const authorName = getAuthorName(diary);
               const relativeTime = getRelativeTime(diary.created_at);
               return (
                 <TouchableOpacity

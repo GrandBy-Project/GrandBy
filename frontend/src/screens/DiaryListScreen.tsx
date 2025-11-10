@@ -378,44 +378,38 @@ export const DiaryListScreen = () => {
   };
 
   /**
-   * 한국 시간으로 포맷팅 (created_at이 KST로 저장되어 있으므로)
+   * 다이어리 작성 시간 표시 (created_at 기반)
    */
-  const formatKSTDateTime = (dateString: string): string => {
-    try {
-      // DB에서 저장된 시간은 한국 시간(KST)인데 시간대 정보가 없음
-      // ISO 형식인 경우 시간대 정보 추가
-      let date: Date;
-      
-      if (dateString.includes('T')) {
-        // ISO 형식이면 시간대 정보 확인
-        // 시간대 정보가 없으면 (Z, +, -가 없으면) 한국 시간대(+09:00)로 추가
-        if (!dateString.includes('Z') && !dateString.match(/[+-]\d{2}:\d{2}$/)) {
-          // 마이크로초 제거 후 한국 시간대 추가
-          dateString = dateString.replace(/\.\d+/, '') + '+09:00';
-        }
-        date = new Date(dateString);
-      } else {
-        // 다른 형식이면 그대로 파싱
-        date = new Date(dateString);
-      }
-      
-      // 유효하지 않은 날짜인 경우 빈 문자열 반환
-      if (isNaN(date.getTime())) {
-        return '';
-      }
-      
-      // 한국 시간대로 표시
-      return date.toLocaleString('ko-KR', {
-        month: 'long',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        timeZone: 'Asia/Seoul',
-      });
-    } catch (error) {
-      console.error('날짜 포맷팅 오류:', error);
+  const formatDiaryFooterTime = (dateTimeString: string | null | undefined): string => {
+    if (!dateTimeString) {
       return '';
     }
+
+    let normalized = dateTimeString.trim();
+
+    // 공백 구분자를 ISO 형식으로 변환
+    if (normalized.includes(' ') && !normalized.includes('T')) {
+      normalized = normalized.replace(' ', 'T');
+    }
+
+    // 타임존 정보가 없으면 한국 시간(+09:00)으로 보정
+    const hasTimezone =
+      normalized.includes('Z') || /[+-]\d{2}:\d{2}$/.test(normalized);
+
+    if (!hasTimezone) {
+      normalized = normalized.replace(/\.\d+/, '');
+      normalized = `${normalized}+09:00`;
+    }
+
+    const date = new Date(normalized);
+    if (isNaN(date.getTime())) {
+      return '';
+    }
+
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+
+    return `${hours}시 ${minutes}분`;
   };
 
   /**
@@ -572,7 +566,7 @@ export const DiaryListScreen = () => {
         {/* 작성 시간 및 댓글 개수, 사진 개수 */}
         <View style={styles.footerRow}>
           <Text style={styles.timestamp}>
-            {formatKSTDateTime(item.created_at)}
+            {formatDiaryFooterTime(item.created_at)}
           </Text>
           {(item.photos && item.photos.length > 0) || (item.comment_count !== undefined && item.comment_count > 0) ? (
             <View style={styles.badgeContainer}>
@@ -670,6 +664,14 @@ export const DiaryListScreen = () => {
     return diaryMonth === month;
   });
 
+  const reportAllDiaries = useMemo(() => {
+    return allDiaries.filter(diary => diary.user_id === diary.author_id);
+  }, [allDiaries]);
+
+  const reportMonthlyDiaries = useMemo(() => {
+    return monthlyDiaries.filter(diary => diary.user_id === diary.author_id);
+  }, [monthlyDiaries]);
+
   // 월간 리포트 탭에서 월 변경 시 로딩 상태
   const [isReportLoading, setIsReportLoading] = useState(false);
 
@@ -685,6 +687,20 @@ export const DiaryListScreen = () => {
     });
     return Array.from(monthSet).sort((a, b) => b.localeCompare(a)); // 최신 월부터
   }, [allDiaries]);
+
+  const reportAvailableMonths = useMemo(() => {
+    const monthSet = new Set<string>();
+    reportAllDiaries.forEach(diary => {
+      const diaryMonth = diary.date.substring(0, 7);
+      monthSet.add(diaryMonth);
+    });
+    const months = Array.from(monthSet).sort((a, b) => b.localeCompare(a));
+    if (!months.includes(month)) {
+      months.push(month);
+      months.sort((a, b) => b.localeCompare(a));
+    }
+    return months;
+  }, [reportAllDiaries, month]);
 
   if (isLoading && !isRefreshing && diaries.length === 0) {
     return (
@@ -854,11 +870,11 @@ export const DiaryListScreen = () => {
           ) : (
             <DiaryInsights
               month={month}
-              diaries={monthlyDiaries}
-              allDiaries={allDiaries}
+              diaries={reportMonthlyDiaries}
+              allDiaries={reportAllDiaries}
               onInsightPress={handleInsightPress}
               onMonthChange={setMonth}
-              availableMonths={availableMonths}
+              availableMonths={reportAvailableMonths}
             />
           )}
         </ScrollView>

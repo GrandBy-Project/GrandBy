@@ -56,6 +56,7 @@ class TodoResponse(BaseModel):
     todo_id: str
     elderly_id: str
     creator_id: str
+    creator_name: Optional[str] = None
     title: str
     description: Optional[str]
     category: Optional[TodoCategory]
