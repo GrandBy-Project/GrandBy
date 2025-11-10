@@ -24,8 +24,11 @@ def generate_daily_recurring_todos():
     """
     db: Session = SessionLocal()
     try:
-        today = date.today()
-        logger.info(f"📅 반복 TODO 생성 시작: {today}")
+        # KST 시간대 사용 (타임존 문제 해결)
+        import pytz
+        kst = pytz.timezone('Asia/Seoul')
+        today = datetime.now(kst).date()
+        logger.info(f"📅 반복 TODO 생성 시작: {today} (KST)")
         
         created_count = TodoService.generate_recurring_todos(
             db=db,
