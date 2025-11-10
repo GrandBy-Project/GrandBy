@@ -9,9 +9,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 export interface WeatherData {
   temperature?: number;
   description?: string;
-  icon?: string;
-  location?: string;
-  hasPermission?: boolean;
+  icon?: string; // OpenWeatherMap 아이콘 코드 (예: "01d", "02n")
+  location?: string; // 시/구 수준 위치 (예: "서울특별시 서초구")
+  cityName?: string; // 도시 이름
+  countryCode?: string; // 국가 코드
+  humidity?: number; // 습도
+  feelsLike?: number; // 체감 온도
+  hasPermission?: boolean; // 위치 권한 여부
   lastUpdated?: number; // 마지막 업데이트 시간 (timestamp)
 }
 
