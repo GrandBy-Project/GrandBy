@@ -384,14 +384,20 @@ export const DiaryDetailScreen = () => {
   /**
    * 작성자 타입 표시
    */
-  const getAuthorTypeText = (authorType: string): string => {
-    switch (authorType) {
+  const getAuthorDisplayText = (targetDiary: Diary): string => {
+    if (targetDiary.is_auto_generated || targetDiary.author_type === 'ai') {
+      return 'AI 자동 생성';
+    }
+
+    if (targetDiary.author_name) {
+      return `${targetDiary.author_name}님 작성`;
+    }
+
+    switch (targetDiary.author_type) {
       case 'elderly':
         return '어르신 작성';
       case 'caregiver':
         return '보호자 작성';
-      case 'ai':
-        return 'AI 자동 생성';
       default:
         return '';
     }
@@ -493,7 +499,7 @@ export const DiaryDetailScreen = () => {
               <Ionicons name="pencil" size={16} color="#666666" style={{ marginRight: 4 }} />
             )}
             <Text style={styles.authorType}>
-              {getAuthorTypeText(diary.author_type)}
+              {getAuthorDisplayText(diary)}
             </Text>
           </View>
 

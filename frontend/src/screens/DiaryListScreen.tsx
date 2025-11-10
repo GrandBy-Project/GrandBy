@@ -670,6 +670,14 @@ export const DiaryListScreen = () => {
     return diaryMonth === month;
   });
 
+  const reportAllDiaries = useMemo(() => {
+    return allDiaries.filter(diary => diary.user_id === diary.author_id);
+  }, [allDiaries]);
+
+  const reportMonthlyDiaries = useMemo(() => {
+    return monthlyDiaries.filter(diary => diary.user_id === diary.author_id);
+  }, [monthlyDiaries]);
+
   // 월간 리포트 탭에서 월 변경 시 로딩 상태
   const [isReportLoading, setIsReportLoading] = useState(false);
 
@@ -685,6 +693,20 @@ export const DiaryListScreen = () => {
     });
     return Array.from(monthSet).sort((a, b) => b.localeCompare(a)); // 최신 월부터
   }, [allDiaries]);
+
+  const reportAvailableMonths = useMemo(() => {
+    const monthSet = new Set<string>();
+    reportAllDiaries.forEach(diary => {
+      const diaryMonth = diary.date.substring(0, 7);
+      monthSet.add(diaryMonth);
+    });
+    const months = Array.from(monthSet).sort((a, b) => b.localeCompare(a));
+    if (!months.includes(month)) {
+      months.push(month);
+      months.sort((a, b) => b.localeCompare(a));
+    }
+    return months;
+  }, [reportAllDiaries, month]);
 
   if (isLoading && !isRefreshing && diaries.length === 0) {
     return (
@@ -854,11 +876,11 @@ export const DiaryListScreen = () => {
           ) : (
             <DiaryInsights
               month={month}
-              diaries={monthlyDiaries}
-              allDiaries={allDiaries}
+              diaries={reportMonthlyDiaries}
+              allDiaries={reportAllDiaries}
               onInsightPress={handleInsightPress}
               onMonthChange={setMonth}
-              availableMonths={availableMonths}
+              availableMonths={reportAvailableMonths}
             />
           )}
         </ScrollView>

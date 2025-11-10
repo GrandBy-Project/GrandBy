@@ -276,7 +276,7 @@ export const GuardianTodoAddScreen = () => {
       {/* 헤더 */}
       <Header 
         title={isEditMode 
-          ? (elderlyName ? `${elderlyName}님의 할일 수정` : '할일 수정')
+          ? '할일 수정'
           : (elderlyName ? `${elderlyName}님의 할일 추가` : '할일 추가')
         } 
         showMenuButton={true}
@@ -456,7 +456,7 @@ export const GuardianTodoAddScreen = () => {
               <View style={styles.reminderInfoContent}>
                 <Ionicons name="notifications-outline" size={16} color="#B8860B" />
                 <Text style={styles.reminderText}>
-                  설정한 시간 10분 전에 어르신께 알림이 전송됩니다.
+                  설정한 시간 10분 전에 알림이 전송됩니다.
                 </Text>
               </View>
             </View>
@@ -478,7 +478,9 @@ export const GuardianTodoAddScreen = () => {
           {isSaving ? (
             <ActivityIndicator color="#FFFFFF" />
           ) : (
-            <Text style={styles.saveButtonText}>할일 등록하기</Text>
+            <Text style={styles.saveButtonText}>
+              {isEditMode ? '할일 수정하기' : '할일 등록하기'}
+            </Text>
           )}
         </TouchableOpacity>
       </View>

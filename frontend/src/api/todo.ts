@@ -8,6 +8,7 @@ export interface TodoItem {
   todo_id: string;
   elderly_id: string;
   creator_id: string;
+  creator_name?: string | null;
   title: string;
   description: string | null;
   category: 'MEDICINE' | 'EXERCISE' | 'MEAL' | 'HOSPITAL' | 'OTHER' | null;

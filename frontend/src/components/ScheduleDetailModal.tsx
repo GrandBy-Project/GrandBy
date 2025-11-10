@@ -184,6 +184,32 @@ export const ScheduleDetailModal: React.FC<ScheduleDetailModalProps> = ({
     return null;
   };
 
+  const creatorLabel = React.useMemo(() => {
+    if (!schedule || !user) {
+      return '';
+    }
+
+    if (schedule.creator_name && schedule.creator_name.trim().length > 0) {
+      return schedule.creator_name;
+    }
+
+    if (schedule.creator_type === 'elderly') {
+      if (schedule.creator_id === user.user_id && user.name) {
+        return user.name;
+      }
+      return '어르신';
+    }
+
+    if (schedule.creator_type === 'caregiver') {
+      if (schedule.creator_id === user.user_id && user.name) {
+        return user.name;
+      }
+      return '보호자';
+    }
+
+    return 'AI';
+  }, [schedule, user]);
+
   return (
     <Modal
       visible={visible}
@@ -358,16 +384,7 @@ export const ScheduleDetailModal: React.FC<ScheduleDetailModalProps> = ({
                         fontWeight: '500',
                       }}
                     >
-                      {schedule.creator_type === 'elderly'
-                        ? user?.role === 'elderly'
-                          ? '나'
-                          : '어르신'
-                        : schedule.creator_type === 'caregiver'
-                        ? user?.role === 'caregiver' &&
-                          schedule.creator_id === user?.user_id
-                          ? '나'
-                          : '보호자'
-                        : 'AI'}
+                      {creatorLabel}
                     </Text>
                   </View>
 

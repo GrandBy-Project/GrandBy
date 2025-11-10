@@ -98,7 +98,7 @@ export const TodoListScreen = () => {
         status: todo.status,
         creatorType: todo.creator_type,
         creatorId: todo.creator_id,
-        creatorName: (todo as any).creator_name ?? null,
+        creatorName: todo.creator_name ?? null,
         isSharedWithCaregiver: todo.is_shared_with_caregiver,
         isRecurring: todo.is_recurring,
         recurringType: todo.recurring_type,
@@ -337,12 +337,12 @@ export const TodoListScreen = () => {
     const categoryKey = categorySource ? categorySource.toUpperCase() : null;
     const recurringLabel = formatRecurringInfo(todo);
     const creatorLabel = (() => {
-      if (todo.creatorId === user?.user_id) {
-        return '나';
-      }
-
       if (todo.creatorName) {
         return todo.creatorName;
+      }
+
+      if (todo.creatorId === user?.user_id && user?.name) {
+        return user.name;
       }
 
       if (todo.creatorType === 'elderly') {

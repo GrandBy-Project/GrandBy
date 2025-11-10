@@ -102,3 +102,8 @@ class Todo(Base):
     def __repr__(self):
         return f"<Todo {self.title} ({self.status})>"
 
+    @property
+    def creator_name(self) -> str | None:
+        """생성자 이름 (연결이 없는 경우 None)"""
+        return self.creator.name if self.creator else None
+
