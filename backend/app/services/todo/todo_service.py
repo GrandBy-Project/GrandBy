@@ -8,6 +8,7 @@ from sqlalchemy import and_, or_, func
 from datetime import date, datetime, timedelta
 from typing import List, Optional, Dict
 import uuid
+import logging
 from app.utils.datetime_utils import kst_now
 
 from app.models.todo import Todo, TodoStatus, CreatorType, RecurringType
@@ -21,6 +22,8 @@ from app.schemas.todo import (
     CategoryStatsResponse
 )
 from fastapi import HTTPException, status
+
+logger = logging.getLogger(__name__)
 
 
 class TodoService:
@@ -905,24 +908,30 @@ class TodoService:
         created_count = 0
         
         for recurring_todo in recurring_todos:
-            # 이미 생성된 TODO가 있는지 확인
-            existing = db.query(Todo).filter(
-                and_(
-                    Todo.parent_recurring_id == recurring_todo.todo_id,
-                    Todo.due_date == target_date
-                )
-            ).first()
-            
-            if existing:
-                continue  # 이미 생성됨
-            
-            # 반복 조건 확인
+            # 반복 조건 확인 (조건에 맞지 않으면 스킵)
             should_create = TodoService._should_create_recurring_todo(
                 recurring_todo, target_date
             )
             
-            if should_create:
-                # 새 TODO 생성
+            if not should_create:
+                continue
+            
+            # 이미 생성된 TODO가 있는지 확인 (더 엄격한 체크)
+            # elderly_id도 포함하여 동일한 어르신의 동일한 반복 일정 중복 방지
+            existing = db.query(Todo).filter(
+                and_(
+                    Todo.parent_recurring_id == recurring_todo.todo_id,
+                    Todo.due_date == target_date,
+                    Todo.elderly_id == recurring_todo.elderly_id  # elderly_id도 체크
+                )
+            ).first()
+            
+            if existing:
+                logger.debug(f"⏭️  이미 생성된 TODO 스킵: {recurring_todo.title} ({target_date})")
+                continue  # 이미 생성됨
+            
+            # 새 TODO 생성
+            try:
                 new_todo = Todo(
                     todo_id=str(uuid.uuid4()),
                     elderly_id=recurring_todo.elderly_id,
@@ -941,7 +950,28 @@ class TodoService:
                 )
                 
                 db.add(new_todo)
+                # 각 TODO마다 즉시 flush하여 중복 방지 (동시성 문제 해결)
+                db.flush()
                 created_count += 1
+                logger.debug(f"✅ 반복 TODO 생성: {recurring_todo.title} ({target_date})")
+            
+            except Exception as e:
+                # 중복 생성 시도 시 무시 (다른 프로세스가 이미 생성했을 수 있음)
+                db.rollback()
+                logger.warning(f"⚠️  TODO 생성 중 오류 (무시): {recurring_todo.title} ({target_date}) - {str(e)}")
+                # 다시 중복 체크
+                existing_retry = db.query(Todo).filter(
+                    and_(
+                        Todo.parent_recurring_id == recurring_todo.todo_id,
+                        Todo.due_date == target_date,
+                        Todo.elderly_id == recurring_todo.elderly_id
+                    )
+                ).first()
+                if existing_retry:
+                    logger.debug(f"⏭️  재확인 결과 이미 존재함: {recurring_todo.title} ({target_date})")
+                    continue
+                # 실제 오류인 경우 재시도
+                raise
         
         db.commit()
         
