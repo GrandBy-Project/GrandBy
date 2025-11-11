@@ -20,7 +20,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../store/authStore';
 import { useRouter } from 'expo-router';
-import { BottomNavigationBar, Header, CheckIcon, PhoneIcon, DiaryIcon, NotificationIcon, PillIcon, SunIcon, ProfileIcon, QuickActionGrid, type QuickAction } from '../components';
+import { BottomNavigationBar, Header, CheckIcon, PhoneIcon, DiaryIcon, NotificationIcon, PillIcon, SunIcon, ProfileIcon, WeatherIcon, QuickActionGrid, type QuickAction } from '../components';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import * as todoApi from '../api/todo';
@@ -169,7 +169,19 @@ export const ElderlyHomeScreen = () => {
   };
 
   const weatherIconSize = fontSizeLevel >= 1 ? 32 : 24;
-  const weatherIconUrl = weather?.icon ? `https://openweathermap.org/img/wn/${weather.icon}@2x.png` : null;
+  
+  // 디버깅: 날씨 데이터 확인
+  useEffect(() => {
+    if (weather) {
+      console.log('🔍 날씨 상태 확인:', {
+        icon: weather.icon,
+        location: weather.location,
+        temperature: weather.temperature,
+        hasIcon: !!weather.icon,
+        hasLocation: !!weather.location,
+      });
+    }
+  }, [weather]);
 
   const loadTodayTodos = async () => {
     if (!user) {
@@ -258,17 +270,43 @@ export const ElderlyHomeScreen = () => {
       const weatherData = await weatherApi.getLocationBasedWeather();
       
       if (weatherData) {
-        setWeather(weatherData);
+        // 모든 필드를 포함하여 저장 (icon, location 등)
+        setWeather({
+          temperature: weatherData.temperature,
+          description: weatherData.description,
+          icon: weatherData.icon,
+          location: weatherData.location,
+          cityName: weatherData.cityName,
+          countryCode: weatherData.countryCode,
+          humidity: weatherData.humidity,
+          feelsLike: weatherData.feelsLike,
+          hasPermission: weatherData.hasPermission,
+        });
         console.log('✅ 날씨 로딩 성공:', weatherData);
+        console.log('   - 아이콘:', weatherData.icon);
+        console.log('   - 지역:', weatherData.location);
+        console.log('   - 온도:', weatherData.temperature);
       } else {
         console.log('⚠️ 날씨 정보를 가져올 수 없습니다 (위치 권한 또는 GPS 오류)');
         // 에러 상태에서도 로딩 종료 (권한 없음으로 표시)
-        setWeather({ description: '위치 정보를 가져올 수 없습니다', hasPermission: false });
+        setWeather({ 
+          description: '위치 정보를 가져올 수 없습니다', 
+          hasPermission: false,
+          // 기본값 설정
+          icon: undefined,
+          location: undefined,
+        });
       }
     } catch (error) {
       console.error('❌ 날씨 정보 불러오기 실패:', error);
       // 에러 발생 시에도 UI 업데이트 (권한 없음으로 표시)
-      setWeather({ description: '날씨 정보를 불러올 수 없습니다', hasPermission: false });
+      setWeather({ 
+        description: '날씨 정보를 불러올 수 없습니다', 
+        hasPermission: false,
+        // 기본값 설정
+        icon: undefined,
+        location: undefined,
+      });
     } finally {
       console.log('🌤️ loadWeather 완료 (로딩 종료)');
       setIsLoadingWeather(false);
@@ -778,19 +816,11 @@ export const ElderlyHomeScreen = () => {
           <View style={styles.divider} />
 
           <View style={styles.weatherSection}>
-            {weatherIconUrl ? (
-              <Image
-                source={{ uri: weatherIconUrl }}
-                style={{
-                  width: weatherIconSize,
-                  height: weatherIconSize,
-                  borderRadius: weatherIconSize / 2,
-                }}
-                resizeMode="contain"
-              />
-            ) : (
-              <SunIcon size={weatherIconSize} color="#FFB800" />
-            )}
+            <WeatherIcon 
+              iconCode={weather?.icon} 
+              size={weatherIconSize} 
+              color="#FFB800" 
+            />
             {isLoadingWeather ? (
               <Text style={[styles.weatherText, fontSizeLevel >= 1 && styles.weatherTextLarge, fontSizeLevel >= 2 && { fontSize: 18 }]}>
                 날씨 정보를 불러오는 중...

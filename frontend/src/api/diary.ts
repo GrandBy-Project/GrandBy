@@ -15,6 +15,7 @@ export interface Diary {
   diary_id: string;
   user_id: string;
   author_id: string;
+  author_name?: string;
   call_id?: string | null;  // 통화 ID 추가
   date: string; // YYYY-MM-DD 형식
   title?: string | null;

@@ -4,6 +4,7 @@
  */
 import React from 'react';
 import { View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 
 export const CheckIcon = ({ size = 24, color = '#34B79F' }: { size?: number; color?: string }) => (
   <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
@@ -204,4 +205,88 @@ export const ProfileIcon = ({ size = 36, color = '#34B79F' }: { size?: number; c
     }} />
   </View>
 );
+
+/**
+ * OpenWeatherMap 아이콘 코드에 따라 날씨 아이콘을 반환하는 컴포넌트
+ * @param iconCode OpenWeatherMap 아이콘 코드 (예: "01d", "02n")
+ * @param size 아이콘 크기
+ * @param color 아이콘 색상
+ */
+export const WeatherIcon = ({ 
+  iconCode, 
+  size = 24, 
+  color = '#FFB800' 
+}: { 
+  iconCode?: string; 
+  size?: number; 
+  color?: string;
+}) => {
+  // OpenWeatherMap 아이콘 코드 매핑
+  const getIconName = (code: string): string => {
+    // 첫 두 자리 숫자로 날씨 상태 판단
+    const prefix = code.substring(0, 2);
+    
+    switch (prefix) {
+      case '01': // 맑음 (clear sky)
+        return 'sunny';
+      case '02': // 약간 흐림 (few clouds)
+        return 'partly-sunny';
+      case '03': // 흐림 (scattered clouds)
+        return 'cloudy';
+      case '04': // 매우 흐림 (broken clouds)
+        return 'cloudy-outline';
+      case '09': // 소나기 (shower rain)
+        return 'rainy';
+      case '10': // 비 (rain)
+        return 'rainy';
+      case '11': // 천둥번개 (thunderstorm)
+        return 'thunderstorm';
+      case '13': // 눈 (snow)
+        return 'snow';
+      case '50': // 안개 (mist)
+        return 'cloudy-outline';
+      default:
+        return 'sunny'; // 기본값: 맑음
+    }
+  };
+
+  // 아이콘 색상 매핑 (날씨 상태에 따라)
+  const getIconColor = (code: string): string => {
+    const prefix = code.substring(0, 2);
+    
+    switch (prefix) {
+      case '01': // 맑음
+        return '#FFB800'; // 노란색
+      case '02': // 약간 흐림
+        return '#FFA500'; // 주황색
+      case '03': // 흐림
+      case '04': // 매우 흐림
+        return '#87CEEB'; // 하늘색
+      case '09': // 소나기
+      case '10': // 비
+        return '#4682B4'; // 강철색
+      case '11': // 천둥번개
+        return '#FF6347'; // 토마토색
+      case '13': // 눈
+        return '#E0E0E0'; // 회색
+      case '50': // 안개
+        return '#D3D3D3'; // 연한 회색
+      default:
+        return color; // 기본 색상
+    }
+  };
+
+  if (!iconCode) {
+    return <SunIcon size={size} color={color} />;
+  }
+
+  const iconName = getIconName(iconCode);
+  const iconColor = getIconColor(iconCode);
+
+  return (
+    <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+      <Ionicons name={iconName} size={size} color={iconColor} />
+    </View>
+  );
+};
 

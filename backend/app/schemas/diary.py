@@ -39,6 +39,7 @@ class DiaryResponse(BaseModel):
     diary_id: str
     user_id: str
     author_id: str
+    author_name: Optional[str] = None
     date: date
     title: Optional[str] = None
     content: str
